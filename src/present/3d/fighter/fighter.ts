@@ -219,6 +219,8 @@ export class Fighter {
   private readonly drawn: number[];
   /** The picture on its face (0 the face as loaded). */
   private picture = 0;
+  /** Each joint a vertex names, its rotation (nine) and translation (three) for the pose being placed. */
+  private readonly frames: Float64Array;
 
   /** It owns `mesh`: a hand's shape is copied into its points and normals. */
   constructor(renderer: RendererApi, mesh: FighterMesh, texture: SurfaceTextureHandle, white: SurfaceTextureHandle | null = null) {
@@ -226,6 +228,10 @@ export class Fighter {
     this.mesh = mesh;
     this.texture = texture;
     this.drawn = mesh.shapes.map(() => 0);
+    let slots = 0;
+    for (const j of mesh.joints) slots = Math.max(slots, j + 1);
+    for (const j of mesh.normalJoint) slots = Math.max(slots, j + 1);
+    this.frames = new Float64Array(slots * 12);
     const n = mesh.vertexCount;
     this.positions = new Float32Array(n * 3);
     this.normals = new Float32Array(n * 3);
@@ -289,31 +295,35 @@ export class Fighter {
     this.picture = picture < this.mesh.pictures ? picture : 0;
   }
 
-  /** Places every vertex for the joints' world transforms and uploads the result; a picture not on the face collapses to a point. */
+  /**
+   * Places every vertex for the joints' world transforms and uploads the result; a picture not on
+   * the face collapses to a point. A joint the skeleton lacks leaves its points as they are.
+   */
   pose(skeleton: readonly (JointTransform | undefined)[]): void {
     const m = this.mesh;
     const joints: readonly (Frame | undefined)[] = m.rig === null ? skeleton : m.rig.extend(skeleton);
+    const f = this.frames;
+    for (let j = 0, o = 0; o < f.length; j += 1, o += 12) {
+      const joint = joints[j];
+      if (joint === undefined) {
+        f.fill(0, o, o + 12);
+        f[o] = f[o + 4] = f[o + 8] = 1;
+        continue;
+      }
+      const r = joint.r;
+      for (let k = 0; k < 9; k += 1) f[o + k] = r[k] ?? 0;
+      f[o + 9] = joint.t[0] ?? 0;
+      f[o + 10] = joint.t[1] ?? 0;
+      f[o + 11] = joint.t[2] ?? 0;
+    }
+    const { influenceCount, weights, points, normal, normalJoint, pictureOf } = m;
+    const jointOf = m.joints;
     const out = this.positions;
     const outNormal = this.normals;
-    const place = (joint: number, x: number, y: number, z: number, into: number[]): void => {
-      const j = joints[joint];
-      if (j === undefined) {
-        into[0] = x;
-        into[1] = y;
-        into[2] = z;
-        return;
-      }
-      const r = j.r;
-      into[0] = (r[0] ?? 0) * x + (r[1] ?? 0) * y + (r[2] ?? 0) * z + (j.t[0] ?? 0);
-      into[1] = (r[3] ?? 0) * x + (r[4] ?? 0) * y + (r[5] ?? 0) * z + (j.t[1] ?? 0);
-      into[2] = (r[6] ?? 0) * x + (r[7] ?? 0) * y + (r[8] ?? 0) * z + (j.t[2] ?? 0);
-    };
-    const a = [0, 0, 0];
-    const b = [0, 0, 0];
     const shown = this.picture + 1;
     for (let i = 0; i < m.vertexCount; i += 1) {
       const p = i * 3;
-      const picture = m.pictureOf[i]!;
+      const picture = pictureOf[i]!;
       if (picture !== 0 && picture !== shown) {
         out[p] = 0;
         out[p + 1] = 0;
@@ -323,38 +333,35 @@ export class Fighter {
         outNormal[p + 2] = 0;
         continue;
       }
-      a[0] = 0;
-      a[1] = 0;
-      a[2] = 0;
-      const count = m.influenceCount[i] ?? 1;
+      let ax = 0;
+      let ay = 0;
+      let az = 0;
+      const count = influenceCount[i]!;
       for (let k = 0; k < count; k += 1) {
         const slot = i * INFLUENCES + k;
-        const w = m.weights[slot] ?? 0;
+        const w = weights[slot]!;
         if (w === 0) continue;
-        place(m.joints[slot] ?? 0, m.points[slot * 3] ?? 0, m.points[slot * 3 + 1] ?? 0, m.points[slot * 3 + 2] ?? 0, b);
-        a[0] += b[0]! * w;
-        a[1] += b[1]! * w;
-        a[2] += b[2]! * w;
+        const o = jointOf[slot]! * 12;
+        const x = points[slot * 3]!;
+        const y = points[slot * 3 + 1]!;
+        const z = points[slot * 3 + 2]!;
+        ax += (f[o]! * x + f[o + 1]! * y + f[o + 2]! * z + f[o + 9]!) * w;
+        ay += (f[o + 3]! * x + f[o + 4]! * y + f[o + 5]! * z + f[o + 10]!) * w;
+        az += (f[o + 6]! * x + f[o + 7]! * y + f[o + 8]! * z + f[o + 11]!) * w;
       }
       /* Game axes to the player's: millimetres to metres, and a half turn about X. */
-      out[p] = a[0]! / 1000;
-      out[p + 1] = -a[1]! / 1000;
-      out[p + 2] = -a[2]! / 1000;
+      out[p] = ax / 1000;
+      out[p + 1] = -ay / 1000;
+      out[p + 2] = -az / 1000;
 
-      const j = joints[m.normalJoint[i] ?? 0];
-      const nx = (m.normal[p] ?? 0) / 4096;
-      const ny = (m.normal[p + 1] ?? 0) / 4096;
-      const nz = (m.normal[p + 2] ?? 0) / 4096;
-      let wx = nx;
-      let wy = ny;
-      let wz = nz;
-      if (j !== undefined) {
-        const r = j.r;
-        wx = (r[0] ?? 0) * nx + (r[1] ?? 0) * ny + (r[2] ?? 0) * nz;
-        wy = (r[3] ?? 0) * nx + (r[4] ?? 0) * ny + (r[5] ?? 0) * nz;
-        wz = (r[6] ?? 0) * nx + (r[7] ?? 0) * ny + (r[8] ?? 0) * nz;
-      }
-      const length = Math.hypot(wx, wy, wz) || 1;
+      const o = normalJoint[i]! * 12;
+      const nx = normal[p]! / 4096;
+      const ny = normal[p + 1]! / 4096;
+      const nz = normal[p + 2]! / 4096;
+      const wx = f[o]! * nx + f[o + 1]! * ny + f[o + 2]! * nz;
+      const wy = f[o + 3]! * nx + f[o + 4]! * ny + f[o + 5]! * nz;
+      const wz = f[o + 6]! * nx + f[o + 7]! * ny + f[o + 8]! * nz;
+      const length = Math.sqrt(wx * wx + wy * wy + wz * wz) || 1;
       outNormal[p] = wx / length;
       outNormal[p + 1] = -wy / length;
       outNormal[p + 2] = -wz / length;

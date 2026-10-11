@@ -73,14 +73,15 @@ Android app carries it.
 `npm run android` makes the page's data when it is missing (as `npm run dev` does), builds the page
 into `dist/`, and has DriftEngine's packager (`@driftengine/package`, at the engine's version, as
 `drift.package.json` describes the app) wrap it in an APK: one activity holding the phone's WebView,
-serving the game from the APK's own files. It asks for no permission, not even the network. Only
+serving the game from the APK's own files, held in landscape either way up. It asks for no
+permission, not even the network. Only
 the APK is kept, `out/android/Tekken-3-<version>.apk`, some 750 MB; install it with
 `adb install -r out/android/Tekken-3-<version>.apk`, or copy it to the phone and open it there.
 
-The first build fetches the packager, and the Android toolchain it builds with (a JDK, the Android
-SDK's command-line tools, platform and build tools, and Gradle), into `~/.cache/driftengine/`
-(`DRIFT_TOOLCHAIN_HOME` moves it), and accepts the Android SDK's licence for you; later builds
-reuse them. A build needs some 4 GB of free disk space while it runs.
+The first build installs the packager into `.cache/packager/`, and fetches the Android toolchain it
+builds with (a JDK, the Android SDK's command-line tools, platform and build tools, and Gradle) into
+`~/.cache/driftengine/` (`DRIFT_TOOLCHAIN_HOME` moves it), accepting the Android SDK's licence for
+you; later builds reuse them. A build needs some 4 GB of free disk space while it runs.
 
 The APK is signed with a key the packager makes on the first build and keeps beside the toolchain
 (`keystores/io.github.emulator000.tekken3.jks`). A phone installs a later build over an earlier one
@@ -100,10 +101,11 @@ addresses change (the phone then asks to accept it once more). HTTPS is what giv
 and full screen there: a page over plain HTTP from another address is refused both. A home router
 keeps the page inside the network unless a port is forwarded to it.
 
-A page opened from another device posts what it logs, its errors and, every two seconds, its frame
-rate and longest frame, the picture's size and density, and its memory where the browser tells it,
-to the machine serving it, which keeps them in `.cache/client.log`: a tab that stalls or crashes
-leaves its last moments there.
+A page opened from another device posts what it logs, its errors and, every two seconds, what its
+frames take (the fields and frames a second, the frames that ran two fields, the time between frames
+and the main thread's time on the fields and on the drawing), the picture's size and density, and
+its memory where the browser tells it, to the machine serving it, which keeps them in
+`.cache/client.log`: a tab that stalls or crashes leaves its last moments there.
 
 ### On a touch screen
 

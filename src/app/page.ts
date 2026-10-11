@@ -5,7 +5,9 @@
  */
 import { createRenderer, ResolutionGovernor, startLoop, type RendererApi } from '@driftengine/core';
 import { fightQuality } from '../present/3d/quality.ts';
+import { FrameStats } from './frame-stats.ts';
 import { PadInput } from './input.ts';
+import { evenFrames } from './pacing.ts';
 import { tellWith } from './remote-log.ts';
 import { onPhone, TouchPad, wantsTouch } from './touch.ts';
 
@@ -78,8 +80,15 @@ const LEAST_SCALE = 0.5;
  * address's, for comparing pictures) or a failure; `__tekken3()` tells what the page plays.
  *
  * The picture's density is held to the frame budget by the engine's governor: while most of a
- * fight's frames take longer than `BUDGET_MS` (`?budget` sets it, `0` holds the density still) it
- * steps down toward half its pixels each way, and back up as the frames allow.
+ * fight's frames come longer than `BUDGET_MS` after the one before (`?budget` sets it, `0` holds
+ * the density still) it steps down toward half its pixels each way, and back up as the frames
+ * allow. Only frames drawn count: on a display faster than 60 Hz the frames between fields draw
+ * nothing and take no time of their own.
+ *
+ * `FrameStats` measures the fields and the drawing, for a page on another device to tell.
+ *
+ * The display's frames are counted evenly (`pacing.ts`), so a 60 Hz or 120 Hz display runs the
+ * fields one a frame or one every other frame, never bunched.
  *
  * A frame runs two fields at most: after a slow frame the game runs late, as the console's slows,
  * rather than catching up with up to fifteen fields in one frame (the engine's quarter second),
@@ -95,15 +104,10 @@ export function play(player: Player, renderer: RendererApi, backend: string): vo
   const touch = wantsTouch(params) ? new TouchPad() : null;
   const budget = Number(params.get('budget') ?? BUDGET_MS);
   const governor = budget > 0 ? new ResolutionGovernor(1, { budgetMs: budget, minScale: LEAST_SCALE }) : null;
-  /** The frames since the state line last told them: how many, their longest, and when they began. */
-  const told = { frames: 0, longest: 0, from: performance.now() };
-  let last = performance.now();
-  tellWith(() => {
-    const now = performance.now();
-    const line = `frames ${((told.frames * 1000) / (now - told.from)).toFixed(1)}/s, longest ${told.longest.toFixed(1)} ms | fields ${fields} | canvas ${canvas.width}x${canvas.height} at ${(governor?.scale ?? 1).toFixed(3)} | ${backend}`;
-    Object.assign(told, { frames: 0, longest: 0, from: now });
-    return line;
-  });
+  const stats = new FrameStats(() => `${backend}, ${canvas.width}x${canvas.height} at ${(governor?.scale ?? 1).toFixed(3)}`);
+  tellWith(() => stats.line());
+  /** When the last frame was drawn. */
+  let lastDrawn = 0;
   const stopAt = Number(params.get('stop') ?? Infinity);
   let failure: Error | null = null;
   let fields = 0;
@@ -116,7 +120,11 @@ export function play(player: Player, renderer: RendererApi, backend: string): vo
       simulate() {
         if (failure !== null || stopAt <= fields) return;
         try {
-          if (player.field([input.word(0) | (touch?.word() ?? 0), input.word(1)]) !== false) fields += 1;
+          const start = performance.now();
+          if (player.field([input.word(0) | (touch?.word() ?? 0), input.word(1)]) !== false) {
+            fields += 1;
+            stats.field(start);
+          }
         } catch (e) {
           failure = e as Error;
           console.error(e);
@@ -124,24 +132,25 @@ export function play(player: Player, renderer: RendererApi, backend: string): vo
         }
       },
       render() {
-        const now = performance.now();
-        const ms = now - last;
-        last = now;
-        told.frames += 1;
-        told.longest = Math.max(told.longest, ms);
-        const scale = governor?.sample(ms, document.visibilityState === 'visible' && player.fighting()) ?? null;
-        if (scale !== null) renderer.applyResolutionScale(scale);
         const { width, height } = canvas;
         if (fields === drawnAt.fields && width === drawnAt.width && height === drawnAt.height && player.moving?.() !== true) {
           frames.kept += 1;
           return;
         }
+        const now = performance.now();
+        if (lastDrawn > 0) {
+          const scale = governor?.sample(now - lastDrawn, document.visibilityState === 'visible' && player.fighting()) ?? null;
+          if (scale !== null) renderer.applyResolutionScale(scale);
+        }
+        lastDrawn = now;
         drawnAt = { fields, width, height };
         frames.drawn += 1;
+        stats.drawing();
         player.render(width, height);
+        stats.drawn();
       },
     },
-    { fixedDt: 1 / 60, maxFrameTime: MOST_FIELDS / 60 },
+    { fixedDt: 1 / 60, maxFrameTime: MOST_FIELDS / 60, frameSource: evenFrames() },
   );
   Object.assign(globalThis, {
     __tekken3: () => ({ remake: true, backend, fields, frames: { ...frames }, density: governor?.scale ?? 1, ...player.probe(), failure: failure?.message ?? null }),
