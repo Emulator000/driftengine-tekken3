@@ -19,7 +19,7 @@ Contributions are reviewed case by case. Submitting one does not, by itself, cha
 
 - [ ] I authored this code or have permission to submit it
 - [ ] It contains no disc images, executables or files from the discs
-- [ ] It contains nothing extracted, decoded or converted from them
+- [ ] It contains nothing extracted, decoded or converted from them, and no build carrying it (an APK)
 - [ ] It contains no screenshots or recordings of game content
 - [ ] It contains no decompiled or disassembled code, and no decompiler output or names
 - [ ] It contains no copy protection or region lock bypass

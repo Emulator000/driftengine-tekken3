@@ -3,6 +3,9 @@
 Requests to the engine, each with what it is for and what it would save. Remove an entry once a
 release has it.
 
-None open. The last, a partial upload into a ui2d sprite texture slot (`SpritePass.updateTexture`)
-so that a picture painted into a 2D atlas sends its own texels rather than the whole atlas, is in
-4.13.1.
+## The Android app held in landscape
+
+`drift.package.json` has no way to say which way the app is held: the packager's activity is
+`screenOrientation="unspecified"`, so a phone held upright shows the fight as a band across the
+middle of the screen. A fighting game is played sideways: an `android.orientation` (`landscape`,
+`sensorLandscape`) written into the activity would hold it so.

@@ -4,10 +4,10 @@
  * the arrows, numpad 4 5 1 2, numpad 7 and 9, numpad Enter. A standard gamepad drives the player
  * of its index.
  */
-const UP = 0x1000;
-const RIGHT = 0x2000;
-const DOWN = 0x4000;
-const LEFT = 0x8000;
+export const UP = 0x1000;
+export const RIGHT = 0x2000;
+export const DOWN = 0x4000;
+export const LEFT = 0x8000;
 
 const KEYS: readonly Record<string, number>[] = [
   { KeyW: UP, KeyD: RIGHT, KeyS: DOWN, KeyA: LEFT, KeyU: 0x80, KeyI: 0x10, KeyJ: 0x40, KeyK: 0x20, KeyQ: 0x01, KeyE: 0x04, Enter: 0x800 },

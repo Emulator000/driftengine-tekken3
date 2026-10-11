@@ -35,6 +35,7 @@ This repository intentionally does not contain or provide:
 - audio, music or voices
 - movies
 - converted, extracted or decoded game content
+- builds of the game, such as Android apps: each is built on your machine, from your own disc
 - copy protection or region lock bypasses
 - downloads of original game content
 
@@ -45,6 +46,8 @@ This repository intentionally does not contain or provide:
 - **Node.js 22.12 or newer** (<https://nodejs.org>).
 - **A recent browser**: Chrome or Edge on Windows, macOS or Linux, or Safari 26 on macOS, which
   draw it with WebGPU. Where WebGPU is missing the engine falls back to WebGL2.
+- **A phone**, optional: an Android phone plays it as an app you build from your disc, and any
+  phone or tablet plays it in its browser over your home network (below).
 - **FFmpeg**, optional: converts the disc's movies to web video. Without it the movies are left
   out and their time passes in black.
 - **7-Zip**, optional: only to read an image you keep as a `.7z` archive.
@@ -98,6 +101,39 @@ listens on `localhost` only, and none of it is committed.
 
 Sound starts once a key, click or touch lets the browser play audio.
 
+### 4. On your phone (optional)
+
+- **As an Android app**:
+
+  ```sh
+  npm run android
+  ```
+
+  builds an APK of the game with your disc's data in it, `out/android/Tekken-3-<version>.apk` (some
+  750 MB). Install it with `adb install -r out/android/Tekken-3-<version>.apk`, or copy it to the
+  phone and open it there (the phone asks you to allow installing apps from where you opened it).
+  The first build fetches DriftEngine's packager and the Android toolchain (a JDK, the Android SDK
+  and Gradle) into your user cache, and accepts the Android SDK's licence for you; a build needs
+  some 4 GB of free disk space while it runs.
+
+- **In the phone's browser, over your home network**:
+
+  ```sh
+  npm run dev:lan
+  ```
+
+  serves the game over HTTPS to your devices on your home network and prints the addresses to open
+  (`https://<this machine's address>:5190`). The phone asks once to accept the certificate, made on
+  your machine the first time; HTTPS is what gives the page WebGPU there.
+
+On a touch screen the game shows a pad over the picture: a stick where your left thumb lands, the
+four buttons on the right in a diamond as on the pad (2 above, 1 and 4 either side, 3 below; a
+thumb between two holds both), Select and Start between the thumbs. A phone draws the
+picture without the ambient occlusion and the bloom, at fewer pixels while its frames run slow.
+
+The APK carries your disc's converted data, and the home network's page serves it: both are for
+your own devices. Never share or upload the APK.
+
 ## Playing
 
 The game starts as the console does: the logo, the opening movie, the title (Enter), the mode menu.
@@ -107,7 +143,8 @@ The game starts as the console does: the logo, the opening movie, the title (Ent
 | Player 1 | W A S D | U | I | J | K | Q, E | Enter |
 | Player 2 | arrows | numpad 4 | numpad 5 | numpad 1 | numpad 2 | numpad 7, 9 | numpad Enter |
 
-A gamepad drives the player of its index. `?quick` in the address skips the menus for a match at
+A gamepad drives the player of its index, and on a touch screen the pad over the picture drives
+the first. `?quick` in the address skips the menus for a match at
 once; [docs/USAGE.md](docs/USAGE.md) lists every option (fighters, stage, the computer's sides,
 the endings, the original textures, the viewer) and every command.
 
@@ -167,6 +204,9 @@ field. What is done and what is not yet:
 | The voices, effects, music and the audio track | Done | Played from the game's own banks and songs |
 | **Around the game** | | |
 | Keyboard and gamepads | Done | |
+| Touch controls | Done | A stick where the left thumb lands, the four buttons, Select and Start |
+| Phones and tablets, in the browser | Done | Over your home network, `npm run dev:lan` |
+| An Android app built from your disc | Done | `npm run android`, for your own phone |
 | Windows, macOS, Linux | Done | Developed and tested on Linux |
 | Kazuya from Tekken 4 | Done | Optional, from your own Tekken 4 disc |
 | Discs of other regions (PAL, Japanese) | Not yet | The USA disc (SLUS-00402) alone is read |
@@ -181,6 +221,7 @@ field. What is done and what is not yet:
 | `src/present/` | The presentation on DriftEngine: the 3D, the 2D, the effects, the sound |
 | `src/app/` | The page, the input and the 60 Hz loop |
 | `src/mod/kazuya/` | Kazuya, added through the game's extension points |
+| `drift.package.json` | The Android app, as DriftEngine's packager builds it (`npm run android`) |
 | `tests/` | The tests (`npm test`); those that need the disc's data skip without it |
 | `docs/USAGE.md` | Commands and the page's options |
 | `docs/ENGINE.md` | What the game needs from DriftEngine |

@@ -1,11 +1,13 @@
 /**
  * The player page's parts every way of playing shares: the canvas filling the window, the asset
- * and data fetches, the renderer, the pads, and the fixed 60 Hz loop that stops on a failure and
- * says why.
+ * and data fetches, the renderer, the pads (and on a touch screen the touch pad), and the fixed
+ * 60 Hz loop that stops on a failure and says why.
  */
-import { createRenderer, startLoop, type RendererApi } from '@driftengine/core';
+import { createRenderer, ResolutionGovernor, startLoop, type RendererApi } from '@driftengine/core';
 import { fightQuality } from '../present/3d/quality.ts';
 import { PadInput } from './input.ts';
+import { tellWith } from './remote-log.ts';
+import { onPhone, TouchPad, wantsTouch } from './touch.ts';
 
 const ASSETS = `${import.meta.env.BASE_URL}assets/`;
 const DATA = `${import.meta.env.BASE_URL}data/`;
@@ -37,13 +39,16 @@ export const image = async (path: string): Promise<ImageBitmap> =>
   createImageBitmap(new Blob([await fetchBytes(DATA, path)], { type: 'image/png' }), { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
 export const two = (n: number): string => String(n).padStart(2, '0');
 
-/** The renderer on the canvas, the picture filling the window (the game's 4:3 widens to it). */
+/**
+ * The renderer on the canvas, the picture filling the window (the game's 4:3 widens to it), at the
+ * address's `quality`, or `low` on a phone and `high` elsewhere.
+ */
 export async function pageRenderer(): Promise<{ renderer: RendererApi; backend: string }> {
   const frame = document.createElement('div');
   frame.style.cssText = 'position:fixed;inset:0';
   canvas.replaceWith(frame);
   frame.append(canvas);
-  const { renderer, backend, reason } = await createRenderer(canvas, fightQuality(params.get('quality')));
+  const { renderer, backend, reason } = await createRenderer(canvas, fightQuality(params.get('quality') ?? (onPhone() ? 'low' : 'high')));
   console.log(`[tekken3 remake] ${backend}: ${reason}`);
   renderer.resize();
   addEventListener('resize', () => renderer.resize());
@@ -57,13 +62,24 @@ export interface Player {
   render(width: number, height: number): void;
   /** Whether the picture moves between fields (a dissolve, a movie's frames), so every frame is drawn; absent, only a frame with a new field is. */
   moving?(): boolean;
+  /** Whether a fight is on screen: its frames alone move the picture's density. */
+  fighting(): boolean;
   /** What the page's probe tells about the game. */
   probe(): Record<string, unknown>;
 }
 
+/** The frame time the picture's density is held to, milliseconds: a 60 Hz frame and a fifth. */
+const BUDGET_MS = 20;
+/** The least share of its density the picture is drawn at. */
+const LEAST_SCALE = 0.5;
+
 /**
  * The game played at 60 fields a second from the pads, drawn each frame, until `stop` fields (the
  * address's, for comparing pictures) or a failure; `__tekken3()` tells what the page plays.
+ *
+ * The picture's density is held to the frame budget by the engine's governor: while most of a
+ * fight's frames take longer than `BUDGET_MS` (`?budget` sets it, `0` holds the density still) it
+ * steps down toward half its pixels each way, and back up as the frames allow.
  *
  * A frame runs two fields at most: after a slow frame the game runs late, as the console's slows,
  * rather than catching up with up to fifteen fields in one frame (the engine's quarter second),
@@ -74,8 +90,20 @@ export interface Player {
  * drew the same picture again (every other frame at 120 Hz, the whole 3D frame and the 2D over it).
  */
 const MOST_FIELDS = 2;
-export function play(player: Player, backend: string): void {
+export function play(player: Player, renderer: RendererApi, backend: string): void {
   const input = new PadInput(window);
+  const touch = wantsTouch(params) ? new TouchPad() : null;
+  const budget = Number(params.get('budget') ?? BUDGET_MS);
+  const governor = budget > 0 ? new ResolutionGovernor(1, { budgetMs: budget, minScale: LEAST_SCALE }) : null;
+  /** The frames since the state line last told them: how many, their longest, and when they began. */
+  const told = { frames: 0, longest: 0, from: performance.now() };
+  let last = performance.now();
+  tellWith(() => {
+    const now = performance.now();
+    const line = `frames ${((told.frames * 1000) / (now - told.from)).toFixed(1)}/s, longest ${told.longest.toFixed(1)} ms | fields ${fields} | canvas ${canvas.width}x${canvas.height} at ${(governor?.scale ?? 1).toFixed(3)} | ${backend}`;
+    Object.assign(told, { frames: 0, longest: 0, from: now });
+    return line;
+  });
   const stopAt = Number(params.get('stop') ?? Infinity);
   let failure: Error | null = null;
   let fields = 0;
@@ -88,7 +116,7 @@ export function play(player: Player, backend: string): void {
       simulate() {
         if (failure !== null || stopAt <= fields) return;
         try {
-          if (player.field([input.word(0), input.word(1)]) !== false) fields += 1;
+          if (player.field([input.word(0) | (touch?.word() ?? 0), input.word(1)]) !== false) fields += 1;
         } catch (e) {
           failure = e as Error;
           console.error(e);
@@ -96,6 +124,13 @@ export function play(player: Player, backend: string): void {
         }
       },
       render() {
+        const now = performance.now();
+        const ms = now - last;
+        last = now;
+        told.frames += 1;
+        told.longest = Math.max(told.longest, ms);
+        const scale = governor?.sample(ms, document.visibilityState === 'visible' && player.fighting()) ?? null;
+        if (scale !== null) renderer.applyResolutionScale(scale);
         const { width, height } = canvas;
         if (fields === drawnAt.fields && width === drawnAt.width && height === drawnAt.height && player.moving?.() !== true) {
           frames.kept += 1;
@@ -109,6 +144,6 @@ export function play(player: Player, backend: string): void {
     { fixedDt: 1 / 60, maxFrameTime: MOST_FIELDS / 60 },
   );
   Object.assign(globalThis, {
-    __tekken3: () => ({ remake: true, backend, fields, frames: { ...frames }, ...player.probe(), failure: failure?.message ?? null }),
+    __tekken3: () => ({ remake: true, backend, fields, frames: { ...frames }, density: governor?.scale ?? 1, ...player.probe(), failure: failure?.message ?? null }),
   });
 }

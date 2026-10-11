@@ -16,8 +16,11 @@ issue and pull request, is public.
   Converted output is still the game's content whatever its format. The disc's data lives under
   `.cache/`, `public/data/` and `public/assets/`, all ignored.
 - **The user's own disc.** Everything the game shows and plays comes from the image the user
-  makes of their own disc, read on their machine. Nothing converted is ever hosted or served
-  beyond the user's own machine.
+  makes of their own disc, read on their machine. Nothing converted is ever hosted, uploaded or
+  served beyond the user's own machine and devices: `npm run dev` binds to localhost,
+  `npm run dev:lan` serves the user's own home network, and `npm run android` builds an APK on
+  their machine for their own phone. No release, issue or pull request carries an APK or any
+  other build holding the disc's data.
 - **Write it plainly.** Code comments say what the code does, briefly; they do not narrate how a
   format or a behaviour was worked out. The repository carries no format documentation of the
   game's own files.
@@ -40,6 +43,9 @@ issue and pull request, is public.
   is the page, the input and the 60 Hz loop. `tests/architecture.test.mjs` keeps these rules.
 - `src/mod/kazuya/` adds Kazuya from the user's own Tekken 4 disc through named extension
   points.
+- The Android app is the built page in DriftEngine's packager (`scripts/android.mjs`,
+  `drift.package.json`), fetched at the engine's version when `npm run android` runs; the touch
+  pad (`src/app/touch.ts`) is the first player's pad on a touch screen.
 - The engine comes from npm. A checkout at `../drftrun/driftengine` replaces it in development
   (`DRIFT_ENGINE_LOCAL=0` forces the npm packages).
 
@@ -48,4 +54,6 @@ issue and pull request, is public.
 ```sh
 npm test               # the tests, then the typecheck
 npm run dev            # the game on localhost
+npm run dev:lan        # the game over HTTPS on the home network, for a phone
+npm run android        # an APK of the game, for the user's own phone
 ```

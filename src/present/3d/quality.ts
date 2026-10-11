@@ -1,8 +1,8 @@
 /**
- * The picture's finishing, by the address's `quality`: `high` (the default) adds the engine's
- * ambient occlusion (the fighters set on the floor, the stage's corners) and bloom (only what is
- * brighter than white: the sparks and flashes) to the multisampled HDR scene; `low` is the scene
- * multisampled only, as stage 2 drew it.
+ * The picture's finishing, by the address's `quality`: `high` (the default, but on a phone) adds
+ * the engine's ambient occlusion (the fighters set on the floor, the stage's corners) and bloom
+ * (only what is brighter than white: the sparks and flashes) to the multisampled HDR scene; `low`
+ * (a phone's default) is the scene multisampled only.
  */
 import type { RenderQualityOptions } from '@driftengine/core';
 

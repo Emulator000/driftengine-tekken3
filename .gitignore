@@ -1,5 +1,11 @@
 node_modules/
 dist/
+# The Android build (`npm run android`): it carries the disc's data.
+out/
+*.apk
+*.aab
+*.jks
+*.keystore
 *.log
 .playwright-mcp/
 

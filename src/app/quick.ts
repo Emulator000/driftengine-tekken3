@@ -109,7 +109,9 @@ export async function playQuickMatch(): Promise<void> {
         x: fight.state.fighters.slice(0, 2).map((f) => f.position[0]),
         pause: { frozen: fight.state.pause.frozen, cursor: fight.state.pauseMenu.cursor, choice: fight.state.pauseMenu.choice, drawn: fight.state.pauseMenu.drawn },
       }),
+      fighting: () => true,
     },
+    renderer,
     backend,
   );
 }

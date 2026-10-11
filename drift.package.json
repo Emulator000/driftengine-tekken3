@@ -1,0 +1,9 @@
+{
+  "id": "io.github.emulator000.tekken3",
+  "name": "Tekken 3",
+  "entry": "dist/index.html",
+  "targets": ["android"],
+  "backend": { "webgpu": "prefer", "allowSoftwareRenderer": false },
+  "features": { "clipExport": false, "gamepad": true },
+  "android": { "permissions": [], "cleartextTraffic": false }
+}

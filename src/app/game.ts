@@ -218,8 +218,10 @@ export async function playGame(): Promise<void> {
         );
       },
       moving: () => presenter.moving,
+      fighting: () => shown === 'fight',
       probe: () => ({ scene: game.state.scene, sceneState: game.state.step, sound: sound?.probe() ?? null, movie: movie.probe() }),
     },
+    renderer,
     backend,
   );
 }
