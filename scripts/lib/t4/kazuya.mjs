@@ -18,6 +18,8 @@ import { apply, convertPose, mul, restRotation, transpose } from './retarget.mjs
 const FLIP = [1, 0, 0, 0, -1, 0, 0, 0, -1];
 /** How far a drawing laid over another stands off it, in Tekken 3's units (millimetres, near enough). */
 const LIFT = 2;
+/** A model's size in hundredths: as made. */
+const FULL_SIZE = 100;
 
 /** Tekken 3's joints: the node each stands at, and its parent. */
 const JOINTS = [
@@ -385,11 +387,15 @@ export function exportKazuya(model, uploads, tables, encodePng) {
 /**
  * A Tekken 3 model file (`3DMK`) carrying his joint offsets: the game hangs its skeleton on each
  * part's record (words 5 to 7, the offset from its parent, z negated) and reads nothing else of it
- * that the player draws. `parts` is the executable's part table for the model's pack.
+ * that the player draws, but its size (the header's second word, in hundredths), by which it scales
+ * the root's place and not the body hung under it. His motions are Tekken 4's, made at his full
+ * size, so his is 100: at Heihachi's 98 his root sat 2% lower over legs of his full length, his
+ * feet that far through the floor. `parts` is the executable's part table for the model's pack.
  */
 export function withOffsets(model3dmk, parts, skeleton) {
   const out = Uint8Array.from(model3dmk);
   const view = new DataView(out.buffer);
+  view.setUint32(4, FULL_SIZE, true);
   for (const part of parts) {
     if (part.joint >= skeleton.length) continue;
     const [x, y, z] = skeleton[part.joint].offset;

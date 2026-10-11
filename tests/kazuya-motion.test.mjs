@@ -222,3 +222,19 @@ test('his u+4 string plays on as one motion', { skip: !kazuya }, async () => {
   assert.ok(moves[1].frame > 20, `the second kick took up the first's frame (it started on frame ${moves[1].frame})`);
   assert.ok(worst < 90, `his body turned ${worst.toFixed(0)} degrees in a field through the first two kicks`);
 });
+
+/*
+ * His feet stand on the floor: in his stance Tekken 4 holds his ankles 94 to 101 mm up; his model
+ * took Heihachi's size, which lowers the root alone by 2%, and they stood at 77 to 81.
+ */
+test('in his stance his ankles stand as high as Tekken 4 holds them', { skip: !kazuya }, async () => {
+  let ankles = null;
+  await play(
+    () => 0,
+    440,
+    (field, f) => {
+      if (field === 439) ankles = [14, 17].map((j) => -f.skeleton.joints[j].world.translation[1]);
+    },
+  );
+  assert.ok(ankles.every((h) => h >= 90), `his ankles are ${ankles.join(' and ')} mm up`);
+});

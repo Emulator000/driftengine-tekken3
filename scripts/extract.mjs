@@ -58,7 +58,7 @@ const out = path.join(root, 'public/data');
 const exePath = path.join(root, '.cache/disc/SLUS_004.02');
 if (!existsSync(exePath)) throw new Error('no disc data: run npm run disc first');
 /** The format of what this writes, in its manifest: raised when the output changes, so `npm run dev` extracts again. */
-const DATA_FORMAT = 5;
+const DATA_FORMAT = 6;
 const extracted = (() => {
   try {
     return JSON.parse(readFileSync(path.join(out, 'manifest.json'), 'utf8')).format === DATA_FORMAT && existsSync(path.join(out, 'movies/streams.json'));
