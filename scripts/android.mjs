@@ -2,19 +2,16 @@
  * `npm run android`: the game as an Android app for the user's own phone, from the disc read with
  * `npm run disc`. The page is built into `dist/` with the disc's data, and DriftEngine's packager
  * (`@driftengine/package`, at the engine's version, as `drift.package.json` describes the app)
- * wraps it in an APK: one WebView serving the page from the APK's own files, signed with a key the
- * packager makes once on this machine and keeps in its cache. The packager is installed into
- * `.cache/packager/`; the Android toolchain it uses (a JDK, the Android SDK and Gradle) is fetched
- * the first time, into the user's cache. Only the APK is kept, in `out/android/`.
- *
- * The packager's own Android project is used as it is, but for its activity, held in landscape
- * either way up (`sensorLandscape`): the packager has no setting for it, so a copy of its
- * templates with that one change is what it builds from (`--resources`).
+ * wraps it in an APK: one WebView serving the page from the APK's own files, held in landscape
+ * either way up, signed with a key the packager makes once on this machine and keeps in its cache.
+ * The packager is installed into `.cache/packager/` and run with this Node; the Android toolchain
+ * it uses (a JDK, the Android SDK and Gradle) is fetched the first time, into the user's cache.
+ * Only the APK is kept, in `out/android/`.
  *
  * The APK carries the disc's converted data: it is for the user's own devices, never to share.
  */
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -22,8 +19,6 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(root, 'out', 'android');
 const packagerHome = path.join(root, '.cache', 'packager');
 const packager = path.join(packagerHome, 'node_modules', '@driftengine', 'package');
-const resources = path.join(root, '.cache', 'android', 'resources');
-const ORIENTATION = 'android:screenOrientation="sensorLandscape"';
 
 function run(command, args, options = {}) {
   const done = spawnSync(command, args, { cwd: root, stdio: 'inherit', ...options });
@@ -47,18 +42,9 @@ if (version(packager) !== engine) {
   else run('npm', install, { env, shell: process.platform === 'win32' });
 }
 
-rmSync(resources, { recursive: true, force: true });
-cpSync(path.join(packager, 'assets'), path.join(resources, 'assets'), { recursive: true });
-cpSync(path.join(packager, 'android'), path.join(resources, 'android'), { recursive: true, filter: (from) => !/[\\/](build|\.gradle)$/.test(from) });
-const manifest = path.join(resources, 'android', 'app', 'src', 'main', 'AndroidManifest.xml');
-const xml = readFileSync(manifest, 'utf8');
-const held = xml.replace(/android:screenOrientation="[^"]*"/, ORIENTATION);
-if (!held.includes(ORIENTATION)) throw new Error(`the packager's AndroidManifest.xml (${engine}) names no screenOrientation to hold in landscape`);
-writeFileSync(manifest, held);
-
 const bin = path.join(packager, 'bin', 'drift-package.mjs');
 run(process.execPath, [bin, 'bootstrap', '--target=android'], { env });
-run(process.execPath, [bin, 'build', '--target=android', `--resources=${resources}`], { env });
+run(process.execPath, [bin, 'build', '--target=android'], { env });
 
 /* The Gradle project the packager staged holds the data twice more. */
 rmSync(path.join(out, 'project'), { recursive: true, force: true });

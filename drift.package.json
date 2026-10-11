@@ -5,5 +5,5 @@
   "targets": ["android"],
   "backend": { "webgpu": "prefer", "allowSoftwareRenderer": false },
   "features": { "clipExport": false, "gamepad": true },
-  "android": { "permissions": [], "cleartextTraffic": false }
+  "android": { "permissions": [], "cleartextTraffic": false, "orientation": "sensorLandscape" }
 }

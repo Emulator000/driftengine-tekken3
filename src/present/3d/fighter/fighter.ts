@@ -1,11 +1,14 @@
 /**
  * A fighter on screen: the extracted mesh (`FTR`, scripts/lib/fighter.mjs and, for Kazuya,
- * scripts/lib/t4/kazuya.mjs), skinned on the CPU every frame from the skeleton's world transforms.
+ * scripts/lib/t4/kazuya.mjs), posed on the device every frame from the skeleton's world transforms
+ * (the engine's point skin).
  *
  * Each vertex is up to four joint-space points with their weights: one, or a seam of two weighted
- * half and half, as the game's renderer averages them; Kazuya's smooth skin takes up to four. Game
- * axes are millimetres with Y down; the player's are metres with Y up and Z toward the viewer, a
- * half turn about X.
+ * half and half, as the game's renderer averages them; Kazuya's smooth skin takes up to four. Its
+ * normal turns on a joint of its own, which the skin takes as the vertex's first (weighing nothing
+ * where it is none of the vertex's points). Game axes are millimetres with Y down; the player's are
+ * metres with Y up and Z toward the viewer, a half turn about X, made part of each joint's
+ * transform.
  *
  * Versions: 1 holds two influences and whole texels; 2 the same with texture coordinates in eighths
  * of a texel; 3 up to four influences, 48 bytes a vertex (a count, the normal's joint, two spare
@@ -18,9 +21,10 @@
  * A hand's shapes: per part, the shape each of its steps draws, and the points and normals of the
  * vertices the shapes move, copied in when the drawn shape changes. A face's pictures (its eyes
  * open and closed): each picture's triangles on vertices of their own, those of every picture but
- * the one on the face drawn collapsed to a point.
+ * the one on the face weighing nothing, so drawn collapsed to a point. Either change makes the skin
+ * again, a few times a second where a pose is sixty.
  */
-import type { MeshHandle, RendererApi, SurfaceMaterial, SurfaceTextureHandle } from '@driftengine/core';
+import type { MeshHandle, PointSkinData, PointSkinHandle, RendererApi, SurfaceMaterial, SurfaceTextureHandle } from '@driftengine/core';
 import type { Rotation } from '../../../motion/motion.ts';
 import { HelperRig, type Frame, type RigNode } from '../../../mod/kazuya/tekken4.ts';
 
@@ -205,13 +209,14 @@ export interface JointTransform {
   readonly t: Float64Array;
 }
 
+/** A joint the skeleton lacks: its points as they are. */
+const STILL: Frame = { r: [1, 0, 0, 0, 1, 0, 0, 0, 1], t: [0, 0, 0] };
+
 export class Fighter {
   readonly handle: MeshHandle;
   readonly material: SurfaceMaterial<SurfaceTextureHandle>;
   /** Light added over its own colours, linear: the hit flash (`light`). */
   private readonly glow: [number, number, number] = [0, 0, 0];
-  private readonly positions: Float32Array;
-  private readonly normals: Float32Array;
   private readonly renderer: RendererApi;
   private readonly mesh: FighterMesh;
   private readonly texture: SurfaceTextureHandle;
@@ -219,8 +224,14 @@ export class Fighter {
   private readonly drawn: number[];
   /** The picture on its face (0 the face as loaded). */
   private picture = 0;
-  /** Each joint a vertex names, its rotation (nine) and translation (three) for the pose being placed. */
-  private readonly frames: Float64Array;
+  /** The vertices of the face's pictures. */
+  private readonly onPictures: Uint32Array;
+  /** The skin as the device was last given it, and whether a hand or the face changed it since. */
+  private readonly data: PointSkinData;
+  private skin: PointSkinHandle;
+  private stale = false;
+  /** Each joint a vertex names, as its transform into the player's axes: sixteen floats, column-major. */
+  private readonly matrices: Float32Array;
 
   /** It owns `mesh`: a hand's shape is copied into its points and normals. */
   constructor(renderer: RendererApi, mesh: FighterMesh, texture: SurfaceTextureHandle, white: SurfaceTextureHandle | null = null) {
@@ -228,20 +239,18 @@ export class Fighter {
     this.mesh = mesh;
     this.texture = texture;
     this.drawn = mesh.shapes.map(() => 0);
+    const n = mesh.vertexCount;
     let slots = 0;
     for (const j of mesh.joints) slots = Math.max(slots, j + 1);
     for (const j of mesh.normalJoint) slots = Math.max(slots, j + 1);
-    this.frames = new Float64Array(slots * 12);
-    const n = mesh.vertexCount;
-    this.positions = new Float32Array(n * 3);
-    this.normals = new Float32Array(n * 3);
-    /* Bounds are measured at upload; two corners make them cover the arena. */
-    this.positions.set([-6, -1, -6, 6, 4, 6]);
-    for (let i = 0; i < n; i += 1) this.normals[i * 3 + 1] = 1;
+    this.matrices = new Float32Array(slots * 16);
+    this.onPictures = Uint32Array.from(Array.from(mesh.pictureOf.keys()).filter((i) => mesh.pictureOf[i] !== 0));
+    const normals = new Float32Array(n * 3);
+    for (let i = 0; i < n; i += 1) normals[i * 3 + 1] = 1;
     this.handle = renderer.createMesh(
       {
-        positions: this.positions,
-        normals: this.normals,
+        positions: new Float32Array(n * 3),
+        normals,
         colors: new Float32Array(n * 3).fill(1),
         emissive: new Float32Array(n).fill(1),
         specular: new Float32Array(n),
@@ -251,6 +260,9 @@ export class Fighter {
       },
       { dynamic: true },
     );
+    this.data = { joints: new Float32Array(n * INFLUENCES), weights: new Float32Array(n * INFLUENCES), points: new Float32Array(n * INFLUENCES * 3), normals: new Float32Array(n * 3) };
+    for (let i = 0; i < n; i += 1) this.skinVertex(i);
+    this.skin = renderer.createPointSkin(this.handle, this.data);
     /* Emission through a white map, so its scale is the glow's colour over the fighter's own. */
     this.material = { albedo: texture, cutout: 0.5, doubleSided: true, ...(white === null ? {} : { emissive: white, emissiveScale: this.glow }) };
   }
@@ -262,8 +274,9 @@ export class Fighter {
     this.glow[2] = b;
   }
 
-  /** Its mesh and texture let go, once the match no longer has it. */
+  /** Its skin, mesh and texture let go, once the match no longer has it. */
   dispose(): void {
+    this.renderer.disposePointSkin(this.skin);
     this.renderer.disposeMesh(this.handle);
     this.renderer.disposeSurfaceTexture(this.texture);
   }
@@ -286,86 +299,91 @@ export class Fighter {
         const v = group.vertices[k]!;
         for (let c = 0; c < INFLUENCES * 3; c += 1) m.points[v * INFLUENCES * 3 + c] = points[k * INFLUENCES * 3 + c]!;
         for (let c = 0; c < 3; c += 1) m.normal[v * 3 + c] = normals[k * 3 + c]!;
+        this.skinVertex(v);
       }
+      this.stale = true;
     }
   }
 
   /** The picture on its face: 0 the face as loaded (the eyes open), 1 the next (the eyes closed). */
   face(picture: number): void {
-    this.picture = picture < this.mesh.pictures ? picture : 0;
+    const shown = picture < this.mesh.pictures ? picture : 0;
+    if (shown === this.picture) return;
+    this.picture = shown;
+    for (const v of this.onPictures) this.skinVertex(v);
+    this.stale = true;
   }
 
   /**
-   * Places every vertex for the joints' world transforms and uploads the result; a picture not on
-   * the face collapses to a point. A joint the skeleton lacks leaves its points as they are.
+   * Poses every vertex for the joints' world transforms, on the device; a joint the skeleton lacks
+   * leaves its points as they are. A hand or a face changed since the last pose makes the skin again.
    */
   pose(skeleton: readonly (JointTransform | undefined)[]): void {
     const m = this.mesh;
     const joints: readonly (Frame | undefined)[] = m.rig === null ? skeleton : m.rig.extend(skeleton);
-    const f = this.frames;
-    for (let j = 0, o = 0; o < f.length; j += 1, o += 12) {
-      const joint = joints[j];
-      if (joint === undefined) {
-        f.fill(0, o, o + 12);
-        f[o] = f[o + 4] = f[o + 8] = 1;
-        continue;
-      }
-      const r = joint.r;
-      for (let k = 0; k < 9; k += 1) f[o + k] = r[k] ?? 0;
-      f[o + 9] = joint.t[0] ?? 0;
-      f[o + 10] = joint.t[1] ?? 0;
-      f[o + 11] = joint.t[2] ?? 0;
-    }
-    const { influenceCount, weights, points, normal, normalJoint, pictureOf } = m;
-    const jointOf = m.joints;
-    const out = this.positions;
-    const outNormal = this.normals;
-    const shown = this.picture + 1;
-    for (let i = 0; i < m.vertexCount; i += 1) {
-      const p = i * 3;
-      const picture = pictureOf[i]!;
-      if (picture !== 0 && picture !== shown) {
-        out[p] = 0;
-        out[p + 1] = 0;
-        out[p + 2] = 0;
-        outNormal[p] = 0;
-        outNormal[p + 1] = 1;
-        outNormal[p + 2] = 0;
-        continue;
-      }
-      let ax = 0;
-      let ay = 0;
-      let az = 0;
-      const count = influenceCount[i]!;
-      for (let k = 0; k < count; k += 1) {
-        const slot = i * INFLUENCES + k;
-        const w = weights[slot]!;
-        if (w === 0) continue;
-        const o = jointOf[slot]! * 12;
-        const x = points[slot * 3]!;
-        const y = points[slot * 3 + 1]!;
-        const z = points[slot * 3 + 2]!;
-        ax += (f[o]! * x + f[o + 1]! * y + f[o + 2]! * z + f[o + 9]!) * w;
-        ay += (f[o + 3]! * x + f[o + 4]! * y + f[o + 5]! * z + f[o + 10]!) * w;
-        az += (f[o + 6]! * x + f[o + 7]! * y + f[o + 8]! * z + f[o + 11]!) * w;
-      }
+    const f = this.matrices;
+    for (let j = 0, o = 0; o < f.length; j += 1, o += 16) {
+      const { r, t } = joints[j] ?? STILL;
       /* Game axes to the player's: millimetres to metres, and a half turn about X. */
-      out[p] = ax / 1000;
-      out[p + 1] = -ay / 1000;
-      out[p + 2] = -az / 1000;
-
-      const o = normalJoint[i]! * 12;
-      const nx = normal[p]! / 4096;
-      const ny = normal[p + 1]! / 4096;
-      const nz = normal[p + 2]! / 4096;
-      const wx = f[o]! * nx + f[o + 1]! * ny + f[o + 2]! * nz;
-      const wy = f[o + 3]! * nx + f[o + 4]! * ny + f[o + 5]! * nz;
-      const wz = f[o + 6]! * nx + f[o + 7]! * ny + f[o + 8]! * nz;
-      const length = Math.sqrt(wx * wx + wy * wy + wz * wz) || 1;
-      outNormal[p] = wx / length;
-      outNormal[p + 1] = -wy / length;
-      outNormal[p + 2] = -wz / length;
+      f[o] = r[0]! / 1000;
+      f[o + 1] = -r[3]! / 1000;
+      f[o + 2] = -r[6]! / 1000;
+      f[o + 3] = 0;
+      f[o + 4] = r[1]! / 1000;
+      f[o + 5] = -r[4]! / 1000;
+      f[o + 6] = -r[7]! / 1000;
+      f[o + 7] = 0;
+      f[o + 8] = r[2]! / 1000;
+      f[o + 9] = -r[5]! / 1000;
+      f[o + 10] = -r[8]! / 1000;
+      f[o + 11] = 0;
+      f[o + 12] = t[0]! / 1000;
+      f[o + 13] = -t[1]! / 1000;
+      f[o + 14] = -t[2]! / 1000;
+      f[o + 15] = 1;
     }
-    this.renderer.updateMesh(this.handle, out, outNormal);
+    if (this.stale) {
+      this.stale = false;
+      this.renderer.disposePointSkin(this.skin);
+      this.skin = this.renderer.createPointSkin(this.handle, this.data);
+    }
+    this.renderer.posePointSkin(this.skin, f);
+  }
+
+  /**
+   * Vertex `i` in the skin: its weighted points, the one on its normal's joint first (or that joint
+   * weighing nothing, where it holds none of them); nothing, on a picture the face does not show.
+   */
+  private skinVertex(i: number): void {
+    const m = this.mesh;
+    const { joints, weights, points, normals } = this.data;
+    const at = i * INFLUENCES;
+    joints.fill(0, at, at + INFLUENCES);
+    weights.fill(0, at, at + INFLUENCES);
+    points.fill(0, at * 3, (at + INFLUENCES) * 3);
+    const picture = m.pictureOf[i]!;
+    if (picture !== 0 && picture !== this.picture + 1) {
+      normals.fill(0, i * 3, i * 3 + 3);
+      return;
+    }
+    const count = m.influenceCount[i]!;
+    const normalJoint = m.normalJoint[i]!;
+    let first = -1;
+    for (let k = 0; k < count && first < 0; k += 1) if (m.weights[at + k] !== 0 && m.joints[at + k] === normalJoint) first = k;
+    let slot = 0;
+    const put = (k: number): void => {
+      if (slot === INFLUENCES) throw new Error(`fighter mesh: vertex ${i} hangs on four joints and turns its normal on a fifth`);
+      joints[at + slot] = m.joints[at + k]!;
+      weights[at + slot] = m.weights[at + k]!;
+      for (let c = 0; c < 3; c += 1) points[(at + slot) * 3 + c] = m.points[(at + k) * 3 + c]!;
+      slot += 1;
+    };
+    if (first >= 0) put(first);
+    else {
+      joints[at] = normalJoint;
+      slot = 1;
+    }
+    for (let k = 0; k < count; k += 1) if (k !== first && m.weights[at + k] !== 0) put(k);
+    for (let c = 0; c < 3; c += 1) normals[i * 3 + c] = m.normal[i * 3 + c]! / 4096;
   }
 }

@@ -153,6 +153,6 @@ export function play(player: Player, renderer: RendererApi, backend: string): vo
     { fixedDt: 1 / 60, maxFrameTime: MOST_FIELDS / 60, frameSource: evenFrames() },
   );
   Object.assign(globalThis, {
-    __tekken3: () => ({ remake: true, backend, fields, frames: { ...frames }, density: governor?.scale ?? 1, ...player.probe(), failure: failure?.message ?? null }),
+    __tekken3: () => ({ remake: true, backend, fields, frames: { ...frames }, density: governor?.scale ?? 1, timing: stats.line(), ...player.probe(), failure: failure?.message ?? null }),
   });
 }

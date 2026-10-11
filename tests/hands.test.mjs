@@ -71,16 +71,36 @@ test('a picture on vertices another triangle shares, or of another length than t
   assert.throws(() => writeFtr5(short), /triangles/);
 });
 
-/** A renderer that keeps the last positions a mesh was given. */
+/**
+ * A renderer that poses a point skin as the engine does on the device (each weighted point moved by
+ * its joint, a weight of 0 skipped) and keeps the positions of the last pose, and how many skins it made.
+ */
 function recorder() {
-  const seen = { positions: null };
+  const seen = { positions: null, skins: 0 };
   return {
     seen,
     renderer: {
       createMesh: () => 'mesh',
-      updateMesh: (_, positions) => {
-        seen.positions = Array.from(positions);
+      createPointSkin: (_, data) => {
+        seen.skins += 1;
+        return { joints: Float32Array.from(data.joints), weights: Float32Array.from(data.weights), points: Float32Array.from(data.points) };
       },
+      posePointSkin: (skin, m) => {
+        const vertices = skin.weights.length / 4;
+        seen.positions = [];
+        for (let v = 0; v < vertices; v += 1) {
+          const p = [0, 0, 0];
+          for (let k = 0; k < 4; k += 1) {
+            const w = skin.weights[v * 4 + k];
+            if (w === 0) continue;
+            const o = skin.joints[v * 4 + k] * 16;
+            const [x, y, z] = skin.points.slice((v * 4 + k) * 3, (v * 4 + k) * 3 + 3);
+            for (let c = 0; c < 3; c += 1) p[c] += w * (m[o + c] * x + m[o + 4 + c] * y + m[o + 8 + c] * z + m[o + 12 + c]);
+          }
+          seen.positions.push(...p);
+        }
+      },
+      disposePointSkin() {},
       disposeMesh() {},
       disposeSurfaceTexture() {},
     },
@@ -117,6 +137,12 @@ test('the player draws a hand in the shape its step gives, and only the picture 
   fighter.face(5);
   fighter.pose([]);
   assert.deepEqual(at(4), [10, 0, -50], 'a picture the face does not have shows it as loaded');
+  const skins = seen.skins;
+  fighter.face(0);
+  fighter.shape(12, 0);
+  fighter.pose([]);
+  fighter.pose([]);
+  assert.equal(seen.skins, skins, 'a hand and a face drawn as they are make no skin again');
 });
 
 /* An icosahedron of radius 100 on one joint, its normals pointing out. */
