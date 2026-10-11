@@ -12,9 +12,9 @@
  * - **A mesh**: four UNPACKs, every fourth quadword from `0x5e`: positions (mm, in the bind pose),
  *   normals (with a fourth value), up to four weights, and the palette slots they go with (1-based).
  *   After them, its triangle strips, each a GIF tag and then items of s, t (floats over TEX0's
- *   size), the vertex and a flag (one GIF strip holds several strips, a run of items each, told apart
- *   by the flag: no triangle joins two runs), under GS state blocks (a packed GIF tag: ALPHA, CLAMP_1, TEX0_1,
- *   TEST) that change between them, and calls to the VU program between batches of them.
+ *   size), the vertex and a word the vertex keeps wherever it is drawn (not the strip's), under GS
+ *   state blocks (a packed GIF tag: ALPHA, CLAMP_1, TEX0_1, TEST) that change between them, and
+ *   calls to the VU program between batches of them.
  */
 import { unpackElements, vifCodes } from './vif.mjs';
 

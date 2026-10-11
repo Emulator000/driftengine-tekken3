@@ -322,13 +322,8 @@ export function exportKazuya(model, uploads, tables, encodePng) {
           }
           return index;
         };
-        /*
-         * A GS strip: every vertex after the second makes a triangle with the two before it, but one
-         * GIF strip carries several, each run of items with its own flag; no triangle joins two.
-         */
+        /* A GS strip: every vertex after the second makes a triangle with the two before it. */
         for (let i = 2; i < strip.items.length; i += 1) {
-          const flag = strip.items[i].flag;
-          if (strip.items[i - 1].flag !== flag || strip.items[i - 2].flag !== flag) continue;
           const all = drawings.get(cornersOf(strip, i));
           const at = all.findIndex((d) => d.s === s && d.i === i);
           if (all.slice(at + 1).some((d) => opaque.get(d.key))) continue;
