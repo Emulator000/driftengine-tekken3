@@ -68,6 +68,12 @@ const THROWS = [
 ];
 /** A cancel's type that carries the frame on into the next move (2), with its no-blend bit (0x40). */
 const CARRY_ON = 0x42;
+/**
+ * Whether a Tekken 4 cancel goes on into its move from the frame it is on, rather than from the move's
+ * first: its transition word's 0x400 bit (0x8000 clear). Kazuya's strings that carry it open the next
+ * move's motion as this one's (Tekken 4's u+4,4: the second motion is the first's for 24 frames).
+ */
+const goesOn = (cancel) => (cancel.extra & 0x8400) === 0x400;
 /** A cancel's command that holds with no input. */
 const ALWAYS = 0x10;
 /** A cancel's type for a throw's connect, which hands the victim its move. */
@@ -604,16 +610,17 @@ export function buildKazuyaMoveset({ heihachiBytes, commonBytes, movesets, exe, 
 
     /*
      * Its cancels: strings to the attacks they start, an attack's own step on to the next at a frame
-     * with no input, a state's moves on to the states taken across, then its end. A string to a move
-     * playing the same motion goes on with it from the frame it is on, unblended, as Tekken 3's own
-     * strings that branch partway through one motion do (Heihachi's Spinning Demon).
+     * with no input, a state's moves on to the states taken across, then its end. A string Tekken 4
+     * plays on from the frame it is on (`goesOn`) carries the frame on, unblended, as Tekken 3's own
+     * strings that branch partway through one motion do (Heihachi's Spinning Demon): the next move's
+     * motion opens as this one does, so its frame there is this frame's pose.
      */
     const list = [];
     for (const e of entries) {
       if (e.command === 0x8000) break;
       if (!isPlain(e.command)) continue;
       const window = { cond: 0, test: 0, param: 0, from: Math.min(e.start, 0xff), to: Math.min(e.end, 0xff), at: Math.min(e.frame, 0xff) };
-      const onward = e.target !== index && t4.moves[e.target]?.motion === move.motion;
+      const onward = e.target !== index && (goesOn(e) || t4.moves[e.target]?.motion === move.motion);
       if (t4Buttons(e.command) !== 0 && isAttack(e.target)) list.push({ ...window, command: t3Command(e.command), target: idFor(e.target), type: onward ? CARRY_ON : 0xc });
       else if (e.command === 0 && isAttack(index) && isAttack(e.target)) list.push({ ...window, command: ALWAYS, target: idFor(e.target), type: 6 });
       else if (state && t4Buttons(e.command) === 0 && converted.has(e.target) && e.target !== index && t4Directions(e.command) !== 0) {

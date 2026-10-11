@@ -194,3 +194,31 @@ function landsFaceDown(data, heihachi) {
   }
   return -1;
 }
+
+/*
+ * His u+4 string: Tekken 4 plays each 4 that follows on from the frame the kick before is on, its
+ * motion opening as the one before does, so the jump kick, the landing kick and the spin are one
+ * motion. Started at their first frame, the second replayed the jump from its crouch, blending his
+ * body half a turn round in a field on the way.
+ */
+test('his u+4 string plays on as one motion', { skip: !kazuya }, async () => {
+  const UP = 0x1000;
+  const pads = (field) => (field === 428 ? UP | PAD.kick : field > 428 && field < 520 ? (field % 2 === 0 ? PAD.kick : 0) | (field < 432 ? UP : 0) : 0);
+  const moves = [];
+  const JOINTS = [1, 11, 12, 15];
+  let previous = null;
+  let worst = 0;
+  let stance = -1;
+  await play(pads, 520, (field, f) => {
+    if (field < 428) return;
+    if (field === 428) stance = f.moveId;
+    if (moves.length === 0 && f.moveId === stance) return;
+    if (moves.at(-1)?.id !== f.moveId) moves.push({ id: f.moveId, frame: f.frame });
+    const now = JOINTS.map((j) => Array.from(f.skeleton.joints[j].world.rotation));
+    if (previous !== null && moves.length <= 2) worst = Math.max(worst, ...JOINTS.map((_, k) => turn(previous[k], now[k])));
+    previous = now;
+  });
+  assert.ok(moves.length >= 3, `the string went on: ${JSON.stringify(moves)}`);
+  assert.ok(moves[1].frame > 20, `the second kick took up the first's frame (it started on frame ${moves[1].frame})`);
+  assert.ok(worst < 90, `his body turned ${worst.toFixed(0)} degrees in a field through the first two kicks`);
+});
