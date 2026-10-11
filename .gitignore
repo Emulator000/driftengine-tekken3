@@ -1,0 +1,47 @@
+node_modules/
+dist/
+*.log
+.playwright-mcp/
+
+# The disc image and everything extracted from it. The game's content, never committed.
+.cache/
+
+# What `npm run extract` and `npm run import` write from the disc. Converted content is still the
+# game's content, whatever its format.
+public/data/
+public/assets/
+
+# Local configuration.
+.env
+.env.*
+
+# Disc images, archives and the game's own file types, so none can be added by accident.
+*.bin
+*.cue
+*.iso
+*.img
+*.ecm
+*.chd
+*.pbp
+*.mdf
+*.mds
+*.ccd
+*.sub
+*.7z
+*.zip
+*.rar
+*.exe
+*.elf
+*.irx
+*.BNS
+*.XAS
+*.STR
+*.xa
+*.vab
+*.vh
+*.vb
+*.tim
+*.tmd
+*.3dmk
+*.pcm
+SL?S_*.*
