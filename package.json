@@ -1,6 +1,6 @@
 {
   "name": "driftengine-tekken3",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Unofficial: Tekken 3 rebuilt on DriftEngine from the data of a user's own disc. No game files included.",
   "license": "UNLICENSED",
   "type": "module",
@@ -14,7 +14,9 @@
     "dev": "vite",
     "predev:lan": "node scripts/extract.mjs --if-missing && node scripts/import.mjs --if-missing",
     "dev:lan": "vite --mode lan",
-    "android": "node scripts/android.mjs",
+    "desktop": "node scripts/app.mjs",
+    "android": "node scripts/app.mjs android",
+    "ios": "node scripts/app.mjs ios",
     "prebuild": "npm test",
     "build": "vite build",
     "preview": "vite preview",
@@ -22,9 +24,9 @@
     "test": "node --test tests/*.test.mjs && npm run typecheck"
   },
   "dependencies": {
-    "@driftengine/audio": "^4.13.2",
-    "@driftengine/core": "^4.13.2",
-    "@driftengine/ui2d": "^4.13.2",
+    "@driftengine/audio": "^4.13.4",
+    "@driftengine/core": "^4.13.4",
+    "@driftengine/ui2d": "^4.13.4",
     "@fontsource/russo-one": "^5.3.0",
     "@fontsource/saira-extra-condensed": "^5.3.0"
   },

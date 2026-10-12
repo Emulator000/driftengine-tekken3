@@ -35,7 +35,7 @@ This repository intentionally does not contain or provide:
 - audio, music or voices
 - movies
 - converted, extracted or decoded game content
-- builds of the game, such as Android apps: each is built on your machine, from your own disc
+- builds of the game, apps for a computer or a phone: each is built on your machine, from your own disc
 - copy protection or region lock bypasses
 - downloads of original game content
 
@@ -46,8 +46,9 @@ This repository intentionally does not contain or provide:
 - **Node.js 22.12 or newer** (<https://nodejs.org>).
 - **A recent browser**: Chrome or Edge on Windows, macOS or Linux, or Safari 26 on macOS, which
   draw it with WebGPU. Where WebGPU is missing the engine falls back to WebGL2.
-- **A phone**, optional: an Android phone plays it as an app you build from your disc, and any
-  phone or tablet plays it in its browser over your home network (below).
+- **An app, optional**: the game builds into an app of its own for Windows, macOS, Linux, an
+  Android phone or an iPhone, from your disc, and plays in any phone's or tablet's browser over your home
+  network (below).
 - **FFmpeg**, optional: converts the disc's movies to web video. Without it the movies are left
   out and their time passes in black.
 - **7-Zip**, optional: only to read an image you keep as a `.7z` archive.
@@ -101,38 +102,59 @@ listens on `localhost` only, and none of it is committed.
 
 Sound starts once a key, click or touch lets the browser play audio.
 
-### 4. On your phone (optional)
+### 4. As an app (optional)
 
-- **As an Android app**:
+The game builds into an app of its own, with your disc's data in it:
+
+- **For this computer**:
+
+  ```sh
+  npm run desktop
+  ```
+
+  builds the app for the system you run it on, into `out/<target>/`: on Windows an installer and a
+  zip, on macOS a `.dmg` and a zip for your Mac's chip, on Linux an AppImage and a `.tar.gz` (some
+  900 MB each). The game opens in a window of its own, drawn with WebGPU where the system offers it.
+  A Mac's app can also be built on Linux (`npm run desktop -- mac-arm64`, or `mac-x64` for an
+  Intel Mac); a Windows app is built on Windows, with Developer Mode on (the build warns when it is
+  off).
+
+- **For an Android phone**:
 
   ```sh
   npm run android
   ```
 
-  builds an APK of the game with your disc's data in it, `out/android/Tekken-3-<version>.apk` (some
-  750 MB). Install it with `adb install -r out/android/Tekken-3-<version>.apk`, or copy it to the
-  phone and open it there (the phone asks you to allow installing apps from where you opened it).
-  The first build fetches DriftEngine's packager and the Android toolchain (a JDK, the Android SDK
-  and Gradle) into your user cache, and accepts the Android SDK's licence for you; a build needs
-  some 4 GB of free disk space while it runs.
+  builds an APK, `out/android/Tekken-3-<version>.apk` (some 750 MB). Install it with
+  `adb install -r out/android/Tekken-3-<version>.apk`, or copy it to the phone and open it there
+  (the phone asks you to allow installing apps from where you opened it).
 
-- **In the phone's browser, over your home network**:
+- **For an iPhone**, on a Mac with Xcode: `npm run ios` writes the app's Xcode project and an
+  unsigned `.ipa` into `out/ios/`; open the project in Xcode, choose your Apple ID's team, and run it
+  on your iPhone. Not yet built or played.
 
-  ```sh
-  npm run dev:lan
-  ```
+The first build fetches DriftEngine's packager and what it builds with (Electron for a computer; a
+JDK, the Android SDK and Gradle for an Android phone, accepting the Android SDK's licence for you;
+XcodeGen for an iPhone) into your user cache. A build needs some 4 GB of free disk space while it
+runs.
 
-  serves the game over HTTPS to your devices on your home network and prints the addresses to open
-  (`https://<this machine's address>:5190`). The phone asks once to accept the certificate, made on
-  your machine the first time; HTTPS is what gives the page WebGPU there.
+### 5. In a phone's browser (optional)
+
+```sh
+npm run dev:lan
+```
+
+serves the game over HTTPS to your devices on your home network and prints the addresses to open
+(`https://<this machine's address>:5190`). The phone asks once to accept the certificate, made on
+your machine the first time; HTTPS is what gives the page WebGPU there.
 
 On a touch screen the game shows a pad over the picture: a stick where your left thumb lands, the
 four buttons on the right in a diamond as on the pad (2 above, 1 and 4 either side, 3 below; a
 thumb between two holds both), Select and Start between the thumbs. A phone draws the
 picture without the ambient occlusion and the bloom, at fewer pixels while its frames run slow.
 
-The APK carries your disc's converted data, and the home network's page serves it: both are for
-your own devices. Never share or upload the APK.
+Every app carries your disc's converted data, and the home network's page serves it: all of them
+are for your own devices. Never share or upload an app built from your disc.
 
 ## Playing
 
@@ -144,7 +166,7 @@ The game starts as the console does: the logo, the opening movie, the title (Ent
 | Player 2 | arrows | numpad 4 | numpad 5 | numpad 1 | numpad 2 | numpad 7, 9 | numpad Enter |
 
 A gamepad drives the player of its index, and on a touch screen the pad over the picture drives
-the first. `?quick` in the address skips the menus for a match at
+the first. Alt+Enter takes the game to full screen and back. `?quick` in the address skips the menus for a match at
 once; [docs/USAGE.md](docs/USAGE.md) lists every option (fighters, stage, the computer's sides,
 the endings, the original textures, the viewer) and every command.
 
@@ -206,7 +228,9 @@ field. What is done and what is not yet:
 | Keyboard and gamepads | Done | |
 | Touch controls | Done | A stick where the left thumb lands, the four buttons, Select and Start |
 | Phones and tablets, in the browser | Done | Over your home network, `npm run dev:lan` |
+| An app for Windows, macOS or Linux built from your disc | Done | `npm run desktop`; the Linux app is the one played so far |
 | An Android app built from your disc | Done | `npm run android`, for your own phone |
+| An iPhone app built from your disc | Partly | `npm run ios`, on a Mac with Xcode; not yet built or played |
 | Windows, macOS, Linux | Done | Developed and tested on Linux |
 | Kazuya from Tekken 4 | Done | Optional, from your own Tekken 4 disc |
 | Discs of other regions (PAL, Japanese) | Not yet | The USA disc (SLUS-00402) alone is read |
@@ -215,13 +239,13 @@ field. What is done and what is not yet:
 
 | Path | What |
 | --- | --- |
-| `scripts/` | Reading the disc image and importing its data: the only code that knows the disc's formats |
+| `scripts/` | Reading the disc image and importing its data, the only code that knows the disc's formats; and building the apps (`app.mjs`) |
 | `src/sim/` | The game: a typed, deterministic simulation, with no engine, browser or I/O in it |
 | `src/assets/` | The imported assets' types and validating loaders |
 | `src/present/` | The presentation on DriftEngine: the 3D, the 2D, the effects, the sound |
 | `src/app/` | The page, the input and the 60 Hz loop |
 | `src/mod/kazuya/` | Kazuya, added through the game's extension points |
-| `drift.package.json` | The Android app, as DriftEngine's packager builds it (`npm run android`) |
+| `drift.package.json` | The apps, as DriftEngine's packager builds them (`npm run desktop`, `npm run android`, `npm run ios`) |
 | `tests/` | The tests (`npm test`); those that need the disc's data skip without it |
 | `docs/USAGE.md` | Commands and the page's options |
 | `docs/ENGINE.md` | What the game needs from DriftEngine |

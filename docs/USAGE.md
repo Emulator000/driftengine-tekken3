@@ -9,12 +9,15 @@
 | `npm run import` | Writes the game's typed assets, under `public/assets/` |
 | `npm run t4 -- "<image>"` | Reads your Tekken 4 disc image (`.iso`, or a `.7z` holding one) for Kazuya; then run `npm run extract` again |
 | `npm run dev` | Serves the game on `localhost:5190` (or the next free port), running `extract` and `import` first when their output is missing |
-| `npm run dev:lan` | Serves the game to your own devices on your home network, over HTTPS ([On your phone](#on-your-phone)) |
-| `npm run android` | Builds an Android app of the game for your own phone, with your disc's data in it, into `out/android/` ([On your phone](#on-your-phone)) |
+| `npm run dev:lan` | Serves the game to your own devices on your home network, over HTTPS ([In a phone's browser](#in-a-phones-browser)) |
+| `npm run desktop` | Builds the game as an app for this computer (Windows, macOS or Linux), with your disc's data in it, into `out/<target>/`; `-- mac-arm64` or `-- mac-x64` builds a Mac's on Linux ([As an app](#as-an-app)) |
+| `npm run android` | Builds the game as an Android app for your own phone, with your disc's data in it, into `out/android/` ([As an app](#as-an-app)) |
+| `npm run ios` | On a Mac with Xcode, builds the game as an iPhone app, with your disc's data in it, into `out/ios/` ([As an app](#as-an-app)) |
 | `npm run build` | Runs the tests, then builds the page into `dist/`. The build copies the disc's data from `public/` into `dist/`: it is for your own machine, never to host or share |
 | `npm test` | The tests (those that need the disc's data skip without it), then the typecheck |
 
-Every command runs alike on Windows, macOS and Linux.
+Every command runs alike on Windows, macOS and Linux, but for the app `npm run desktop` builds,
+which is the system's own.
 
 ### Environment
 
@@ -22,8 +25,10 @@ Every command runs alike on Windows, macOS and Linux.
 | --- | --- |
 | `SEVEN_ZIP` | The 7-Zip program to run, when it is not on the path or in its usual folder |
 | `DRIFT_ENGINE_LOCAL=0` | Uses the DriftEngine packages from npm even when an engine checkout sits at `../drftrun/driftengine` |
-| `DRIFT_TOOLCHAIN_HOME` | Where `npm run android` keeps the Android toolchain and the app's signing key (`~/.cache/driftengine/toolchain` by default) |
+| `DRIFT_TOOLCHAIN_HOME` | Where `npm run desktop` and `npm run android` keep what they build with (Electron's runtime, the Android toolchain) and the Android app's signing key (`~/.cache/driftengine/toolchain` by default) |
 | `DRIFT_ANDROID_KEYSTORE`, `DRIFT_ANDROID_KEYSTORE_PASSWORD`, `DRIFT_ANDROID_KEY_ALIAS` | A signing key of your own for the Android app, in place of the one made for you |
+| `CSC_LINK`, `CSC_KEY_PASSWORD` (`WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD` on Windows) | A code-signing certificate of your own for the computer's app (electron-builder's names) |
+| `APPLE_TEAM_ID` | Your Apple developer team, signing the iPhone app as it is built (without it, Xcode signs it for your own iPhone) |
 
 ## The page's options
 
@@ -63,25 +68,58 @@ Add them to the address, for example `http://localhost:5190/?quick&p1=9&p2=13&st
 
 Mokujin (15) and True Ogre (20) are not in a fight yet.
 
-## On your phone
+## As an app
 
-Both ways below are for your own devices: the home network's page serves your disc's data, and the
-Android app carries it.
+`npm run desktop`, `npm run android` and `npm run ios` make the page's data when it is missing (as
+`npm run dev` does), build the page into `dist/`, and have DriftEngine's packager (`@driftengine/package`, at the
+engine's version, as `drift.package.json` describes the apps) wrap it in an app. The first build
+installs the packager into `.cache/packager/` and fetches what it builds with into
+`~/.cache/driftengine/` (`DRIFT_TOOLCHAIN_HOME` moves it); later builds reuse them. Only the
+finished files are kept, in `out/<target>/` (`--out=<folder>` puts them in `<folder>/<target>/`).
+A build needs some 4 GB of free disk space while it runs. Every app carries your disc's data: it is
+for your own devices, never to share or upload.
 
-### The Android app
+### On this computer
 
-`npm run android` makes the page's data when it is missing (as `npm run dev` does), builds the page
-into `dist/`, and has DriftEngine's packager (`@driftengine/package`, at the engine's version, as
-`drift.package.json` describes the app) wrap it in an APK: one activity holding the phone's WebView,
-serving the game from the APK's own files, held in landscape either way up. It asks for no
-permission, not even the network. Only
-the APK is kept, `out/android/Tekken-3-<version>.apk`, some 750 MB; install it with
+`npm run desktop` builds the app for the system it runs on: Electron's window serving the game from
+the app's own files, 1280 by 720 to start and resizable, drawn with WebGPU where the system offers
+it.
+
+| On | It writes |
+| --- | --- |
+| Windows | `out/win-x64/`: an installer (`Tekken 3 Setup <version>.exe`) and a zip of the app |
+| macOS | `out/mac-arm64/` (Apple silicon) or `out/mac-x64/` (Intel): a `.dmg` and a zip |
+| Linux (x64) | `out/linux-x64/`: `Tekken 3-<version>.AppImage` and `tekken3-<version>.tar.gz` |
+
+Each is some 900 MB. `npm run desktop -- mac-arm64` (or `mac-x64`) builds a Mac's app on Linux, as a
+zip signed ad hoc; a Windows app is built on Windows, and a Linux app on Linux. The first build
+fetches Electron's runtime (and, for a Mac's app built on Linux, `rcodesign`, which signs it).
+
+Alt+Enter takes the game to full screen and back. The app's window takes a browser's own keys away
+(reloading, printing, finding, zooming, the inspector).
+
+The app carries no certificate of yours unless `CSC_LINK` names one: Windows' SmartScreen may ask
+before its first run, and macOS runs the app signed ad hoc on the Mac that built it, while one
+copied from elsewhere may need its quarantine flag cleared first
+(`xattr -dr com.apple.quarantine "Tekken 3.app"`).
+
+On Windows the build makes symbolic links (electron-builder unpacks a signing tool that holds some),
+which an account may do with Developer Mode on (Settings, System, For developers). Without it the
+build fails at its very end, saying "A required privilege is not held by the client"; the build
+warns before it starts. After such a failure, remove the half-unpacked tool
+(`%LOCALAPPDATA%\electron-builder\Cache\winCodeSign`) before building again. A project on a
+network drive builds with `--out=` naming a folder on a local disk:
+`npm run desktop -- --out=C:\tekken3-out`.
+
+### On an Android phone
+
+`npm run android` builds an APK: one activity holding the phone's WebView, serving the game from
+the APK's own files, held in landscape either way up. It asks for no permission, not even the
+network. It writes `out/android/Tekken-3-<version>.apk`, some 750 MB; install it with
 `adb install -r out/android/Tekken-3-<version>.apk`, or copy it to the phone and open it there.
 
-The first build installs the packager into `.cache/packager/`, and fetches the Android toolchain it
-builds with (a JDK, the Android SDK's command-line tools, platform and build tools, and Gradle) into
-`~/.cache/driftengine/` (`DRIFT_TOOLCHAIN_HOME` moves it), accepting the Android SDK's licence for
-you; later builds reuse them. A build needs some 4 GB of free disk space while it runs.
+The first build fetches the Android toolchain (a JDK, the Android SDK's command-line tools, platform
+and build tools, and Gradle), accepting the Android SDK's licence for you.
 
 The APK is signed with a key the packager makes on the first build and keeps beside the toolchain
 (`keystores/io.github.emulator000.tekken3.jks`). A phone installs a later build over an earlier one
@@ -92,7 +130,24 @@ and its password and alias sign with a key of your own instead.
 Android's back gesture is offered to the game first, which leaves it alone: a second back within
 two seconds closes the app.
 
-### The browser, over your home network
+### On an iPhone
+
+`npm run ios`, on a Mac with Xcode, builds an iPhone app: one view holding a `WKWebView`, serving
+the game from the app's own files. It writes `out/ios/`: the Xcode project (in `project/`) and an
+unsigned `Tekken-3-<version>.ipa`. To play it on your own iPhone, open the project in Xcode, choose
+your Apple ID's team under Signing & Capabilities, and run it on the iPhone: Apple signs an app for
+your own device that way, for seven days at a time. `APPLE_TEAM_ID` signs the build with your
+team as it is built instead. The first build fetches XcodeGen, which writes the project; Xcode
+comes from the App Store.
+
+It has not been built or played yet: DriftEngine's iPhone host is written to Apple's documentation
+and has not run on a Mac either.
+
+## In a phone's browser
+
+The page over your home network serves your disc's data: it is for your own devices.
+
+### Over your home network
 
 `npm run dev:lan` serves the game on every address of the machine, over HTTPS, and prints the
 addresses to open (`https://<address>:5190`). Its certificate is made on your machine the first time,

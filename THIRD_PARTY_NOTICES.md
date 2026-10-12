@@ -32,13 +32,17 @@ user has installed them, on the user's own files.
   web video (`scripts/lib/str.mjs`). Without it the movies are left out.
 - **7-Zip** (<https://www.7-zip.org>), LGPL-2.1 with unRAR restriction: unpacks a disc image the
   user keeps as a `.7z` archive (`scripts/lib/sevenzip.mjs`).
-- **DriftEngine's packager** (`@driftengine/package`), Apache-2.0: fetched by `npm run android` at
-  the engine's version, it wraps the built page in an Android app (`scripts/android.mjs`). The app
-  it writes carries its host's code (Apache-2.0) and AndroidX WebKit (Apache-2.0).
-- **The Android toolchain** the packager fetches into the user's cache for that build: Eclipse
-  Temurin (GPL-2.0 with the Classpath Exception), the Android SDK's command-line tools, platform
-  and build tools (the Android Software Development Kit License Agreement), and Gradle
-  (Apache-2.0).
+- **DriftEngine's packager** (`@driftengine/package`), Apache-2.0: fetched by `npm run desktop`,
+  `npm run android` and `npm run ios` at the engine's version, it wraps the built page in an app
+  (`scripts/app.mjs`), building a computer's with electron-builder (MIT). A computer's app carries
+  its shell's code (Apache-2.0) and Electron (MIT), with Chromium's and Node.js's licences in
+  the files beside it; an Android app carries its host's code (Apache-2.0) and AndroidX WebKit
+  (Apache-2.0); an iPhone app carries its host's code (Apache-2.0).
+- **What the packager builds with**, fetched into the user's cache: Electron's runtime (MIT) for a
+  computer's app, and `rcodesign` (MPL-2.0) to sign a Mac's app built on Linux; for an Android
+  app, Eclipse Temurin (GPL-2.0 with the Classpath Exception), the Android SDK's command-line
+  tools, platform and build tools (the Android Software Development Kit License Agreement), and
+  Gradle (Apache-2.0); for an iPhone app, XcodeGen (MIT).
 
 ## DriftEngine
 

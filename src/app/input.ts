@@ -2,7 +2,7 @@
  * Keyboards and gamepads as the console's pad words. Player 1: WASD to move, U I J K for left
  * punch, right punch, left kick, right kick, Q and E the sidestep shoulders, Enter start. Player 2:
  * the arrows, numpad 4 5 1 2, numpad 7 and 9, numpad Enter. A standard gamepad drives the player
- * of its index.
+ * of its index. Alt+Enter takes the page to full screen and back, pressing no Start.
  */
 export const UP = 0x1000;
 export const RIGHT = 0x2000;
@@ -21,6 +21,11 @@ export class PadInput {
 
   constructor(target: Window) {
     target.addEventListener('keydown', (e) => {
+      if (e.altKey && e.code === 'Enter') {
+        e.preventDefault();
+        if (!e.repeat) fullScreen();
+        return;
+      }
       if (KEYS.some((keys) => e.code in keys)) e.preventDefault();
       this.held.add(e.code);
     });
@@ -45,4 +50,10 @@ export class PadInput {
     }
     return word;
   }
+}
+
+/** The page to full screen, or back from it. */
+function fullScreen(): void {
+  if (document.fullscreenElement !== null) void document.exitFullscreen().catch(() => {});
+  else void document.documentElement.requestFullscreen().catch(() => {});
 }

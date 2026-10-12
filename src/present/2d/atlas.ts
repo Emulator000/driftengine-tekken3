@@ -145,7 +145,8 @@ export class PaintAtlas {
   private budget: number;
   /** Slots whose tile was emptied for good, their textures to be let go at the next upload, and what they hold then (a texel). */
   private readonly released = new Set<number>();
-  private readonly blank = new OffscreenCanvas(1, 1);
+  /** The texel, on a canvas with a context: WebGPU copies nothing from a canvas without one, and throws. */
+  private readonly blank = canvasOf(1, 1).canvas;
   /** A tile's canvas kept from one emptied, for the next. */
   private spare: { canvas: OffscreenCanvas; context: Context } | null = null;
   /** The frames it was uploaded on (once each). */
@@ -153,10 +154,10 @@ export class PaintAtlas {
   /** Set while the owner still draws pictures asked for frames ago (a dissolve's frame before): nothing is emptied for room. */
   keep = false;
 
-  constructor(
-    private readonly passes: readonly AtlasPass[],
-    side = 2048,
-  ) {
+  private readonly passes: readonly AtlasPass[];
+
+  constructor(passes: readonly AtlasPass[], side = 2048) {
+    this.passes = passes;
     this.budget = side * side;
     this.context = canvasOf(1, 1).context;
   }

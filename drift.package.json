@@ -2,7 +2,8 @@
   "id": "io.github.emulator000.tekken3",
   "name": "Tekken 3",
   "entry": "dist/index.html",
-  "targets": ["android"],
+  "targets": ["win-x64", "mac-arm64", "mac-x64", "linux-x64", "android", "ios"],
+  "window": { "width": 1280, "height": 720, "mode": "windowed", "resizable": true },
   "backend": { "webgpu": "prefer", "allowSoftwareRenderer": false },
   "features": { "clipExport": false, "gamepad": true },
   "android": { "permissions": [], "cleartextTraffic": false, "orientation": "sensorLandscape" }
