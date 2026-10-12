@@ -2,10 +2,11 @@
  * The credits after an ending. After a wait, the Theater's sound; then its song (the disc's audio
  * track); once it is heard, a second's wait; "THE KING OF IRON FIST TOURNAMENT 3" and "TEKKEN 3"
  * over a band of light whose colour runs from the warm (253, 219, 182) to black, held, then
- * faded; then the staff roll: the list's lines (each led by its kind: 0 a heading in the small
- * type, 1 a name in the large, 2 a blank line, 3 and 4 a heading as Tekken Ball is earned or not,
- * 5 a name once Anna's third costume is) climbing a line and a half a field, each glowing in as it
- * rises from the foot of the screen and out as it reaches the top. The list's end holds the roll
+ * faded; then the staff roll, the remake's line among the blank ones it opens with: the list's
+ * lines (each led by its kind: 0 a heading in the small type, 1 a name in the large, 2 a blank
+ * line, 3 and 4 a heading as Tekken Ball is earned or not, 5 a name once Anna's third costume is)
+ * climbing a line and a half a field, each glowing in as it rises from the foot of the screen and
+ * out as it reaches the top. The list's end holds the roll
  * still: its headings glow on a while, flare up and darken, and the roll waits for the song's end,
  * then shows the namco mark, fading in and out. A button cuts it short.
  *
@@ -13,7 +14,7 @@
  */
 import type { CreditsTables } from '../data/scenes.ts';
 import type { FightData, FightState } from '../fight/state.ts';
-import { playSong, voiceLine } from '../fight/voices.ts';
+import { playSong, resetMusic, voiceLine } from '../fight/voices.ts';
 import { songStarting, syncMusic } from '../sound/music.ts';
 import type { CreditsState, GameState } from './state.ts';
 
@@ -24,6 +25,12 @@ const OPENING_SOUND = 0xc7c0;
 const SONG = 4;
 /** Anna's third costume, among the costumes earned. */
 const ANNA_THIRD = 0x40000;
+/** The remake's line, a heading in place of one of the blank lines the staff roll opens with, before the game's own staff. */
+const REMAKE = { line: 3, text: '0REMAKE IN DRIFTENGINE' } as const;
+const BLANK = '2';
+
+/** The staff list's line `k`, the remake's in its place. */
+const staffLine = (tables: CreditsTables, k: number): string | undefined => (k === REMAKE.line && tables.staff[k] === BLANK ? REMAKE.text : tables.staff[k]);
 
 const min = (a: number, b: number): number => (b < a ? b : a);
 
@@ -206,7 +213,7 @@ function staff(game: GameState, tables: CreditsTables): boolean {
   credits.cursor = credits.line;
   credits.lineY = credits.scroll;
   while (credits.lineY < 480) {
-    const text = tables.staff[credits.cursor];
+    const text = staffLine(tables, credits.cursor);
     if (text === undefined && credits.end === 0) {
       credits.end = 1;
       break;
@@ -259,7 +266,7 @@ export function stepCredits(game: GameState, data: Pick<FightData, 'sound' | 'mu
       break;
     case 2: {
       const starting = songStarting(syncMusic(world.sound, data.music));
-      if (starting === null) world.sound.commands.push({ key: 'music reset' });
+      if (starting === null) resetMusic(world);
       else if (starting) break;
       credits.state = 3;
       credits.line = 0;

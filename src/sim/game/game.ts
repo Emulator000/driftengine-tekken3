@@ -161,7 +161,10 @@ export class Game {
     return this.match;
   }
 
-  /** One field: a frame, or a field the last frame's waits still spend (only the sound's tick then). */
+  /**
+   * One field: a frame, or a field the last frame's waits still spend (only the sound's tick then),
+   * or one an ending's movie goes on through within its frame, its waits reading the pads.
+   */
   field(raw: readonly [number, number]): void {
     const game = this.state;
     const world = game.world;
@@ -170,8 +173,19 @@ export class Game {
     game.vblanks = (game.vblanks + 1) >>> 0;
     musicTick(music);
     world.frameRan = 0;
+    game.codeRan = 0;
+    if (game.theater.playing !== 0) {
+      if (game.vblanks < Math.floor(game.clock.now)) return;
+      game.codeRan = 1;
+      readPads(game, raw);
+      this.scene();
+      syncMusic(world.sound, this.data.tables.music);
+      if (game.theater.playing === 0) game.clock.next = Math.floor(game.clock.now) + 1;
+      return;
+    }
     if (game.vblanks < game.clock.next) return;
     world.frameRan = 1;
+    game.codeRan = 1;
     game.clock.now = game.vblanks;
     world.sound.stamp = game.vblanks;
     game.movie.shows.length = 0;
@@ -195,7 +209,7 @@ export class Game {
     world.attractIntro = game.scene === Scene.ATTRACT ? 1 : 0;
     this.scene();
     syncMusic(world.sound, this.data.tables.music);
-    game.clock.next = Math.floor(game.clock.now) + 1;
+    if (game.theater.playing === 0) game.clock.next = Math.floor(game.clock.now) + 1;
   }
 
   private scene(): void {

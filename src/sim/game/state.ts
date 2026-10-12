@@ -273,9 +273,13 @@ export interface GameState {
   readonly clock: { now: number; next: number };
   /** The movie player (`movie.ts`). */
   readonly movie: MovieState;
-  /** The credits after an ending, and the Theater's record: whether it is the Theater mode (1) or an ending (0), and its movie. */
+  /**
+   * The credits after an ending, and the Theater's record: whether it is the Theater mode (1) or an
+   * ending (0), its movie, and whether the movie plays on within the scene's frame (its waits
+   * reading the pads, `theater.ts`).
+   */
   readonly credits: CreditsState;
-  readonly theater: { mode: number; movie: number };
+  readonly theater: { mode: number; movie: number; playing: number };
   /** The options as set (`PowerOn`'s), each pad's key configuration, and how far Tekken Ball and the Theater are earned. */
   readonly options: {
     difficulty: number;
@@ -430,6 +434,8 @@ export interface GameState {
   };
   /** Whether the fight was drawn this field (the picture holds otherwise). */
   drewFight: number;
+  /** Set on a field the game's code ran: a frame started, or a frame went on through a movie's waits. */
+  codeRan: number;
   /** Set on a field the game saves its progress (`save.ts`), where the console writes its memory card. */
   saving: number;
   readonly run: {
@@ -535,7 +541,7 @@ export function blankGameState(): GameState {
       kind: 0,
       drawn: [],
     },
-    theater: { mode: 0, movie: 0 },
+    theater: { mode: 0, movie: 0, playing: 0 },
     options: { difficulty: 0, rounds: 0, roundTime: 0, alwaysChip: 0, continueChooses: 0, vibration: [0, 0], lastChoices: [0, 0], keepChoices: 0, modeSetting: 0, keys: [new Array<number>(8).fill(0), new Array<number>(8).fill(0)] },
     earned: { ball: 0, theater: 0 },
     menu: { items: [], count: 0, picked: 0, toOptions: 0, scroll: 0, bar: 0, chosen: 0, choosers: 0 },
@@ -636,6 +642,7 @@ export function blankGameState(): GameState {
       shows: 0,
     },
     drewFight: 0,
+    codeRan: 0,
     saving: 0,
     run: {
       challengers: 0,

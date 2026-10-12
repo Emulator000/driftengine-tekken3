@@ -17,7 +17,7 @@ import { startRoundOfGame } from '../fight/start.ts';
 import { Flow } from '../fight/flow.ts';
 import { printCall } from '../fight/hud.ts';
 import type { FightData } from '../fight/state.ts';
-import { effect, fadeMusic, playSong, stopSounds, voiceLine } from '../fight/voices.ts';
+import { effect, fadeMusic, playSong, resetMusic, stopSounds, voiceLine } from '../fight/voices.ts';
 import type { SceneTables } from '../data/scenes.ts';
 import { arcadeRound, arcadeStart, choosePlayers, chooseStage } from './arcade.ts';
 import { joinWithStart } from './join.ts';
@@ -98,7 +98,7 @@ export function matchSetup(game: GameState): MatchSetup {
   };
 }
 
-/** A soft reset: true when it ended what was playing and went back to the mode menu. */
+/** A soft reset: true when it ended what was playing and went back to the mode menu, the music's driver reset and every sound stopped. */
 export function softReset(game: GameState, data: Pick<FightData, 'sound'>): boolean {
   const world = game.world;
   if (world.mode === MenuMode.DEMO) {
@@ -108,6 +108,8 @@ export function softReset(game: GameState, data: Pick<FightData, 'sound'>): bool
     if (!asked(0) && !asked(1) && world.pauseMenu.choice !== PAUSE_RESET) return false;
   }
   world.pauseMenu.choice = 0;
+  resetMusic(world);
+  stopSounds(world, true);
   stopMotors(game);
   voiceLine(world, data, 0, START_SOUND, 0);
   goToLogo(game, Scene.MENU);

@@ -94,7 +94,7 @@ export class MoviePicture {
   /** A field of the game: the drive's reads and pauses (when they are due), the frame showing now, the video kept to it. */
   field(game: GameState): void {
     const world = game.world;
-    if (world.frameRan !== 0) this.timed.add(world.sound.commands, game.vblanks);
+    if (game.codeRan !== 0) this.timed.add(world.sound.commands, game.vblanks);
     for (const c of this.timed.due(game.vblanks)) {
       if (c.key === 'movie read') {
         this.reading?.video.pause();
@@ -108,7 +108,7 @@ export class MoviePicture {
         this.reading = null;
       }
     }
-    if (world.frameRan !== 0) this.shows = [...game.movie.shows];
+    if (game.codeRan !== 0) this.shows = [...game.movie.shows];
     for (const show of this.shows) if (show.at <= game.vblanks) this.shown = show;
     const reading = this.reading;
     if (reading === null) return;
