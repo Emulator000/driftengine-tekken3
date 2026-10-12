@@ -12,8 +12,10 @@ import type { FightData, LoadedMoveset } from '../sim/fight/state.ts';
 import { Game } from '../sim/game/game.ts';
 import { Scene } from '../sim/game/state.ts';
 import { FightStep, matchSetup } from '../sim/game/fight-scene.ts';
-import { MenuMode } from '../sim/game/menu.ts';
-import { checkSurvivalRecord, checkTimeRecord, recordStageTime } from '../sim/game/records.ts';
+import { MenuMode, startMode } from '../sim/game/menu.ts';
+import { OgreChangeShows } from '../sim/game/ogre-change.ts';
+import { applySchedule, checkSurvivalRecord, checkTimeRecord, recordStageTime } from '../sim/game/records.ts';
+import { progressOf, restoreProgress } from '../sim/game/save.ts';
 import { FightView } from '../present/3d/fight-view.ts';
 import { Hud } from '../present/hud/hud.ts';
 import { PauseScreen } from '../present/hud/pause.ts';
@@ -21,11 +23,20 @@ import { loadTypefaces } from '../present/2d/typefaces.ts';
 import { ScenePresenter } from '../present/scenes/scenes.ts';
 import { assetImage, canvas, dataUrl, json, pageRenderer, params, play, status, two } from './page.ts';
 import { drawingFiles, introFiles } from './quick.ts';
+import { readProgress, writeProgress } from './save.ts';
 import { startSound } from './sound.ts';
 import { MoviePicture } from '../present/scenes/movie.ts';
 
 /** The frames each of the ten stages takes in the time record `?record=time` sets. */
 const RECORD_STAGE_FRAMES = 30 * 60;
+/** The page's shortcuts: a page started with one never saves the progress. */
+const SHORTCUTS = ['arcade', 'ending', 'record', 'unlock'] as const;
+/** The unlock schedule's steps, its last earning everything. */
+const UNLOCK_STEPS = 14;
+/** Arcade's stages; the roster ids `?arcade` takes past Mokujin's (his draw not remade), Kazuya's with his files. */
+const ARCADE_STAGES = 10;
+const MOKUJIN = 15;
+const KAZUYA = 22;
 
 export async function playGame(): Promise<void> {
   const { renderer, backend } = await pageRenderer();
@@ -78,6 +89,38 @@ export async function playGame(): Promise<void> {
   };
 
   const game = new Game({ tables, scenes, fightData, introData });
+  /* The progress kept on this device; a page started with a shortcut reads it and never writes it. */
+  const saved = readProgress();
+  if (saved !== null) {
+    try {
+      restoreProgress(game.state, saved);
+    } catch (error) {
+      console.warn(`[tekken3 remake] the saved progress does not fit this game: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  const saves = !SHORTCUTS.some((key) => params.has(key));
+  /* `?unlock` earns everything the game unlocks: every character, the costumes, Tekken Ball and the Theater. */
+  if (params.has('unlock')) applySchedule(game.state, scenes, UNLOCK_STEPS);
+  /*
+   * `?arcade=ROSTER[,COSTUME[,STAGE]]` starts Arcade at once with that character on the first pad,
+   * at that stage (1 to 10; by default the tenth, Ogre's), as the menu and the character select
+   * leave it.
+   */
+  const arcade = params.get('arcade');
+  if (arcade !== null) {
+    const [roster = 0, costume = 0, stage = ARCADE_STAGES] = arcade.split(',').map(Number);
+    const manifest = (await json('manifest.json')) as { kazuya?: boolean };
+    const playable = Number.isInteger(roster) && 0 <= roster && roster <= (manifest.kazuya === true ? KAZUYA : KAZUYA - 1) && roster !== MOKUJIN;
+    startMode(game.state, MenuMode.ARCADE, 1);
+    const { entrants, world, run } = game.state;
+    entrants.roster[0] = playable ? roster : 0;
+    entrants.costume[0] = Number.isInteger(costume) ? costume & 3 : 0;
+    entrants.chosen[0] = 1;
+    entrants.computer[0] = 0;
+    world.match.stage = Number.isInteger(stage) ? Math.max(1, Math.min(ARCADE_STAGES, stage)) - 1 : ARCADE_STAGES - 1;
+    game.state.modeOverlay = run.overlay;
+    Object.assign(game.state, { scene: Scene.FIGHT, step: FightStep.MODE_SETUP });
+  }
   /* `?ending=ROSTER[,COSTUME]` goes straight to that character's Arcade ending (the first side the one human). */
   const ending = params.get('ending');
   if (ending !== null) {
@@ -163,6 +206,7 @@ export async function playGame(): Promise<void> {
         if (next !== null) fightData(next);
         if (game.blocked() || !drawingReady()) return false;
         game.field(pads);
+        if (saves && game.state.saving !== 0) writeProgress(progressOf(game.state));
         sound?.field(game.state.world, game.state.vblanks);
         movie.audible = sound?.running ?? false;
         movie.field(game.state);
@@ -177,7 +221,8 @@ export async function playGame(): Promise<void> {
         /* What this frame shows: the fight, the records over their stage, the attract intro, a scene's 2D; or nothing new (the picture held, drawn again only while a dissolve over it runs). */
         const records = state.scene === Scene.RECORDS && state.recordsScreen.draws !== 0 && data !== null && state.held === 0 && fightFor(data).view.prepare(state.world, true);
         const intro = introSetUp(state) && state.held === 0 && introView(state.attract.intro).prepare(state.world);
-        const shows = state.scene === Scene.FIGHT ? (state.drewFight !== 0 && data !== null ? 'fight' : null) : records ? 'records' : intro ? 'intro' : state.held === 0 ? `scene ${state.scene}` : null;
+        const change = state.scene === Scene.FIGHT && state.ogreChange.shows !== OgreChangeShows.NONE && data !== null;
+        const shows = change ? 'change' : state.scene === Scene.FIGHT ? (state.drewFight !== 0 && data !== null ? 'fight' : null) : records ? 'records' : intro ? 'intro' : state.held === 0 ? `scene ${state.scene}` : null;
         if (shows === null) {
           presenter.hold(width, height, now);
           return;
@@ -191,6 +236,12 @@ export async function playGame(): Promise<void> {
         }
         if (intro) {
           introView(state.attract.intro).render(state.world, aspect, undefined, () => presenter.render(state, width, height, true, now));
+          return;
+        }
+        /* Ogre's change: black, white, or its scene under its fades, with no HUD and no effects. */
+        if (change) {
+          if (state.ogreChange.shows !== OgreChangeShows.SCENE) presenter.render(state, width, height, false, now);
+          else fightFor(data!).view.render(state.world, aspect, undefined, () => presenter.render(state, width, height, true, now), false, { effects: false, scenery: state.ogreChange.sceneryOff === 0 });
           return;
         }
         if (state.scene !== Scene.FIGHT) {

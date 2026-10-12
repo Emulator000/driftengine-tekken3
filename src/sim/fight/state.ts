@@ -155,6 +155,9 @@ export interface ReplayFrame {
   blending: number;
   /** Each hand's model step as drawn. */
   readonly hands: number[];
+  /** True Ogre's wings' step as drawn, and half his arm's shape. */
+  wing: number;
+  arm: number;
 }
 
 /** A fighter's input: this frame's and the last 60 frames'. */
@@ -441,8 +444,12 @@ export interface Fighter {
   hurtFace: number;
   /** True Ogre's wings out: off the ground and not held. */
   wingsOut: number;
-  /** True Ogre's wings' frame and state, and his arm's shape, target and rate (not remade beyond resting). */
-  readonly trueOgre: { wingFrame: number; wingState: number; arm: number; armTarget: number; armRate: number };
+  /**
+   * True Ogre's wings: their frame in the opening (state 0) or the beating (1), the beat's first
+   * step being two, and the step drawn; his arm's shape (0 to 256, stretched), target and rate; and
+   * the frames his wings and tail have beaten (`hands.ts`, `pose.ts`).
+   */
+  readonly trueOgre: { wingFrame: number; wingState: number; wingStart: number; wingDrawn: number; arm: number; armTarget: number; armRate: number; beat: number };
   input: FighterInput;
   move: MoveRef | null;
 }
@@ -845,6 +852,8 @@ export interface FightState {
   status: number;
   /** Set in the attract mode's fights. */
   attract: number;
+  /** Set while Ogre changes into True Ogre: the stage's scenery stands at the origin, not between the fighters. */
+  sceneryAtOrigin: number;
   readonly camera: FightCamera;
   /** A camera shake playing: which of the three, and how far along its list; or none. */
   shake: { kind: number; at: number } | null;
@@ -941,6 +950,8 @@ export interface FightState {
   /** Set when this frame's pose is the frame's own, not a replay's step. */
   liveFrame: number;
   skipBlend: number;
+  /** Set while Ogre's change poses a side: a move's bit that lets the eyes open (with its state's that shuts them) is not read. */
+  posingChange: number;
   /** Frames during which moves cut without blending. */
   noBlendFrames: number;
   nothingDrawn: number;
@@ -1052,10 +1063,14 @@ export interface FightState {
     humanSide: number;
     computerSide: number;
     streakSide: number;
-    /** The arcade's stage, whether a human lost the arcade's match, whether the continue was offered (and is being asked), the frames fought this stage and the run's before it. */
+    /**
+     * The arcade's stage, whether a human lost the arcade's match, whether Ogre has changed into
+     * True Ogre this run, whether the continue is being asked, the frames fought this stage and
+     * the run's before it.
+     */
     stage: number;
     humanLost: number;
-    continueOffered: number;
+    ogreChanged: number;
     continuing: number;
     fightFrames: number;
     totalTime: number;

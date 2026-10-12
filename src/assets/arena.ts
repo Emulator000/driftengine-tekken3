@@ -4,9 +4,10 @@
  * its depth past the fighters, each stage's height, the scenery grid's cell order, and per stage
  * its ground's kind and shade strength and its scenery's cell size (null for a stage not extracted).
  */
-import { expectArray, expectInts, expectObject } from './validate.ts';
+import { AssetError, expectArray, expectInts, expectObject } from './validate.ts';
 
 export interface StageLayout {
+  /** How its floor is shaded: 0 by depth (by the shade strength), 1 lit at each fighter's feet, 2 lit over their midpoint. */
   readonly groundKind: number;
   readonly shadeStrength: number;
   readonly cellSize: number;
@@ -39,6 +40,7 @@ export function parseArenaTables(json: unknown, where = 'tables/arena.json'): Ar
       const stage = expectObject(s, `${where} stages[${i}]`);
       const [groundKind, shadeStrength] = expectInts([stage.groundKind, stage.shadeStrength], `${where} stages[${i}]`, 2, (n) => new Int16Array(n), -0x8000, 0x7fff);
       const [cellSize] = expectInts([stage.cellSize], `${where} stages[${i}].cellSize`, 1, (n) => new Int32Array(n), 1, 0x7fffffff);
+      if (!(groundKind! >= 0 && groundKind! <= 2)) throw new AssetError(`${where} stages[${i}].groundKind`, `is ${groundKind}, not a floor shaded by depth (0) or lit (1, 2)`);
       return { groundKind: groundKind!, shadeStrength: shadeStrength!, cellSize: cellSize! };
     }),
   };

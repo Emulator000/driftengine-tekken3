@@ -25,7 +25,7 @@ import { goToLogo, goToScene, holdPicture, queueFile, startPressed } from './log
 import { MenuMode, stopMotors } from './menu.ts';
 import { NameResult, NameStep, startNameEntry, stepNameEntry } from './name-entry.ts';
 import { print } from './printer.ts';
-import { earn, HIDDEN, Naming, playCount, recordsChanged, sortPairs } from './records.ts';
+import { earn, HIDDEN, Naming, playCount, recordsChanged, saveRecords, sortPairs } from './records.ts';
 import { fade } from './title.ts';
 import { Scene, type GameState } from './state.ts';
 
@@ -357,7 +357,7 @@ export function recordsLoaderScene(game: GameState, tables: FightTables, scenes:
     case 1:
       stopSounds(game.world, false);
       stopMotors(game);
-      if (game.records.naming === 0) game.records.changed = 0;
+      if (game.records.naming === 0) saveRecords(game);
       queueFile(game);
       goToScene(game, Scene.RECORDS_LOADER, 2);
       return;

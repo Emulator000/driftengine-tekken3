@@ -65,11 +65,11 @@ function shapeGroups(model, parts) {
     if (!part.drawn) continue;
     const records = [part.record, ...(part.secondary ? [part.record + 1] : [])]
       .map((r) => model.records[r])
-      .filter((record) => record?.shapes && record.shapes.rejected.length === 0 && record.shapes.blocks.size > 0);
+      .filter((record) => record?.shapes && record.shapes.steps.some((block) => block !== null));
     if (records.length === 0) continue;
     const length = Math.max(...records.map((r) => r.shapes.table.length));
     /* Per step, the block each record draws, or null where its table keeps the one drawn. */
-    const chosen = Array.from({ length }, (_, step) => records.map((r) => (r.shapes.table[step] ? r.shapes.blocks.get(r.shapes.table[step]) : null)));
+    const chosen = Array.from({ length }, (_, step) => records.map((r) => r.shapes.steps[step] ?? null));
     const ids = new Map();
     const idOf = (block) => {
       if (!ids.has(block)) ids.set(block, ids.size);
@@ -137,10 +137,11 @@ function texelsDiffer(open, shut, uvs) {
 
 /**
  * The fighter's mesh, skeleton and atlas. `eyes`, where the costume has closed eyes, says where
- * they are copied over its face (`withPicture`).
+ * they are copied over its face (`withPicture`); `shapesFrom`, where one record's shapes lie
+ * outside the model (`parseModel`).
  */
-export function exportFighter(modelBytes, archiveMembers, parts, parseModel, encodePng, { eyes = null } = {}) {
-  const model = parseModel(modelBytes);
+export function exportFighter(modelBytes, archiveMembers, parts, parseModel, encodePng, { eyes = null, shapesFrom = null } = {}) {
+  const model = parseModel(modelBytes, { shapesFrom });
   const resolved = resolveFighter(model, parts);
   if (resolved.problems.length) throw new Error(`the model does not resolve: ${resolved.problems[0]}`);
   const groups = shapeGroups(model, parts);

@@ -34,13 +34,16 @@ const HAND_SPEED = 10;
 /** The replay's start before anything to replay. */
 const NO_KNOCKOUT = -2;
 
-/** A fighter at the round's start on its side of the arena, facing the other, its state cleared and its health full. */
-export function resetFighter(state: FightState, data: FightData, f: Fighter, opponent: Fighter): void {
+/**
+ * A fighter at the round's start on its side of the arena, facing the other (or, not `fresh`,
+ * where it stands and as it faces), its state cleared and its health full.
+ */
+export function resetFighter(state: FightState, data: FightData, f: Fighter, opponent: Fighter, fresh = true): void {
   const side = (f.slot << 24) >> 24;
   f.opponent = opponent.slot;
-  const x = side === 0 ? -START_X : START_X;
-  const z = 0;
-  const facing = side === 0 ? 0x4000 : -0x4000;
+  const x = fresh ? (side === 0 ? -START_X : START_X) : f.position[0]!;
+  const z = fresh ? 0 : f.position[2]!;
+  const facing = fresh ? (side === 0 ? 0x4000 : -0x4000) : f.facing;
   f.targetDz = FAR;
   f.targetDx = FAR;
   f.targetDistance = FAR;

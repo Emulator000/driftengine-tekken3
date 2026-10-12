@@ -1,6 +1,6 @@
 /** The skeleton's tables (`tables/skeleton.json`), validated. */
 import type { SkeletonTables, Spring, SpringAim } from '../sim/data/skeleton.ts';
-import { expectArray, expectBoolean, expectInt, expectInts, expectObject } from './validate.ts';
+import { AssetError, expectArray, expectBoolean, expectInt, expectInts, expectObject } from './validate.ts';
 
 /** The game's model packs, which the springs table has a row for. */
 const SPRING_PACKS = 0x34;
@@ -53,6 +53,15 @@ export function parseSkeletonTables(json: unknown, where = 'tables/skeleton.json
     return [vector(list[0], `${where} offsets.${key}[0]`), vector(list[1], `${where} offsets.${key}[1]`)];
   };
   const hands = expectObject(o.hands, `${where} hands`);
+  const wings = expectObject(o.wings, `${where} wings`);
+  /** A wing table: steps of the wings' model (41 of them), ending in two -1s and holding none before. */
+  const wingFrames = (key: string): Int8Array => {
+    const at = `${where} wings.${key}`;
+    const frames = expectInts(wings[key], at, undefined, (n) => new Int8Array(n), -1, 40);
+    const end = frames.indexOf(-1);
+    if (end < 1 || end !== frames.length - 2 || frames[end + 1] !== -1) throw new AssetError(at, 'is not a run of steps ending in two -1s');
+    return frames;
+  };
   return {
     eulerJoints: expectInts(o.eulerJoints, `${where} eulerJoints`, 10, (n) => new Uint8Array(n), 0, 21),
     fixup: [...expectInts(o.fixup, `${where} fixup`, 9, (n) => new Int16Array(n), -0x8000, 0x7fff)],
@@ -76,5 +85,6 @@ export function parseSkeletonTables(json: unknown, where = 'tables/skeleton.json
       fists: expectInts(hands.fists, `${where} hands.fists`, 0x37, (n) => new Uint8Array(n), 0, 7),
       open: expectInts(hands.open, `${where} hands.open`, 0x37, (n) => new Uint8Array(n), 0, 0xff),
     },
+    wings: { opening: wingFrames('opening'), beating: wingFrames('beating') },
   };
 }

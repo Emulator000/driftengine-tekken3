@@ -81,29 +81,29 @@ function vertexBlock(bytes, offset, withStitch) {
 
 /**
  * A hand's shapes: a table of offsets indexed by the hand's state, each to a whole vertex block
- * (the game points the record's vertices at one of them). Most entries repeat the first.
- * The table runs to `end`, the next block any record names; each distinct block is decoded once.
+ * (the game points the record's vertices at one of them), or 0 to keep the block drawn. Most
+ * entries repeat the first. The table runs to `end`, the next block any record names; each
+ * distinct block is decoded once. With `from` (`{ bytes, base }`) every entry past the first lies
+ * in those bytes from `base` instead of in the model.
  */
-function shapeBlocks(bytes, offset, end) {
+function shapeBlocks(bytes, offset, end, from = null) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const table = [];
   for (let at = offset; at + 4 <= end; at += 4) table.push(view.getUint32(at, true));
-  const blocks = new Map();
-  /*
-   * Entries that are not vertex blocks are kept out and listed: one character's model has a table
-   * here of another kind (a run of 0x2a4-byte steps from zero), not yet decoded.
-   */
-  const rejected = [];
-  for (const target of table) {
-    if (blocks.has(target) || rejected.includes(target)) continue;
-    try {
-      if (target < 16 || target >= bytes.length) throw new Error('outside the model');
-      blocks.set(target, vertexBlock(bytes, target, true));
-    } catch {
-      rejected.push(target);
+  const decoded = new Map();
+  const blockAt = (source, start, key) => {
+    if (!decoded.has(key)) {
+      if (start < 16 || start >= source.length) throw new Error(`a hand shape at 0x${start.toString(16)} lies outside its bytes`);
+      decoded.set(key, vertexBlock(source, start, true));
     }
-  }
-  return { table, blocks, rejected };
+    return decoded.get(key);
+  };
+  /* Per entry, the block it draws, or null where it keeps the one drawn. */
+  const steps = table.map((entry, k) => {
+    if (entry === 0) return null;
+    return from !== null && k > 0 ? blockAt(from.bytes, from.base + entry, `from ${entry}`) : blockAt(bytes, entry, `model ${entry}`);
+  });
+  return { table, steps };
 }
 
 /** The normal block: copy-in lists, the normals, then where each lit colour is published. */
@@ -197,8 +197,11 @@ function textureBlock(bytes, offset) {
   return { ft3: read(3), ft4: read(4), gt3: read(3), gt4: read(4) };
 }
 
-/** A model: its records, each with its blocks decoded. */
-export function parseModel(bytes) {
+/**
+ * A model: its records, each with its blocks decoded. `shapesFrom` (`{ record, bytes, base }`)
+ * says where one record's hand shapes past the first lie, outside the model.
+ */
+export function parseModel(bytes, { shapesFrom = null } = {}) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (String.fromCharCode(...bytes.subarray(8, 12)) !== '3DMK') throw new Error('not a 3DMK model');
   const count = view.getUint32(0, true);
@@ -222,7 +225,7 @@ export function parseModel(bytes) {
     records.push({
       index: i,
       vertices: vertexBlock(bytes, word(0), true),
-      shapes: word(1) ? shapeBlocks(bytes, word(1), nextBlock(word(1))) : null,
+      shapes: word(1) ? shapeBlocks(bytes, word(1), nextBlock(word(1)), shapesFrom?.record === i ? shapesFrom : null) : null,
       normals: word(2) ? normalBlock(bytes, word(2)) : null,
       polygons: word(3) ? polygonBlock(bytes, word(3)) : null,
       texture: word(4) ? textureBlock(bytes, word(4)) : null,

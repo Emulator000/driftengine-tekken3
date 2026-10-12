@@ -5,6 +5,8 @@
  * screen, the match set up and a second's wait; each round the picture held a field and let go and
  * the round set up; then a frame a field until the round's end, the next round or the mode's
  * result: Arcade's next opponent, a continue ("CONTINUE?" counting down), game over, the ending.
+ * In Arcade's last stage, the first round won against Ogre ends with him changing into True Ogre
+ * (start skips it), and the match goes on against True Ogre, the rounds won kept.
  * A second player's start brings a challenger. Start, select and both shoulders held on a pad (or
  * the pause menu's reset; in the attract demo, start) end what is playing and go back to the menu.
  */
@@ -12,6 +14,7 @@ import { fightFrame } from '../fight/fight.ts';
 import type { FightTables, MatchSetup } from '../fight/match.ts';
 import { startMatch } from '../fight/match.ts';
 import { startRoundOfGame } from '../fight/start.ts';
+import { Flow } from '../fight/flow.ts';
 import { printCall } from '../fight/hud.ts';
 import type { FightData } from '../fight/state.ts';
 import { effect, fadeMusic, playSong, stopSounds, voiceLine } from '../fight/voices.ts';
@@ -20,6 +23,7 @@ import { arcadeRound, arcadeStart, choosePlayers, chooseStage } from './arcade.t
 import { joinWithStart } from './join.ts';
 import { goToLogo, goToScene, holdPicture, queueFile, START_SOUND, startPressed } from './logo.ts';
 import { MenuMode, stopMotors } from './menu.ts';
+import { startOgreChange, stepOgreChange } from './ogre-change.ts';
 import { addStreakWin, countArcadePlay, countVersusResult, earnOnDefeat, recordEnding, recordStageTime, setStreakSide } from './records.ts';
 import { Scene, type GameState } from './state.ts';
 
@@ -48,10 +52,19 @@ export const FightStep = {
   GAME_OVER_SHOWN: 0xc,
   CHALLENGER: 0xd,
   CHALLENGER_SHOWN: 0xe,
+  OGRE_CHANGE: 0xf,
+  OGRE_CHANGE_START: 0x10,
+  OGRE_CHANGING: 0x11,
+  OGRE_CHANGED: 0x12,
+  TRUE_OGRE_SHOWN: 0x13,
+  TRUE_OGRE: 0x14,
   DEMO_OVER: 0x18,
 } as const;
-/** The states of other modes' results and replays, not remade. */
-const RESULTS = { first: 0xf, last: 0x17 } as const;
+/** The pause menu's quit and its states, not remade. */
+const QUITTING = { first: 0x15, last: 0x17 } as const;
+/** Arcade's last opponent, Ogre, who changes into True Ogre. */
+const LAST_OPPONENT = 9;
+const TRUE_OGRE = 0x14;
 /** Fields the match's load waits after the versus screen began. */
 const LOAD_WAIT = 0x3b;
 /** Fields into a round before a challenger may join. */
@@ -237,7 +250,12 @@ function fighting(game: GameState, data: FightSceneData): void {
   }
   if (flow === 7) throw new Error("the pause menu's quit is not remade");
   if (flow < 9) return;
-  if (flow === 10 || flow === 0xb) throw new Error(`the round flow's step ${flow} is not remade`);
+  if (flow === Flow.TRUE_OGRE) {
+    holdPicture(game, 1);
+    game.step = mode !== MenuMode.TIME_ATTACK ? FightStep.OGRE_CHANGE : FightStep.TRUE_OGRE_SHOWN;
+    return;
+  }
+  if (flow === 0xb) throw new Error(`the round flow's step ${flow} is not remade`);
   if (mode === MenuMode.PRACTICE) throw new Error("practice's end is not remade");
   if (world.match.winner === 0) {
     game.step = FightStep.HOLD;
@@ -246,6 +264,33 @@ function fighting(game: GameState, data: FightSceneData): void {
   if (mode === MenuMode.ARCADE) arcadeResult(game, data.scenes);
   else if (mode === MenuMode.DEMO) game.step = FightStep.DEMO_OVER;
   else throw new Error(`mode ${mode}'s result is not remade`);
+}
+
+/**
+ * The match against True Ogre, set up in Ogre's place: Arcade's last opponent made True Ogre, put
+ * on the computer's side, his stage chosen and the match loaded with no versus screen, the round
+ * and both sides' wins kept (unless a match is a round).
+ */
+function trueOgreMatch(game: GameState, data: FightSceneData): void {
+  const world = game.world;
+  game.run.opponents[LAST_OPPONENT]!.roster = TRUE_OGRE;
+  world.match.winner = 0;
+  world.match.winnerSide = 0;
+  world.match.loserSide = 0;
+  world.sceneryAtOrigin = 0;
+  arcadeRound(game);
+  chooseStage(game, data.tables);
+  if (world.round.last < 2) {
+    world.round.number = 0;
+    world.fighters[0].wins = 0;
+    world.fighters[1].wins = 0;
+  }
+  const [round, first, second] = [world.round.number, world.fighters[0].wins, world.fighters[1].wins];
+  const setup = matchSetup(game);
+  startMatch(world, data.load(setup), setup);
+  world.round.number = round;
+  world.fighters[0].wins = first;
+  world.fighters[1].wins = second;
 }
 
 /** The fight scene's step in its state; some states go straight on to the next in the same field. */
@@ -370,6 +415,29 @@ function step(game: GameState, data: FightSceneData): void {
       if (game.count < CHALLENGER.frames) return;
       return challengerArrived(game);
     }
+    case FightStep.OGRE_CHANGE:
+      holdPicture(game, 0);
+      game.step = FightStep.OGRE_CHANGE_START;
+      return;
+    case FightStep.OGRE_CHANGE_START:
+      startOgreChange(game, data.match!);
+      game.step = FightStep.OGRE_CHANGING;
+      return;
+    case FightStep.OGRE_CHANGING:
+      if (stepOgreChange(game, data.match!, data.scenes) || (world.input.fresh[world.match.humanSide]! & START) !== 0) game.step = FightStep.OGRE_CHANGED;
+      return;
+    case FightStep.OGRE_CHANGED:
+      holdPicture(game, 1);
+      game.step = FightStep.TRUE_OGRE_SHOWN;
+      return;
+    case FightStep.TRUE_OGRE_SHOWN:
+      holdPicture(game, 0);
+      game.step = FightStep.TRUE_OGRE;
+      return;
+    case FightStep.TRUE_OGRE:
+      trueOgreMatch(game, data);
+      game.step = FightStep.HOLD;
+      return;
     case FightStep.DEMO_OVER:
       stopSounds(world, false);
       stopMotors(game);
@@ -377,7 +445,7 @@ function step(game: GameState, data: FightSceneData): void {
       else goToLogo(game, Scene.TITLE);
       return;
     default:
-      if (RESULTS.first <= game.step && game.step <= RESULTS.last) throw new Error(`the fight scene's state 0x${game.step.toString(16)} (results and replays of other modes) is not remade`);
+      if (QUITTING.first <= game.step && game.step <= QUITTING.last) throw new Error(`the fight scene's state 0x${game.step.toString(16)} (the pause menu's quit) is not remade`);
       /* Quitting from the pause menu: back to the mode menu. */
       stopSounds(world, true);
       voiceLine(world, data.tables, 0, START_SOUND, 0);

@@ -197,11 +197,12 @@ field. What is done and what is not yet:
 | Power-on: the logo, the opening movie, the title | Done | |
 | The attract cycle: the in-engine intros, the demo fights, the other movie | Done | |
 | The mode menu | Done | Only Arcade starts a game yet |
-| The character select | Done | Kazuya in a cell of his own when his files are built |
+| The character select | Done | Both its layouts: one row, and two once more characters are earned (`?unlock` earns them all); Kazuya in a cell of his own when his files are built |
 | The versus screen | Done | |
-| Arcade: its ten opponents, the continue, game over | Done | |
+| Arcade: its ten opponents, Ogre's change into True Ogre, the continue, game over | Done | `?arcade=ROSTER` starts it at Ogre's stage |
 | The endings: each character's movie and captions, the credits | Done | |
 | The records screens and the name entry | Done | A new record's name comes from Time Attack and Survival, not yet in; `?record` enters one |
+| The progress kept between plays: characters and costumes earned, the unlocks, the plays, the records, the options | Done | Saved on your device where the console saves to its memory card |
 | A quick match without the menus (`?quick`) | Done | |
 | **The modes** | | |
 | Versus (two players) | Not yet | |
@@ -217,11 +218,12 @@ field. What is done and what is not yet:
 | Input, moves, throws, hits, the camera, the rounds, the replay | Done | The original's on every field, checked against it frame by frame |
 | The computer opponent | Done | |
 | The HUD, the round calls, the pause menu and the command lists | Done | |
-| The fighters | Partly | Every fighter but Mokujin and True Ogre |
+| The fighters | Partly | Every fighter but Mokujin |
 | Hit sparks, dust, bursts, the charged glow, breath and fire | Done | |
 | Hair and accessories swinging | Done | On the original's springs, checked against it frame by frame |
 | Hands opening and clenching, eyes blinking | Done | Each hand's shapes from the model, rounded alike; the costume's closed eyes over its face. Gon's face colours not yet |
 | **The picture and the sound** | | |
+| The stages' floors, shaded by depth or lit around the fighters | Done | |
 | The fighters rounded into curved surfaces | Done | `?models=psx` draws the console's meshes, as an entry-level phone does |
 | The textures enlarged and smoothed | Done | `?textures=psx` draws the originals |
 | The 2D (HUD, calls, menus) drawn at the display's resolution | Done | |

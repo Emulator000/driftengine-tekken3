@@ -7,26 +7,47 @@
  *
  * Each accessory swings on its spring as its joint is placed (`accessories.ts`).
  *
+ * True Ogre's joints 5, 6, 18 and 19 are each placed by another's local (18's, 5's, 19's and 6's),
+ * turned to a beat a quarter turn apart from the next: a beat that moves on each frame, sways as
+ * much as joint 6 stands high (to 512 mm), and leans as his elbow bends; his arm's stretch
+ * (`hands.ts`) quiets the beat and lengthens them, and shortens the last.
+ *
  * The rest of the original's pose is drawing only: the light matrix, the back colour, the stage's
  * light; the presentation makes those. Not remade, as in the current port: the head turning to the
  * opponent.
  */
-import { s16, s8 } from '../math/integers.ts';
+import { angle4096, sine } from '../math/angles.ts';
+import { div, s16, s8 } from '../math/integers.ts';
 import { copyMatrix, multiply, type Matrix } from '../math/matrix.ts';
 import { projectPoint } from '../math/projection.ts';
 import { tableRoot } from '../math/roots.ts';
 import { FIRST_ACCESSORY, swingAccessory } from './accessories.ts';
-import { blink, stepHands } from './hands.ts';
+import { blink, stepHands, trueOgreArm } from './hands.ts';
 import { sampleMotion } from './motion.ts';
 import { motionOf, moveAt, moveById, sameMove } from './moves.ts';
 import { recordMove, replayAngles, replayMove, replayRoot } from './replay.ts';
-import { blendLocals, cosineOf, localRotations, placeJoint, rootRotation, sineOf } from './skeleton.ts';
+import { blendLocals, cosineOf, eulerRotation, localRotations, placeJoint, rootRotation, sineOf } from './skeleton.ts';
 import { Mode, type FightData, type FightState, type Fighter } from './state.ts';
 
 /** The joint the hips are; the screen's x of its origin is where the fighter stands on screen. */
 const HIPS = 11;
-/** True Ogre's roster id; his skeleton has wings of its own, not remade. */
+/** True Ogre's roster id: his skeleton beats. */
 const TRUE_OGRE = 0x14;
+/** His joints that beat: the local each is placed by, and its phase in quarter turns. */
+const BEATING: ReadonlyMap<number, readonly [number, number]> = new Map([
+  [5, [0x12, 0]],
+  [6, [5, 1]],
+  [0x12, [0x13, 2]],
+  [0x13, [6, 3]],
+]);
+/** The first of them, where the beat moves on; the one his arm's stretch shortens; the one whose height sways it. */
+const FIRST_BEATING = 5;
+const SHORTENED = 0x13;
+const SWAYING = 6;
+/** The most the beat sways; his arm stretched; a quarter turn in 4096ths. */
+const FULL_SWAY = 0x100;
+const STRETCHED = 0x100;
+const QUARTER = 0x400;
 /** Blend kinds: none, out of the last move, toward the next, toward the move that follows. */
 export const Blend = { NONE: 0, OUT: 1, NEXT: 2, FOLLOWER: 3 } as const;
 
@@ -353,6 +374,50 @@ function placeRoot(state: FightState, data: FightData, f: Fighter, startReplayCa
   replayRoot(state, f, startReplayCamera);
 }
 
+/** True Ogre's beat as its first joint sets it each frame: where in the sine its turns about y and z are, and how far it sways. */
+interface Beat {
+  y: number;
+  z: number;
+  sway: number;
+}
+
+/**
+ * The local a joint of True Ogre's is placed by: its own, or for a beating joint another's, which
+ * (unless the game is paused) is turned to the beat (its phase on, quieter as his arm stretches,
+ * leaning by `lean`) and lengthened as his arm stretches: along its bone by a quarter of the
+ * stretch, across it by an eighth; the shortened one shorter along it by the quarter.
+ */
+function trueOgreLocal(state: FightState, data: FightData, f: Fighter, j: number, lean: number, beat: Beat | null): { local: Matrix; beat: Beat | null } {
+  const sk = f.skeleton;
+  const beating = BEATING.get(j);
+  if (beating === undefined) return { local: sk.locals[j]!, beat };
+  const [from, phase] = beating;
+  const running = state.pause.requested === 0 && state.pause.paused === 0;
+  if (j === FIRST_BEATING) {
+    if (running) f.trueOgre.beat = s16(f.trueOgre.beat + 1);
+    const sway = div(-sk.joints[SWAYING]!.world.translation[1]!, 2);
+    beat = { y: (f.trueOgre.beat & 0x7f) << 5, z: (f.trueOgre.beat & 0x3f) << 6, sway: Math.max(0, Math.min(FULL_SWAY, sway)) };
+  }
+  const local = sk.locals[from]!;
+  if (!running) return { local, beat };
+  if (beat === null) throw new Error(`True Ogre's joint ${j} beats before joint ${FIRST_BEATING} set the beat`);
+  const arm = trueOgreArm(state, f);
+  const swing = div(beat.sway * (STRETCHED - arm), 0x100);
+  const y = s16(div(sine(data.math, beat.y + phase * QUARTER) * swing, 0x200));
+  const z = s16(div(sine(data.math, beat.z + phase * QUARTER) * swing, 0x100) + lean);
+  const m = local.rotation;
+  eulerRotation(data.math, 0, y, z, m);
+  const across = div(arm, 8) + 0x100;
+  let along = div(arm, 4) + 0x100;
+  if (j === SHORTENED) along = 0x200 - along;
+  for (const row of [0, 3, 6]) {
+    m[row] = s16(div(m[row]! * along, 0x100));
+    m[row + 1] = s16(div(m[row + 1]! * across, 0x100));
+    m[row + 2] = s16(div(m[row + 2]! * across, 0x100));
+  }
+  return { local, beat };
+}
+
 /** Every joint's world and camera-space matrix; while the game runs, the locals from this frame's channels, blended while a blend runs. */
 function buildSkeleton(state: FightState, data: FightData, f: Fighter): void {
   const sk = f.skeleton;
@@ -362,7 +427,11 @@ function buildSkeleton(state: FightState, data: FightData, f: Fighter): void {
     if (f.blend.kind !== Blend.NONE) blendLocals(data.skeleton, sk.locals, sk.deltas, f.blend.weight);
     for (let j = 1; j < 0x12; j += 1) copyMatrix(sk.locals[j]!, sk.blended[j - 1]!);
   }
-  if (f.roster === TRUE_OGRE) throw new Error("True Ogre's skeleton is not remade");
+  const trueOgre = f.roster === TRUE_OGRE;
+  /* His beat leans as his forearm turns: the angle of its local's first row. */
+  const elbow = sk.locals[FIRST_BEATING]!.rotation;
+  const lean = trueOgre ? s16(angle4096(elbow[0]!, elbow[1]!, data.math) * -4) : 0;
+  let beat: Beat | null = null;
   f.trailCount = 0;
   for (let j = 0; j < 0x16; j += 1) {
     if (f.parts[j]!.hung === 0) continue;
@@ -370,7 +439,9 @@ function buildSkeleton(state: FightState, data: FightData, f: Fighter): void {
     if (joint.parent === null) throw new Error(`joint ${j} hangs on no parent`);
     const parent = joint.parent < 0 ? sk.root : sk.joints[joint.parent]!.world;
     if (j >= FIRST_ACCESSORY) swingAccessory(state, data, f, j, parent);
-    placeJoint(parent, sk.locals[j]!, state.skeletonCamera, joint.world, joint.view);
+    let local = sk.locals[j]!;
+    if (trueOgre) ({ local, beat } = trueOgreLocal(state, data, f, j, lean, beat));
+    placeJoint(parent, local, state.skeletonCamera, joint.world, joint.view);
   }
 }
 
@@ -402,7 +473,7 @@ function poseMove(state: FightState, data: FightData, f: Fighter, startReplayCam
   state.skipBlend = 0;
   recordMove(state, f);
   placeRoot(state, data, f, startReplayCamera);
-  stepHands(state, f);
+  stepHands(state, data, f);
   if (state.attractIntro === 0) blink(state, data, f);
   buildSkeleton(state, data, f);
   if (state.nothingDrawn === 0) projectHips(state, data, f);

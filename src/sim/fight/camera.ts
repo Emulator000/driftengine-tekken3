@@ -1723,14 +1723,17 @@ export function introCamera(state: FightState, data: FightData, kind: number, si
   return progress;
 }
 
-/** The intro's camera set up: the camera reset, the attract shots and slots started over, the intro's first script set started. */
-export function startIntroCamera(state: FightState, data: FightData): void {
+/**
+ * The intro's camera set up: the camera reset, the attract shots and slots started over, a script
+ * set started (`kind` 1 the intro's first, 2 Ogre's change's).
+ */
+export function startIntroCamera(state: FightState, data: FightData, kind = 1): void {
   const c: Camera = { state, data };
   const [a, b] = state.fighters;
   resetCamera(c);
   startAttract(c, a, b);
   resetSlots(c, a, b);
-  introCamera(state, data, 1);
+  introCamera(state, data, kind);
 }
 
 /* ---- The frame. ---- */

@@ -6,7 +6,9 @@
  * part's joint (0x8001a074, 22 bytes), its record in the model (0x8001a05c) and whether it is drawn
  * (0x8001a08c, halfwords, below zero not), and by model pack the hands' fist and open shapes
  * (0x80095950 and 0x80095984, 55 bytes each; the first runs three bytes into the second) and which
- * of its four accessories are drawn (0x80095e10, six bytes a pack).
+ * of its four accessories are drawn (0x80095e10, six bytes a pack); and True Ogre's wings' frames,
+ * the steps of their model while they open (0x80095888) and while they beat (0x8009589c), each
+ * table's end two bytes of -1 (a frame steps one or two).
  *
  * And by model pack each accessory's spring: six pointers a pack (0x8009623c, the game's 0x34
  * packs), 0x80095f48 the spring that is none. A spring is shorts: +0 the row of the axes table
@@ -31,6 +33,8 @@ const PART_DRAWN = 0x8001a08c;
 const ACCESSORIES_DRAWN = 0x80095e10;
 const FISTS = 0x80095950;
 const OPEN_HANDS = 0x80095984;
+const WINGS_OPENING = 0x80095888;
+const WINGS_BEATING = 0x8009589c;
 const PACKS = 0x37;
 const SPRINGS = 0x8009623c;
 const SPRING_PACKS = 0x34;
@@ -89,6 +93,21 @@ function springs(exe) {
   );
 }
 
+/** A table of signed bytes up to its end, two bytes of -1, included. */
+function wingFrames(exe, address) {
+  const frames = [];
+  while (frames.length < 0x40) {
+    const frame = (exe.u8(address + frames.length) << 24) >> 24;
+    frames.push(frame);
+    if (frame === -1) {
+      if ((exe.u8(address + frames.length) << 24) >> 24 !== -1) throw new Error(`the wings' frames at 0x${address.toString(16)} end in one -1`);
+      frames.push(-1);
+      return frames;
+    }
+  }
+  throw new Error(`the wings' frames at 0x${address.toString(16)} have no end`);
+}
+
 export function skeletonTables(exe) {
   const vector = (k) => [0, 1, 2].map((i) => exe.u32(OFFSETS + k * 12 + i * 4) | 0);
   const halves = (address, count) => Array.from({ length: count }, (_, i) => exe.s16(address + i * 2));
@@ -107,5 +126,6 @@ export function skeletonTables(exe) {
       fists: Array.from({ length: PACKS }, (_, i) => exe.u8(FISTS + i)),
       open: Array.from({ length: PACKS }, (_, i) => exe.u8(OPEN_HANDS + i)),
     },
+    wings: { opening: wingFrames(exe, WINGS_OPENING), beating: wingFrames(exe, WINGS_BEATING) },
   };
 }

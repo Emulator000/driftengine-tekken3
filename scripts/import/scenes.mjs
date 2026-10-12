@@ -82,6 +82,26 @@ function versusTables(exe, root) {
 }
 
 /**
+ * Ogre's change into True Ogre, from the Arcade mode's overlay (BNS 5): its two scripts, by the
+ * human's side (`0x800b0728` the first, `0x800b075c` the second; events of five halfwords, the
+ * frame, what, and its arguments, up to the one that ends it).
+ */
+function ogreChangeTables(root) {
+  const overlay = new Uint8Array(readFileSync(path.join(root, 'public/data/bns/005.bin')));
+  const view = new DataView(overlay.buffer, overlay.byteOffset, overlay.byteLength);
+  const script = (address) => {
+    const events = [];
+    for (let at = address - MODE_OVERLAY; events.length < 16; at += 10) {
+      const event = Array.from({ length: 5 }, (_, j) => view.getInt16(at + j * 2, true));
+      events.push(event);
+      if (event[1] === -1) return events;
+    }
+    throw new Error(`Ogre's change's script at 0x${address.toString(16)} has no end`);
+  };
+  return { scripts: [script(0x800b0728), script(0x800b075c)] };
+}
+
+/**
  * The records screen's overlay (BNS 11, also loaded at `0x800b8d58`): the stages it never circles
  * (`0x800cb868`), the ranks' endings (`0x800cb828`), each ranking's row colours (`0x800cb838`
  * five a row, `0x800cb844` four, `0x800cb84c` three; plain then highlighted) and each character's
@@ -264,6 +284,7 @@ export function sceneTables(exe, root) {
     records: recordsTables(root),
     /** The attract demo's characters (`0x800e2a74` in the title's overlay; the attract overlay has the same). */
     intros: introTables(root),
+    ogreChange: ogreChangeTables(root),
     demoFighters: Array.from(overlay.subarray(0x800e2a74 - TITLE_OVERLAY, 0x800e2a74 - TITLE_OVERLAY + 14)),
     movies: moviesTable(root),
     credits: creditsTable(root),

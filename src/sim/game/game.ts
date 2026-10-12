@@ -18,6 +18,7 @@ import { bootScene, loaderScene, logoScene } from './logo.ts';
 import { titleScene } from './title.ts';
 import { menuScene, modeScene } from './menu.ts';
 import { FightStep, fightScene, matchSetup } from './fight-scene.ts';
+import { OgreChangeShows } from './ogre-change.ts';
 import { goToScene, holdPicture, queueFile } from './logo.ts';
 import { stopMotors } from './menu.ts';
 import { versusScene } from './versus.ts';
@@ -187,6 +188,8 @@ export class Game {
     world.pauseMenu.drawn = 0;
     game.printed.length = 0;
     game.fades.length = 0;
+    game.ogreChange.shows = OgreChangeShows.NONE;
+    game.saving = 0;
     game.logo.shows = 3;
     /* The attract intro's own ways (its sparks, no blinking) hold while its scene plays. */
     world.attractIntro = game.scene === Scene.ATTRACT ? 1 : 0;

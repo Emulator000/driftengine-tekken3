@@ -5,13 +5,18 @@
  * keeps; of its 6 × 6 cells only those the view can see past the fighters are drawn. The ground is
  * a 10 × 10 patch of 1800 mm tiles snapped around the fighters (or, under a high camera, where the
  * view's lower edge meets the floor), its tiles taken from the stage's map by position, each corner
- * shaded darker with its depth past the fighters. A view wider than the game's 4:3 widens the
- * culling and lays extra rings of tiles, continuing the map as it repeats.
+ * shaded darker with its depth past the fighters. Some stages light their floor instead: a light
+ * at each fighter's feet, or one over their midpoint, brightest within a couple of metres and
+ * fading by the square of the distance, so the floor sinks into the dark beyond the patch, which
+ * is then always laid round the fighters' midpoint; with True Ogre in the match a floor shaded by
+ * depth takes the midpoint's light. A view wider than the game's 4:3 widens the culling and lays
+ * extra rings of tiles, continuing the map as it repeats.
  */
 import type { ArenaTables, StageLayout } from '../../assets/arena.ts';
 import { libraryRoot, tableRoot } from '../../sim/math/roots.ts';
 import { fighterLockedOn } from '../../sim/fight/camera.ts';
 import type { FightData, FightState } from '../../sim/fight/state.ts';
+import { GroundLight, groundLighting, litShade } from './ground-light.ts';
 import type { GroundState } from './stage/ground.ts';
 
 const TILE = 1800;
@@ -149,7 +154,10 @@ export function layScenery(state: FightState, data: FightData, arena: ArenaTable
   const roots = state.scenery.roots;
   const average = (side: number, axis: 'x' | 'z'): number => (roots[side]![0]![axis] + roots[side]![1]![axis] + roots[side]![2]![axis] + roots[side]![3]![axis]) >> 2;
   const lock = fighterLockedOn(state, data);
-  if (lock === 0) {
+  if (state.sceneryAtOrigin !== 0) {
+    out.x = 0;
+    out.z = 0;
+  } else if (lock === 0) {
     out.x = (average(0, 'x') + rootB[0]!) >> 1;
     out.z = (average(0, 'z') + rootB[2]!) >> 1;
   } else if (lock === 1) {
@@ -242,10 +250,20 @@ function depthOf(state: FightState, ox: number, oz: number, x: number, z: number
   return depth < 0 ? 0 : depth > 0xffff ? 0xffff : depth;
 }
 
+/** A lit floor's centre: the fighters' midpoint, unless the view looks exactly level with the floor. */
+function litCentre(trig: Trig, state: FightState): [number, number] | null {
+  if (trig.sin(state.camera.drawn.pitch + 0xef) === 0) return null;
+  const [a, b] = state.fighters;
+  return [((a.skeleton.base.translation[0]! + b.skeleton.base.translation[0]!) / 2) | 0, ((a.skeleton.base.translation[2]! + b.skeleton.base.translation[2]!) / 2) | 0];
+}
+
 /** The ground's patch this frame: each quad's map cell, its corners (mm) and their shades (128 unchanged). */
 export function layGround(state: FightState, data: FightData, arena: ArenaTables, stage: StageLayout, view: View, out: ReturnType<typeof newGround>): void {
   const trig = new Trig(data.math.sine);
-  const centre = groundCentre(trig, state, data);
+  /* The attract intro lays its floor its own way, shaded by depth. */
+  const lighting = state.attractIntro !== 0 ? { kind: GroundLight.DEPTH, brightest: 0 } : groundLighting(stage, state.stage, state.match.trueOgres);
+  const lit = lighting.kind !== GroundLight.DEPTH;
+  const centre = lit ? litCentre(trig, state) : groundCentre(trig, state, data);
   out.drawn = centre !== null;
   if (centre === null) return;
   const ix = tileOf(centre[0] + TILE / 2);
@@ -272,7 +290,10 @@ export function layGround(state: FightState, data: FightData, arena: ArenaTables
     const shade = ((arena.shades[at]! * stage.shadeStrength) >> 7) + 0x80;
     return shade < 0 ? 0 : 0xfe < shade ? 0xfe : shade;
   };
-  const depths = arena.ground.vertices.map(([x, z]) => depthOf(state, ox, oz, x, z));
+  const roots = [a.skeleton.base.translation, b.skeleton.base.translation] as const;
+  /* A corner's shade: by its depth, or by the light where it lies. */
+  const cornerShade = (x: number, z: number): number => (lit ? litShade(lighting.kind, lighting.brightest, roots[0], roots[1], x, z) : shadeAt(depthOf(state, ox, oz, x - ox, z - oz)));
+  const shades = arena.ground.vertices.map(([x, z]) => cornerShade(x + ox, z + oz));
   let mapRow = row;
   for (let r = 0; r < MAP; r += 1) {
     let mapColumn = column;
@@ -284,7 +305,7 @@ export function layGround(state: FightState, data: FightData, arena: ArenaTables
         const [x, z] = arena.ground.vertices[corners[k]!]!;
         out.x[quad * 4 + k] = x + ox;
         out.z[quad * 4 + k] = z + oz;
-        out.shade[quad * 4 + k] = shadeAt(depths[corners[k]!]!);
+        out.shade[quad * 4 + k] = shades[corners[k]!]!;
       }
       mapColumn = mapColumn + 1 < MAP ? mapColumn + 1 : 0;
     }
@@ -304,7 +325,7 @@ export function layGround(state: FightState, data: FightData, arena: ArenaTables
       corners.forEach(([x, z], k) => {
         out.x[quad * 4 + k] = x;
         out.z[quad * 4 + k] = z;
-        out.shade[quad * 4 + k] = shadeAt(depthOf(state, ox, oz, x - ox, z - oz));
+        out.shade[quad * 4 + k] = cornerShade(x, z);
       });
       quad += 1;
     }

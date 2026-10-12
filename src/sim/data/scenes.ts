@@ -77,6 +77,15 @@ export interface IntroTables {
   readonly shadows: number;
 }
 
+/**
+ * Ogre's change into True Ogre: its script by the human's side (each event its frame, what (2 or
+ * 3 a side's move, from a frame to a last, 5 the fade to white at a step a frame, 6 its song, -1
+ * the end) and three arguments).
+ */
+export interface OgreChangeTables {
+  readonly scripts: readonly (readonly (readonly [number, number, number, number, number])[])[];
+}
+
 /** A best time: its frames and its holder's initials. */
 export interface TimeRecord {
   readonly frames: number;
@@ -224,6 +233,7 @@ export interface SceneTables {
   readonly demoFighters: readonly number[];
   /** The attract overlay's intros. */
   readonly intros: readonly IntroTables[];
+  readonly ogreChange: OgreChangeTables;
   /** The unlock schedule: fourteen steps of a kind (0 nothing, 1 a character, 2 a costume, 3 and 4 the hidden modes, 5 everything) and a value; and the endings (bits by roster id) that each move it a step. */
   readonly schedule: readonly (readonly [number, number])[];
   readonly endingSteps: number;

@@ -14,8 +14,8 @@ import { loadTypefaces } from '../present/2d/typefaces.ts';
 import { assetBytes, assetImage, dataBytes, image, json, pageQuality, pageRenderer, params, play, status, two } from './page.ts';
 import { startSound } from './sound.ts';
 
-/** Roster ids the remake cannot set up yet: Mokujin's draw and True Ogre's skeleton. */
-const NOT_YET = new Set([15, 20]);
+/** Roster ids the remake cannot set up yet: Mokujin's draw. */
+const NOT_YET = new Set([15]);
 const KAZUYA = 22;
 const PAUL = 0;
 const LAW = 1;

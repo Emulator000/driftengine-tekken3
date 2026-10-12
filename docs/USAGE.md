@@ -40,7 +40,9 @@ Add them to the address, for example `http://localhost:5190/?quick&p1=9&p2=13&st
 | `p1`, `p2` | The quick match's fighters, by roster id (below) |
 | `stage` | The quick match's stage, from 0 |
 | `cpu` | Which sides the computer plays: `2` (the default), `1`, `12` to watch it play itself, `0` for two players |
+| `arcade=ROSTER`, `arcade=ROSTER,COSTUME` or `arcade=ROSTER,COSTUME,STAGE` | Starts Arcade at once with that character on the first pad, at that stage (1 to 10; by default the tenth, against Ogre, who becomes True Ogre once a round is won against him) |
 | `ending=ROSTER` or `ending=ROSTER,COSTUME` | Plays that character's ending at once |
+| `unlock` | Earns everything the game unlocks, as its last unlock does: every character (the character select then shows its two rows), the costumes, Tekken Ball and the Theater |
 | `record=time,ROSTER` or `record=survival,ROSTER,WINS` | Goes to the records with a new best time for that character (ten stages of 30 seconds) or a survival record of that many wins (more than the tenth best has), its name to enter, on the first pad |
 | `textures=psx` | Draws the fighters' and stages' textures as the console did, each texel sharp, instead of enlarged and smoothed |
 | `models=psx`, `models=rounded` | Draws the fighters with the console's meshes, or the rounded ones (by default the rounded ones, but at `quality=verylow`) |
@@ -64,11 +66,21 @@ Add them to the address, for example `http://localhost:5190/?quick&p1=9&p2=13&st
 | 5 | Nina | 17 | Gon |
 | 6 | Hwoarang | 18 | Anna |
 | 7 | Xiaoyu | 19 | Dr. B |
-| 8 | Eddy | 21 | Tekken Force |
-| 9 | Jin | 22 | Kazuya (with Tekken 4's files) |
-| 10 | Julia | | |
+| 8 | Eddy | 20 | True Ogre |
+| 9 | Jin | 21 | Tekken Force |
+| 10 | Julia | 22 | Kazuya (with Tekken 4's files) |
 
-Mokujin (15) and True Ogre (20) are not in a fight yet.
+Mokujin (15) is not in a fight yet.
+
+## The progress
+
+The game keeps what it keeps on a memory card on the console: the characters, costumes and modes
+earned, the endings seen, each character's plays, the best records and the options. It saves them
+where the console saves (on the way back to the title, and before the records), on the device
+you play on: in the browser's storage for the page's address, or in the app's own. A page started
+with `arcade`, `ending`, `record` or `unlock` reads the progress but never saves it, so those
+shortcuts leave it as it was. Clearing the site's data in the browser (or the app's) starts the
+game afresh.
 
 ## As an app
 

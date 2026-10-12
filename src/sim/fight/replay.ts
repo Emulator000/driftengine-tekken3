@@ -4,6 +4,7 @@
  * half-frames averaged between two records. Starting a replay holds the live frame aside, and
  * ending it puts that back.
  */
+import { div } from '../math/integers.ts';
 import type { FightState, Fighter, ReplayFrame } from './state.ts';
 
 /**
@@ -79,6 +80,26 @@ export function replayHandStep(state: FightState, f: Fighter, hand: number, step
   if (replay === ReplayState.ENDING) return heldOf(state, f).hands[hand]!;
   if (replay === ReplayState.RECORDING) recording(state, f).hands[hand] = step & 0xff;
   return step;
+}
+
+/** True Ogre's wings' step as drawn, kept and played back as a hand's is. */
+export function replayWingStep(state: FightState, f: Fighter, step: number): number {
+  const replay = state.replay.state;
+  if (replay === ReplayState.STARTING) heldOf(state, f).wing = step & 0xff;
+  if (replay === ReplayState.STARTING || replay === ReplayState.PLAYING || replay === ReplayState.PLAYING_LAST) return playing(state, f).wing;
+  if (replay === ReplayState.ENDING) return heldOf(state, f).wing;
+  if (replay === ReplayState.RECORDING) recording(state, f).wing = step & 0xff;
+  return step;
+}
+
+/** True Ogre's arm's shape, kept halved in a byte: a replay's is the half recorded, doubled. */
+export function replayArm(state: FightState, f: Fighter, arm: number): number {
+  const replay = state.replay.state;
+  if (replay === ReplayState.STARTING) heldOf(state, f).arm = div(arm, 2) & 0xff;
+  if (replay === ReplayState.STARTING || replay === ReplayState.PLAYING || replay === ReplayState.PLAYING_LAST) return playing(state, f).arm << 1;
+  if (replay === ReplayState.ENDING) return heldOf(state, f).arm << 1;
+  if (replay === ReplayState.RECORDING) recording(state, f).arm = div(arm, 2) & 0xff;
+  return arm;
 }
 
 /** The root's angles, recorded or played back. */

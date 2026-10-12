@@ -240,6 +240,11 @@ export class ScenePresenter {
       case Scene.RECORDS:
         drawRecords(game, this.data.scenes, this.art, layer, this.pictures.select.smallIcons);
         break;
+      case Scene.FIGHT:
+        /* Ogre's change: its fades over its picture. */
+        for (const run of game.printed) layer.print(run);
+        for (const { level } of game.fades) layer.fade(level);
+        break;
       default:
         for (const run of game.printed) layer.print(run);
     }

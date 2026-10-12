@@ -2,7 +2,7 @@
 import { AssetError, expectArray, expectBoolean, expectInt, expectObject } from './validate.ts';
 
 /** The format the importer writes and the loaders read. Raised when an asset's shape changes. */
-export const ASSET_FORMAT = 32;
+export const ASSET_FORMAT = 33;
 
 /** How many times their size the original pictures are written (`pictures/*.png`), enlarged by edge-directed interpolation. */
 export const PICTURE_SCALE = 4;

@@ -3,7 +3,7 @@
  * them are corrected by, the generic skeleton's offsets the limbs are measured with (the chest, the
  * shoulders and hips, and the hands' and feet's reach), the inverse roots vectors are normalised
  * by, which joint each of the 22 drawn parts hangs on, by model pack the hands' fist and open
- * shapes, and by model pack the springs its accessories swing on.
+ * shapes, by model pack the springs its accessories swing on, and True Ogre's wings' frames.
  */
 
 /**
@@ -65,4 +65,6 @@ export interface SkeletonTables {
   /** By model pack (the game's: an added character's pack lies past them), each of the four accessories' spring, null where it does not swing. */
   readonly springs: readonly (readonly (Spring | null)[])[];
   readonly hands: { readonly fists: Uint8Array; readonly open: Uint8Array };
+  /** True Ogre's wings: by frame, the step of their model while they open and while they beat, each ending in two -1s. */
+  readonly wings: { readonly opening: Int8Array; readonly beating: Int8Array };
 }

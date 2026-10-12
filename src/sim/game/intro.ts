@@ -59,7 +59,7 @@ function firstPacks(intro: number): [number, number] {
 }
 
 /** A side given a pack: its roster code the first one with that pack, the pack as that code has it, its roster id the code over four. */
-function setPack(tables: FightTables, f: Fighter, pack: number): void {
+export function setPack(tables: FightTables, f: Fighter, pack: number): void {
   const codes = tables.roster.codes;
   f.rosterCode = 0;
   for (let code = 0; code < codes.length; code += 1) {

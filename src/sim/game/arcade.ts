@@ -149,7 +149,7 @@ export function arcadeStart(game: GameState, scenes: SceneTables): void {
   if (game.run.started !== 0) return;
   const human = game.world.joined[0] === 0 ? 1 : 0;
   drawOpponents(game, scenes, codeOf(game, human));
-  game.world.match.continueOffered = 0;
+  game.world.match.ogreChanged = 0;
 }
 
 /** Each round: the computer's strength by the round, and with one human the round's opponent on the computer's side. */

@@ -98,7 +98,7 @@ function placeOnRoster(tables: FightTables, f: Fighter, entrant: Entrant): void 
 }
 
 /** Each side's bank of voices: kept where VAB 2 or 3 already holds it, else loaded into the one the other side leaves (both when both load). */
-function chooseFighterBanks(state: FightState, data: FightTables): void {
+export function chooseFighterBanks(state: FightState, data: FightTables): void {
   const sound = state.sound;
   reverbOff(state);
   const wanted = [0, 1].map((side) => data.sound.banks[state.fighters[side]!.sound] ?? NO_BANK);
@@ -164,8 +164,9 @@ export function setUpModel(state: FightState, data: FightTables, f: Fighter): vo
   f.wingsOut = 0;
   f.blinkWait = 0;
   f.eyesShut = 0;
-  /* A model loaded draws its hands as they are in its file. */
+  /* A model loaded draws its hands (and True Ogre's wings) as they are in its file. */
   f.hands.drawn.fill(0);
+  f.trueOgre.wingDrawn = 0;
   restHands(state, data, f);
 }
 

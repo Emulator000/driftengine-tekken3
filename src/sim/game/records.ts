@@ -37,6 +37,12 @@ export function playCount(game: GameState, roster: number): number {
   return counts[0]! + counts[2]! + counts[3]!;
 }
 
+/** The progress saved, if the records changed since it last was. */
+export function saveRecords(game: GameState): void {
+  if (game.records.changed !== 0) game.saving = 1;
+  game.records.changed = 0;
+}
+
 /** The unlocks plays bring checked, and the records marked to be saved. */
 export function recordsChanged(game: GameState, scenes: SceneTables): void {
   checkUnlocks(game, scenes);

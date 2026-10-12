@@ -58,7 +58,7 @@ const out = path.join(root, 'public/data');
 const exePath = path.join(root, '.cache/disc/SLUS_004.02');
 if (!existsSync(exePath)) throw new Error('no disc data: run npm run disc first');
 /** The format of what this writes, in its manifest: raised when the output changes, so `npm run dev` extracts again. */
-const DATA_FORMAT = 6;
+const DATA_FORMAT = 7;
 const extracted = (() => {
   try {
     return JSON.parse(readFileSync(path.join(out, 'manifest.json'), 'utf8')).format === DATA_FORMAT && existsSync(path.join(out, 'movies/streams.json'));
@@ -128,13 +128,31 @@ function eyesOf(pack) {
   return { to: place(row[0]), from: place(row[3]), w: exe.readUInt16LE(at(0x8009586c + row[1] * 4)), h: exe.readUInt16LE(at(0x8009586c + row[1] * 4 + 2)) };
 }
 
+/** True Ogre's roster id: his model's second record on the chest has its shapes past the first in his moveset. */
+const TRUE_OGRE = 0x14;
+const WINGS_RECORD = 2;
+
+/**
+ * Where a pack's model keeps shapes outside itself: for True Ogre's, his moveset (by the roster
+ * record's byte 9) from its header's word at 0x30 (an even roster code) or 0x34 (an odd one).
+ */
+function shapesFromOf(pack) {
+  for (let code = TRUE_OGRE * 4; code < TRUE_OGRE * 4 + 4; code += 1) {
+    if (exe.readInt8(at(0x800958c4) + code) !== pack) continue;
+    const moveset = movesets.get(exe[at(exe.readUInt32LE(at(0x80097d40 + code * 4))) + 9]);
+    if (moveset === undefined) throw new Error(`pack ${pack}'s moveset is not on the disc`);
+    return { record: WINGS_RECORD, bytes: moveset, base: Buffer.from(moveset).readUInt32LE((code & 1) !== 0 ? 0x34 : 0x30) };
+  }
+  return null;
+}
+
 /* Character packs: four files each from BNS 71; the model, a sound bank, the archive, a copy of a moveset. */
 const fighters = [];
 for (let pack = 0; 71 + pack * 4 + 3 <= 278; pack += 1) {
   const first = 71 + pack * 4;
   const id = String(pack).padStart(2, '0');
   const parts = partTable(exe, pack);
-  const result = exportFighter(file(first), arcMembers(Buffer.from(file(first + 2))), parts, parseModel, encodePng, { eyes: eyesOf(pack) });
+  const result = exportFighter(file(first), arcMembers(Buffer.from(file(first + 2))), parts, parseModel, encodePng, { eyes: eyesOf(pack), shapesFrom: shapesFromOf(pack) });
   put(`fighters/${id}.ftr`, result.mesh);
   put(`fighters/${id}.json`, JSON.stringify({ skeleton: result.skeleton }));
   put(`fighters/${id}.png`, result.atlas);

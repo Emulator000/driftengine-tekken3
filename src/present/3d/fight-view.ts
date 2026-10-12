@@ -1,13 +1,14 @@
 /**
  * The fight drawn from its state: each fighter on screen posed from its joints' world matrices,
- * its hands in the shapes the game draws them in and its eyes open or shut, the stage's scenery
- * and ground laid as the game lays them, the fighters' shadows on the floor, a heavy blow's flash
- * as a glow on each fighter, the sparks, dust and bursts as particles, all through the game's own
- * camera and projection, the picture widened past 4:3 to fill the window.
+ * its hands (and True Ogre's wings) in the shapes the game draws them in and its eyes open or
+ * shut, the stage's scenery and ground laid as the game lays them, the fighters' shadows on the
+ * floor, a heavy blow's flash as a glow on each fighter, the sparks, dust and bursts as particles,
+ * all through the game's own camera and projection, the picture widened past 4:3 to fill the
+ * window.
  */
 import { Camera, computeLightMatrix, createEnvironment, type RendererApi, type ShadowCasters, type SurfaceTextureHandle } from '@driftengine/core';
 import type { ArenaTables } from '../../assets/arena.ts';
-import { handPart } from '../../sim/fight/hands.ts';
+import { handPart, wingsPart } from '../../sim/fight/hands.ts';
 import type { FightData, FightState, Fighter as FighterState } from '../../sim/fight/state.ts';
 import { Fighter, readFighterMesh, type JointTransform } from './fighter/fighter.ts';
 import { Ground } from './stage/ground.ts';
@@ -228,9 +229,10 @@ export class FightView {
   /**
    * The field's picture, the fighters it posed on the stage; `behind` draws what goes in front of
    * the stage and behind the fighters, `after` what goes over the picture. With `stageAlone` only
-   * the stage (the records screen's circling view): no fighters, no effects.
+   * the stage (the records screen's circling view): no fighters, no effects. Ogre's change draws
+   * no effects, and from near its end no scenery (`only`); while True Ogre fights there is none.
    */
-  render(state: FightState, aspect: number, behind?: () => void, after?: () => void, stageAlone = false): void {
+  render(state: FightState, aspect: number, behind?: () => void, after?: () => void, stageAlone = false, only: { effects: boolean; scenery: boolean } = { effects: true, scenery: true }): void {
     const renderer = this.renderer;
     const widening = Math.max(1, aspect / (4 / 3));
     this.adoptCamera(state, aspect);
@@ -241,13 +243,14 @@ export class FightView {
       const fighter = this.fighterFor(i, f.costume);
       if (fighter === null) continue;
       for (let hand = 0; hand < 2; hand += 1) fighter.shape(handPart(f.roster, hand), f.hands.drawn[hand]!);
+      fighter.shape(wingsPart(f.roster), f.trueOgre.wingDrawn);
       fighter.face(f.eyesShut !== 0 ? 1 : 0);
       fighter.pose(this.jointsOf(f));
       this.light(state, fighter, f);
       this.casting.push(fighter);
     }
     this.castShadows(state);
-    if (!stageAlone) this.effects.prepare(state, this.data, this.env, this.view, this.camera.position);
+    if (!stageAlone && only.effects) this.effects.prepare(state, this.data, this.env, this.view, this.camera.position);
     else this.env.lightCount = 0;
     const sky = state.stage === SKY_STAGE && state.match.trueOgres === 0;
     const backdrop = sky ? SKY : ([0, 0, 0] as const);
@@ -262,13 +265,15 @@ export class FightView {
         renderer.setMaterial(drawn.ground.material);
         renderer.drawTranslucentMesh(drawn.ground.mesh, IDENTITY, 1, { lit: true, fog: false, tint: this.groundTint });
       }
-      layScenery(state, this.data, this.arena, layout, { widening }, this.scenery);
-      renderer.setMaterial(drawn.stage.material);
-      const model = this.sceneryMatrix();
-      drawn.stage.cells.forEach((cell, i) => {
-        if (cell !== null && 0 < this.scenery.cells[i]!) renderer.drawTranslucentMesh(cell, model, 1, { lit: false, fog: false });
-      });
-      renderer.setMaterial(null);
+      if (only.scenery && state.match.trueOgres === 0) {
+        layScenery(state, this.data, this.arena, layout, { widening }, this.scenery);
+        renderer.setMaterial(drawn.stage.material);
+        const model = this.sceneryMatrix();
+        drawn.stage.cells.forEach((cell, i) => {
+          if (cell !== null && 0 < this.scenery.cells[i]!) renderer.drawTranslucentMesh(cell, model, 1, { lit: false, fog: false });
+        });
+        renderer.setMaterial(null);
+      }
     }
     behind?.();
     for (const fighter of this.casting) {
@@ -276,7 +281,7 @@ export class FightView {
       renderer.drawMesh(fighter.handle, IDENTITY);
       renderer.setMaterial(null);
     }
-    if (!stageAlone) this.effects.draw(this.camera, this.env, state.frameCount / 60);
+    if (!stageAlone && only.effects) this.effects.draw(this.camera, this.env, state.frameCount / 60);
     renderer.endFrame();
     after?.();
   }

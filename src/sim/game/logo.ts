@@ -6,11 +6,13 @@
  * and goes back to the mode menu (a soft reset).
  *
  * The remake has every file in hand, so a read lands as it is asked for and the drive is never
- * busy; there is no memory card, so nothing is read from one and no save fails.
+ * busy; the progress is read as the page starts and saved where the console saves its memory
+ * card (`save.ts`), and no save fails.
  */
 import type { FightData } from '../fight/state.ts';
 import { playSong, voiceLine } from '../fight/voices.ts';
 import { print } from './printer.ts';
+import { saveRecords } from './records.ts';
 import { Scene, type GameState } from './state.ts';
 
 /** The start button's sound, and the menu's own. */
@@ -126,9 +128,9 @@ export function loaderScene(game: GameState): void {
 }
 
 /**
- * Scene 2: the records saved (once the memory card was read), the next scene's overlay loaded and
+ * Scene 2: the progress saved (once it was read), the next scene's overlay loaded and
  * started; on the way to the title or a demo, "NAMCO PRESENTS." fades in, holds a second and a
- * half and fades out over it. Start skips to the mode menu once the memory card was read.
+ * half and fades out over it. Start skips to the mode menu once the progress was read.
  */
 export function logoScene(game: GameState, data: Pick<FightData, 'sound'>): void {
   const step = game.step;
@@ -165,8 +167,8 @@ export function logoScene(game: GameState, data: Pick<FightData, 'sound'>): void
     case 2:
     case 3:
     case 4:
-      /* The records saved (to the memory card) on the way. */
-      if (step <= 2) game.records.changed = 0;
+      /* The progress saved on the way. */
+      if (step <= 2) saveRecords(game);
       start();
       finish();
       game.step = 0xc;
@@ -190,8 +192,8 @@ export function logoScene(game: GameState, data: Pick<FightData, 'sound'>): void
     case 8:
     case 9:
       if (step === 7) {
-        /* The memory card read the first time, the records saved to it after. */
-        if (game.cardRead !== 0) game.records.changed = 0;
+        /* The progress read the first time (as the page starts), saved after. */
+        if (game.cardRead !== 0) saveRecords(game);
         game.cardRead = 1;
         game.step = 8;
       }

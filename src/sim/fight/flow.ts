@@ -4,7 +4,8 @@
  * The flow: the opening (until the fighters may move), fighting with the timer running, the
  * knockout (its result scored, the losers' input taken over), the knockout's replay, the closing
  * (the winner's pose, the losers falling, the finishing shot) and the round's end, when the game
- * starts the next round or ends the match. A match's continue is offered from the end.
+ * starts the next round or ends the match. In Arcade's last stage, the first round a lone human
+ * wins against Ogre ends with him changing into True Ogre.
  *
  * The replay: while a round runs, recording advances the ring; a replay starts by holding the live
  * roots aside and framing the replay camera, plays the ring half a frame at a time (the recorded
@@ -27,7 +28,7 @@ import { InputSource, Mode, type FightData, type FightState, type Fighter } from
 import { fadeMusic, keyOff, keyOffVoices } from './voices.ts';
 
 /** The flow's steps. */
-export const Flow = { OPENING: 0, FIGHTING: 1, KNOCKED_OUT: 2, REPLAY_ASKED: 3, REPLAYING: 4, CLOSING_START: 5, CLOSING: 6, RESUMED: 7, OVER: 9, CONTINUE: 10 } as const;
+export const Flow = { OPENING: 0, FIGHTING: 1, KNOCKED_OUT: 2, REPLAY_ASKED: 3, REPLAYING: 4, CLOSING_START: 5, CLOSING: 6, RESUMED: 7, OVER: 9, TRUE_OGRE: 10 } as const;
 /** The round's status while closing: both shown, one side's winner shown, or a side's finishing shot. */
 const Status = { BOTH: 2, FIRST_WINS: 3, SECOND_WINS: 4, POSES: 5, FIRST_FINISH: 6, SECOND_FINISH: 7 } as const;
 /** The round's result bits. */
@@ -58,7 +59,7 @@ const FALLEN = 0xd65;
 const BEATEN = 0xd6c;
 /** The finishing shot's ground fade. */
 const FINISH_FADE = 10000;
-/** The arcade's last stage. */
+/** The arcade's last stage, Ogre's. */
 const LAST_STAGE = 9;
 const BOSCONOVITCH_SET = 0x12;
 
@@ -497,22 +498,25 @@ function loserPoses(state: FightState, data: FightData): void {
   if (b.outcome < 0) endPose(state, data, b, a, b.health === 0 ? FALLEN : BEATEN);
 }
 
-/** In the arcade or time attack, a lone human's lost match at the last stage offers a continue once. */
-function offersContinue(state: FightState): boolean {
+/**
+ * In the arcade or time attack, at the last stage, once a lone human who has not lost there has
+ * won a round and the computer has not won the match, Ogre changes into True Ogre (once a run).
+ */
+function ogreChanges(state: FightState): boolean {
   const match = state.match;
-  if (!((state.mode === ARCADE || state.mode === TIME_ATTACK) && (match.stage & 0xff) === LAST_STAGE && match.humanCount === 1 && match.continueOffered === 0 && match.humanLost === 0)) return false;
+  if (!((state.mode === ARCADE || state.mode === TIME_ATTACK) && (match.stage & 0xff) === LAST_STAGE && match.humanCount === 1 && match.ogreChanged === 0 && match.humanLost === 0)) return false;
   const wins = (slot: number): number => state.fighters[slot]!.wins;
   if (wins(match.computerSide) < match.roundsToWin && 0 < wins(match.humanSide)) {
-    match.continueOffered = 1;
+    match.ogreChanged = 1;
     return true;
   }
   return false;
 }
 
-/** The round over: the game starts the next round or ends the match, or a continue is offered. */
+/** The round over: the game starts the next round or ends the match, or Ogre changes. */
 function endRound(state: FightState): void {
   state.round.flow = Flow.OVER;
-  if (offersContinue(state)) state.round.flow = Flow.CONTINUE;
+  if (ogreChanges(state)) state.round.flow = Flow.TRUE_OGRE;
 }
 
 /** The replay has finished. */
@@ -663,7 +667,7 @@ export function stepRound(state: FightState, data: FightData): void {
     round.flow = Flow.FIGHTING;
     return;
   }
-  if (flow === Flow.OVER && offersContinue(state)) round.flow = Flow.CONTINUE;
+  if (flow === Flow.OVER && ogreChanges(state)) round.flow = Flow.TRUE_OGRE;
 }
 
 /** A human's start button cuts the replay short (not in practice). */

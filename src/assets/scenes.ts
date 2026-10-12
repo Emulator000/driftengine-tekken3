@@ -2,8 +2,8 @@
  * The scenes' tables (`tables/scenes.json`), validated: the values the game's state starts with,
  * the title's lines and the mode menu's entries.
  */
-import type { CreditsTables, IntroTables, MovieRecord, MovieStream, MovieTables, NameTables, RecordsTables, SceneTables, SelectTables, StartLine, SurvivalRecord, TimeRecord, VersusPlace, VersusTables } from '../sim/data/scenes.ts';
-import { expectArray, expectBoolean, expectInt, expectObject, expectString } from './validate.ts';
+import type { CreditsTables, IntroTables, MovieRecord, MovieStream, MovieTables, NameTables, OgreChangeTables, RecordsTables, SceneTables, SelectTables, StartLine, SurvivalRecord, TimeRecord, VersusPlace, VersusTables } from '../sim/data/scenes.ts';
+import { AssetError, expectArray, expectBoolean, expectInt, expectObject, expectString } from './validate.ts';
 
 const int = (value: unknown, where: string): number => expectInt(value, where, -0x80000000, 0xffffffff);
 const pairs = (value: unknown, where: string): [number, number][] =>
@@ -92,14 +92,30 @@ function parseNaming(json: unknown, where: string): NameTables {
   };
 }
 
+/** A script of events, five halfwords each: its frame, what, and three arguments. */
+function parseScript(json: unknown, where: string): (readonly [number, number, number, number, number])[] {
+  const halfword = (v: unknown, at: string): number => expectInt(v, at, -0x8000, 0x7fff);
+  return expectArray(json, where).map((event, k) => {
+    const [frame, kind, a, b, c] = expectArray(event, `${where}[${k}]`, 5).map((v, j) => halfword(v, `${where}[${k}][${j}]`));
+    return [frame!, kind!, a!, b!, c!] as const;
+  });
+}
+
+/** Ogre's change's scripts, one by the human's side, each ending in its end (-1). */
+function parseOgreChange(json: unknown, where: string): OgreChangeTables {
+  const o = expectObject(json, where);
+  const scripts = expectArray(o.scripts, `${where}.scripts`, 2).map((script, side) => {
+    const events = parseScript(script, `${where}.scripts[${side}]`);
+    if (events.findIndex((event) => event[1] === -1) !== events.length - 1) throw new AssetError(`${where}.scripts[${side}]`, 'does not end at its one end');
+    return events;
+  });
+  return { scripts };
+}
+
 function parseIntro(json: unknown, where: string): IntroTables {
   const o = expectObject(json, where);
-  const halfword = (v: unknown, at: string): number => expectInt(v, at, -0x8000, 0x7fff);
   return {
-    script: expectArray(o.script, `${where}.script`).map((event, k) => {
-      const [frame, kind, a, b, c] = expectArray(event, `${where}.script[${k}]`, 5).map((v, j) => halfword(v, `${where}.script[${k}][${j}]`));
-      return [frame!, kind!, a!, b!, c!] as const;
-    }),
+    script: parseScript(o.script, `${where}.script`),
     pairs: expectArray(o.pairs, `${where}.pairs`, 0x2d).map((v, i) => expectInt(v, `${where}.pairs[${i}]`, -0x80, 0x7f)),
     shadows: expectInt(o.shadows, `${where}.shadows`, 0, 0xff),
   };
@@ -192,6 +208,7 @@ export function parseSceneTables(json: unknown, where = 'tables/scenes.json'): S
     records: parseRecords(o.records, `${where}.records`),
     demoFighters: bytes(o.demoFighters, `${where}.demoFighters`, 14),
     intros: expectArray(o.intros, `${where}.intros`, 3).map((v, i) => parseIntro(v, `${where}.intros[${i}]`)),
+    ogreChange: parseOgreChange(o.ogreChange, `${where}.ogreChange`),
     schedule: expectArray(o.schedule, `${where}.schedule`, 14).map((step, i) => {
       const [kind, value] = bytes(step, `${where}.schedule[${i}]`, 2);
       return [kind!, value!] as const;

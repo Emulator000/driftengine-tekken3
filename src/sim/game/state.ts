@@ -409,8 +409,29 @@ export interface GameState {
     event: number;
     readonly sides: { doing: number; pack: number; move: number; last: number; frame: number }[];
   };
+  /**
+   * Ogre's change into True Ogre (`ogre-change.ts`): its phase (0 its camera set up, 1 its script,
+   * 2 the white held), its frames, the script's next event, each side's record (whether it plays,
+   * its move, the move's last frame, its frame), the fade to white (whether it runs, its level,
+   * its step), whether its camera's script is over, whether the stage's scenery is no longer
+   * drawn, and what the field shows (`OgreChangeShows`).
+   */
+  readonly ogreChange: {
+    phase: number;
+    time: number;
+    event: number;
+    readonly sides: { active: number; move: number; last: number; frame: number }[];
+    fading: number;
+    fade: number;
+    fadeStep: number;
+    cameraDone: number;
+    sceneryOff: number;
+    shows: number;
+  };
   /** Whether the fight was drawn this field (the picture holds otherwise). */
   drewFight: number;
+  /** Set on a field the game saves its progress (`save.ts`), where the console writes its memory card. */
+  saving: number;
   readonly run: {
     challengers: number;
     challengerChooses: number;
@@ -602,7 +623,20 @@ export function blankGameState(): GameState {
       event: 0,
       sides: [0, 1].map(() => ({ doing: 0, pack: 0, move: 0, last: 0, frame: 0 })),
     },
+    ogreChange: {
+      phase: 0,
+      time: 0,
+      event: 0,
+      sides: [0, 1].map(() => ({ active: 0, move: 0, last: 0, frame: 0 })),
+      fading: 0,
+      fade: 0,
+      fadeStep: 0,
+      cameraDone: 0,
+      sceneryOff: 0,
+      shows: 0,
+    },
     drewFight: 0,
+    saving: 0,
     run: {
       challengers: 0,
       challengerChooses: 0,
