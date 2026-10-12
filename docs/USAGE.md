@@ -43,8 +43,10 @@ Add them to the address, for example `http://localhost:5190/?quick&p1=9&p2=13&st
 | `ending=ROSTER` or `ending=ROSTER,COSTUME` | Plays that character's ending at once |
 | `record=time,ROSTER` or `record=survival,ROSTER,WINS` | Goes to the records with a new best time for that character (ten stages of 30 seconds) or a survival record of that many wins (more than the tenth best has), its name to enter, on the first pad |
 | `textures=psx` | Draws the fighters' and stages' textures as the console did, each texel sharp, instead of enlarged and smoothed |
-| `models=psx` | Draws the fighters with the console's meshes instead of the rounded ones |
-| `quality=low` | Leaves out the ambient occlusion and the bloom; a phone's default (`quality=high` keeps them there) |
+| `models=psx`, `models=rounded` | Draws the fighters with the console's meshes, or the rounded ones (by default the rounded ones, but at `quality=verylow`) |
+| `quality=high` | The whole picture: ambient occlusion and bloom over the multisampled HDR scene; the default but on a phone |
+| `quality=low` | Leaves out the ambient occlusion and the bloom; a phone's default |
+| `quality=verylow` | The picture for an entry-level phone: the scene drawn straight to the screen with no pass after it, one pixel to the CSS pixel and no more pixels than a 640 by 480 picture, thirty pictures a second (the game still runs sixty fields), and the fighters with the console's meshes. It is the default on a phone whose GPU the browser names as an entry-level part (a Mali-G31, G51, G52 or G57, an Adreno 5xx or 600s to 610s, or a PowerVR), and on any device whose fight ran too slow even at its least density on a start before ([A slow device](#a-slow-device)) |
 | `budget=N` | The frame time, in milliseconds, the picture's density is held to (20 by default): while most of a fight's frames take longer, the picture steps down toward half its pixels each way, and back up as the frames allow; `0` holds it still |
 | `touch=1`, `touch=0` | The touch pad over the picture anywhere, or nowhere (by default on a touch screen or a phone) |
 | `stop=N` | Holds the game after `N` fields (sixtieths of a second), for comparing pictures |
@@ -170,4 +172,14 @@ between two holds both), Select and Start between the thumbs. Start pauses the f
 pad. The first touch takes the page to full screen in landscape where the browser lets it; the
 Android app is full screen already.
 
-A phone's page is `quality=low`, and its picture's density is held to its frames (`budget`).
+A phone's page is `quality=low`, or `quality=verylow` on an entry-level phone, and its picture's
+density is held to its frames (`budget`).
+
+### A slow device
+
+The picture's density steps down while a fight's frames run slow (`budget`), to half its pixels
+each way. Where most of a fight's frames still run over budget at that density (300 frames
+judged together), the browser keeps it, and every start after draws `quality=verylow`; the page
+logs it (`.cache/client.log` for a phone on `npm run dev:lan`). It is kept until the site's data
+is cleared in the browser, or the app's storage in an Android app's settings; `?quality=` in the
+address decides for that start whatever was kept.

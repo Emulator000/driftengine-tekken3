@@ -11,7 +11,7 @@ import { FightView, type DrawingFiles } from '../present/3d/fight-view.ts';
 import { Hud } from '../present/hud/hud.ts';
 import { PauseScreen } from '../present/hud/pause.ts';
 import { loadTypefaces } from '../present/2d/typefaces.ts';
-import { assetBytes, assetImage, dataBytes, image, json, pageRenderer, params, play, status, two } from './page.ts';
+import { assetBytes, assetImage, dataBytes, image, json, pageQuality, pageRenderer, params, play, status, two } from './page.ts';
 import { startSound } from './sound.ts';
 
 /** Roster ids the remake cannot set up yet: Mokujin's draw and True Ogre's skeleton. */
@@ -24,10 +24,17 @@ const LAW = 1;
 const smooth = params.get('textures') !== 'psx';
 /** A fighter's, an intro model's or a stage's texture atlas by its file's name: the enlarged one, or the original. */
 const atlas = (kind: string, name: string): Promise<ImageBitmap> => (smooth ? assetImage(`textures/${kind}/${name}.png`) : image(`${kind}/${name}.png`));
-/** Whether the fighters are drawn rounded, or with the console's meshes (`?models=psx`). */
-const rounded = params.get('models') !== 'psx';
+/**
+ * Whether the fighters are drawn rounded, or with the console's meshes: `?models=psx` or
+ * `?models=rounded`, else the console's on a very low page, whose GPU the rounded meshes' vertices
+ * cost a third of its frame.
+ */
+const rounded = (): boolean => {
+  const asked = params.get('models');
+  return asked === null ? pageQuality() !== 'verylow' : asked !== 'psx';
+};
 /** A fighter's or an intro model's mesh by its file's name: the rounded one, or the original. */
-const fighterMesh = (kind: string, name: string): Promise<ArrayBuffer> => (rounded ? assetBytes(`models/${kind}/${name}.ftr`) : dataBytes(`${kind}/${name}.ftr`));
+const fighterMesh = (kind: string, name: string): Promise<ArrayBuffer> => (rounded() ? assetBytes(`models/${kind}/${name}.ftr`) : dataBytes(`${kind}/${name}.ftr`));
 
 const stage = async (id: number): Promise<{ mesh: ArrayBuffer; ground: ArrayBuffer; texture: ImageBitmap }> => {
   const [mesh, ground, texture] = await Promise.all([dataBytes(`stages/${two(id)}.stg`), dataBytes(`stages/${two(id)}.gnd`), atlas('stages', two(id))]);

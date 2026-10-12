@@ -3,8 +3,8 @@
  * and data fetches, the renderer, the pads (and on a touch screen the touch pad), and the fixed
  * 60 Hz loop that stops on a failure and says why.
  */
-import { createRenderer, ResolutionGovernor, startLoop, type RendererApi } from '@driftengine/core';
-import { fightQuality } from '../present/3d/quality.ts';
+import { createRenderer, describeGpu, ResolutionGovernor, startLoop, type RendererApi } from '@driftengine/core';
+import { entryLevelGpu, fightQuality, isQuality, type Quality } from '../present/3d/quality.ts';
 import { FrameStats } from './frame-stats.ts';
 import { PadInput } from './input.ts';
 import { evenFrames } from './pacing.ts';
@@ -41,16 +41,50 @@ export const image = async (path: string): Promise<ImageBitmap> =>
   createImageBitmap(new Blob([await fetchBytes(DATA, path)], { type: 'image/png' }), { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
 export const two = (n: number): string => String(n).padStart(2, '0');
 
+/** Where the browser keeps that this device's fights were too slow even at their least density. */
+const SLOW = 'tekken3.slow';
+/** The page's quality, as `pageRenderer` picked it. */
+let quality: Quality = 'high';
+
+/** The page's quality, once `pageRenderer` has picked it. */
+export const pageQuality = (): Quality => quality;
+
+/**
+ * The picture's quality: the address's (`?quality=high`, `low` or `verylow`); else `verylow` where a
+ * start before found a fight's frames too slow even at their least density, or on a phone whose GPU
+ * the browser names as an entry-level part; else `low` on a phone and `high` elsewhere.
+ */
+async function pickQuality(): Promise<{ quality: Quality; why: string }> {
+  const asked = params.get('quality');
+  if (isQuality(asked)) return { quality: asked, why: 'asked' };
+  if (stored(SLOW)) return { quality: 'verylow', why: 'a fight before ran too slow at its least density' };
+  if (!onPhone()) return { quality: 'high', why: 'not a phone' };
+  const { rendererName } = await describeGpu();
+  if (entryLevelGpu(rendererName)) return { quality: 'verylow', why: `a phone with an entry-level GPU, ${rendererName}` };
+  return { quality: 'low', why: `a phone, ${rendererName || 'its GPU unnamed'}` };
+}
+
+function stored(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === '1';
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The renderer on the canvas, the picture filling the window (the game's 4:3 widens to it), at the
- * address's `quality`, or `low` on a phone and `high` elsewhere.
+ * quality `pickQuality` gives.
  */
 export async function pageRenderer(): Promise<{ renderer: RendererApi; backend: string }> {
   const frame = document.createElement('div');
   frame.style.cssText = 'position:fixed;inset:0';
   canvas.replaceWith(frame);
   frame.append(canvas);
-  const { renderer, backend, reason } = await createRenderer(canvas, fightQuality(params.get('quality') ?? (onPhone() ? 'low' : 'high')));
+  const picked = await pickQuality();
+  quality = picked.quality;
+  console.log(`[tekken3 remake] quality ${quality}: ${picked.why}`);
+  const { renderer, backend, reason } = await createRenderer(canvas, fightQuality(quality));
   console.log(`[tekken3 remake] ${backend}: ${reason}`);
   renderer.resize();
   addEventListener('resize', () => renderer.resize());
@@ -74,6 +108,11 @@ export interface Player {
 const BUDGET_MS = 20;
 /** The least share of its density the picture is drawn at. */
 const LEAST_SCALE = 0.5;
+/** The fewest milliseconds between pictures on a very low page: thirty a second, the game still running sixty fields. */
+const VERY_LOW_FRAME_MS = 1000 / 30 - 4;
+/** Fight frames at the least density judged together, and the share of them that, over budget, makes this device a slow one. */
+const SLOW_FRAMES = 300;
+const SLOW_SHARE = 0.5;
 
 /**
  * The game played at 60 fields a second from the pads, drawn each frame, until `stop` fields (the
@@ -83,7 +122,11 @@ const LEAST_SCALE = 0.5;
  * fight's frames come longer than `BUDGET_MS` after the one before (`?budget` sets it, `0` holds
  * the density still) it steps down toward half its pixels each way, and back up as the frames
  * allow. Only frames drawn count: on a display faster than 60 Hz the frames between fields draw
- * nothing and take no time of their own.
+ * nothing and take no time of their own. Where most of a fight's frames still run over budget at the
+ * least density, the browser keeps it, and the next start draws the very low picture.
+ *
+ * A very low page draws thirty pictures a second at most (`VERY_LOW_FRAME_MS`), its budget doubled;
+ * the fields still run sixty a second.
  *
  * `FrameStats` measures the fields and the drawing, for a page on another device to tell.
  *
@@ -102,12 +145,32 @@ const MOST_FIELDS = 2;
 export function play(player: Player, renderer: RendererApi, backend: string): void {
   const input = new PadInput(window);
   const touch = wantsTouch(params) ? new TouchPad() : null;
-  const budget = Number(params.get('budget') ?? BUDGET_MS);
+  const veryLow = quality === 'verylow';
+  const budget = Number(params.get('budget') ?? (veryLow ? 2 * BUDGET_MS : BUDGET_MS));
   const governor = budget > 0 ? new ResolutionGovernor(1, { budgetMs: budget, minScale: LEAST_SCALE }) : null;
+  /** Fight frames drawn at the least density, and those of them over budget, toward judging this device slow. */
+  const slow = { frames: 0, long: 0, kept: veryLow };
   const stats = new FrameStats(() => `${backend}, ${canvas.width}x${canvas.height} at ${(governor?.scale ?? 1).toFixed(3)}`);
   tellWith(() => stats.line());
   /** When the last frame was drawn. */
   let lastDrawn = 0;
+  /** One fight frame at the least density; after `SLOW_FRAMES`, this device kept as a slow one where most ran over budget. */
+  const judgeSlow = (long: boolean): void => {
+    slow.frames += 1;
+    if (long) slow.long += 1;
+    if (slow.frames < SLOW_FRAMES) return;
+    if (slow.long / slow.frames >= SLOW_SHARE) {
+      slow.kept = true;
+      try {
+        localStorage.setItem(SLOW, '1');
+      } catch {
+        /* Not kept where the page may not store: the next start judges again. */
+      }
+      console.log(`[tekken3 remake] ${slow.long} of ${slow.frames} fight frames over ${budget} ms at the least density: the next start draws the very low picture`);
+    }
+    slow.frames = 0;
+    slow.long = 0;
+  };
   const stopAt = Number(params.get('stop') ?? Infinity);
   let failure: Error | null = null;
   let fields = 0;
@@ -133,14 +196,17 @@ export function play(player: Player, renderer: RendererApi, backend: string): vo
       },
       render() {
         const { width, height } = canvas;
-        if (fields === drawnAt.fields && width === drawnAt.width && height === drawnAt.height && player.moving?.() !== true) {
+        const now = performance.now();
+        const same = fields === drawnAt.fields && width === drawnAt.width && height === drawnAt.height && player.moving?.() !== true;
+        if (same || (veryLow && now - lastDrawn < VERY_LOW_FRAME_MS)) {
           frames.kept += 1;
           return;
         }
-        const now = performance.now();
         if (lastDrawn > 0) {
-          const scale = governor?.sample(now - lastDrawn, document.visibilityState === 'visible' && player.fighting()) ?? null;
+          const counted = document.visibilityState === 'visible' && player.fighting();
+          const scale = governor?.sample(now - lastDrawn, counted) ?? null;
           if (scale !== null) renderer.applyResolutionScale(scale);
+          if (counted && !slow.kept && governor !== null && governor.scale <= LEAST_SCALE) judgeSlow(now - lastDrawn > budget);
         }
         lastDrawn = now;
         drawnAt = { fields, width, height };
@@ -153,6 +219,6 @@ export function play(player: Player, renderer: RendererApi, backend: string): vo
     { fixedDt: 1 / 60, maxFrameTime: MOST_FIELDS / 60, frameSource: evenFrames() },
   );
   Object.assign(globalThis, {
-    __tekken3: () => ({ remake: true, backend, fields, frames: { ...frames }, density: governor?.scale ?? 1, timing: stats.line(), ...player.probe(), failure: failure?.message ?? null }),
+    __tekken3: () => ({ remake: true, backend, quality, fields, frames: { ...frames }, density: governor?.scale ?? 1, timing: stats.line(), ...player.probe(), failure: failure?.message ?? null }),
   });
 }

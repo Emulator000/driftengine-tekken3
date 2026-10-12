@@ -151,7 +151,10 @@ your machine the first time; HTTPS is what gives the page WebGPU there.
 On a touch screen the game shows a pad over the picture: a stick where your left thumb lands, the
 four buttons on the right in a diamond as on the pad (2 above, 1 and 4 either side, 3 below; a
 thumb between two holds both), Select and Start between the thumbs. A phone draws the
-picture without the ambient occlusion and the bloom, at fewer pixels while its frames run slow.
+picture without the ambient occlusion and the bloom, at fewer pixels while its frames run slow; an
+entry-level phone (its GPU a small Mali, an older Adreno or a PowerVR), or one found too slow
+before, draws the very low picture: fewer pixels, thirty pictures a second while the game runs at
+sixty, and the console's meshes for the fighters.
 
 Every app carries your disc's converted data, and the home network's page serves it: all of them
 are for your own devices. Never share or upload an app built from your disc.
@@ -219,7 +222,7 @@ field. What is done and what is not yet:
 | Hair and accessories swinging | Done | On the original's springs, checked against it frame by frame |
 | Hands opening and clenching, eyes blinking | Done | Each hand's shapes from the model, rounded alike; the costume's closed eyes over its face. Gon's face colours not yet |
 | **The picture and the sound** | | |
-| The fighters rounded into curved surfaces | Done | `?models=psx` draws the console's meshes |
+| The fighters rounded into curved surfaces | Done | `?models=psx` draws the console's meshes, as an entry-level phone does |
 | The textures enlarged and smoothed | Done | `?textures=psx` draws the originals |
 | The 2D (HUD, calls, menus) drawn at the display's resolution | Done | |
 | The movies | Done | Converted from the disc when FFmpeg is installed |
