@@ -11,11 +11,12 @@ type Ramp = readonly string[];
 /** Polished metal, light to dark: the frames, end caps and rims. */
 export const CHROME: Ramp = ['#ffffff', '#e4e4e4', '#b4b4b4', '#7a7a7a', '#454545', '#1e1e1e'];
 
-/** A bar's three parts, light to dark: the health, the damage just taken, what is lost. */
-export const BAR_RAMPS: { readonly health: Ramp; readonly damage: Ramp; readonly lost: Ramp } = {
+/** A bar's three parts, light to dark: the health, the damage just taken, what is lost; and a Tekken Ball gauge's empty part. */
+export const BAR_RAMPS: { readonly health: Ramp; readonly damage: Ramp; readonly lost: Ramp; readonly empty: Ramp } = {
   health: ['#50f8f0', '#28e0d8', '#00c8b8', '#00b0a0', '#009088', '#007870'],
   damage: ['#ffffff', '#f8f888', '#f8f808', '#f8e800', '#f8d800', '#f8c000'],
   lost: ['#ff2a1a', '#f00000', '#c80000', '#a00000', '#700000', '#400000'],
+  empty: ['#525252', '#424242', '#393939', '#313131', '#212121', '#101010'],
 };
 
 /** A round mark's body, light to dark: lit gold, or empty gunmetal. */
@@ -23,6 +24,13 @@ export const MARK_RAMPS: { readonly lit: Ramp; readonly empty: Ramp } = {
   lit: ['#fffff0', '#f8f880', '#f8f820', '#f8d820', '#f8c020', '#f89020'],
   empty: ['#6a6a6a', '#585858', '#484848', '#383838', '#2c2626', '#1a1a1a'],
 };
+
+/** Tekken Force's three keys' metals, light to dark: copper, silver, gold. */
+export const KEY_RAMPS: readonly Ramp[] = [
+  ['#ffb090', '#e86848', '#c03a22', '#901c10', '#5a0c06'],
+  ['#ffffff', '#e8eef2', '#b8c2ca', '#7e8890', '#444c54'],
+  ['#fff4a0', '#ffd040', '#e8a010', '#b07008', '#6a3c00'],
+];
 
 /** Per costume, the name plate's ramp, light to dark. */
 export const PLATE_RAMPS: readonly Ramp[] = [

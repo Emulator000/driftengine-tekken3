@@ -5,8 +5,13 @@
  * button the third where it is earned), the two choices kept apart. In versus each side then sets
  * its handicap on its gauge, select taking the choice back, and a button settles it. The title
  * alternates with the way out once the pads rest, and the game's name and the tournament's line
- * scroll behind. Arcade and the one-player modes come here too when start and both shoulders are
- * held as the mode is chosen; teams and Tekken Ball are not remade.
+ * scroll behind. In Team Battle each side first sets its team's size (one to eight), then
+ * chooses its members (select takes one back, or goes back to the size; start ends the choosing,
+ * the rest drawn later); a side not in takes the other's size. Arcade and the one-player modes
+ * come here too when start and both shoulders are held as the mode is chosen. In Tekken Ball the
+ * first side to choose its character chooses the ball (left and right slide the next one in, a
+ * button takes it, select goes back to the character) and is served from; the other waits, select
+ * taking its choice back.
  */
 import type { FightTables } from '../fight/match.ts';
 import { keyOffVoices, playSong, voiceLine } from '../fight/voices.ts';
@@ -27,12 +32,33 @@ const ROWS = 3;
 export const NO_CHOICE = 0x58;
 export const TAKEN = 0x59;
 /** The side states this scene plays. */
-export const VsSideState = { SET_UP: 0, CHOOSING: 3, HANDICAP: 4, WAITING: 6, PARTNER: 7, COMPUTER: 8, OUT: 10, CHOSEN: 0xb, SETTLED: 0xc, PARTNER_CHOSEN: 0xd } as const;
+export const VsSideState = { SET_UP: 0, TEAM_SIZE: 1, TEAM_CHOOSING: 2, CHOOSING: 3, HANDICAP: 4, WAITING: 6, PARTNER: 7, COMPUTER: 8, TEAM_COMPUTER: 9, OUT: 10, CHOSEN: 0xb, SETTLED: 0xc, PARTNER_CHOSEN: 0xd, BALL_WAIT: 0xe, BALL_CHOICE: 0xf } as const;
+/** A team's size, one to eight; the buttons that settle it. */
+const TEAM_MOST = 8;
+const SETTLE = 0x8f0;
 /** The buttons: a kick (the second costume), the fourth button and start (the third), the four, select, start. */
 const KICKS = 0x60;
 const THIRD = 0x810;
 const BUTTONS = 0xf0;
 const CANCEL = 0x100;
+const START = 0x800;
+const LEFT = 0x8000;
+const RIGHT = 0x2000;
+/** Tekken Ball: a side's handicap at the select; the balls; the ball's choosing as it runs; its turns a field; how far it slides off and in, and within how much it stands; the arrows' blink; its lines (the level's and the name's, centred; BALL DAMAGE and its percent). */
+const BALL_HANDICAP = 6;
+const BALLS = 3;
+const BALL_CHOOSING = 3;
+const BALL_TURNS = { yaw: 8, pitch: 1, roll: 2 } as const;
+const BALL_SLIDE = { edge: 0x800, away: 0x1000, still: 0x3f } as const;
+const BALL_BLINK = 0x20;
+const BALL_LINES = {
+  middle: 0xb8,
+  level: { colour: 0xb, y: 0x144 },
+  name: { colour: 4, y: 0x156 },
+  damage: { colour: 5, x: 0x87, y: 0x19e },
+  percent: { colour: 6, x: 0xa0, y: 0x1b0 },
+  sign: { x: 0xc9, y: 0x1b6 },
+} as const;
 /** The sounds: a cursor's move, a choice, a challenger. */
 const MOVE_SOUND = 0x55f5;
 const CHOOSE_SOUND = 0x50f4;
@@ -63,9 +89,10 @@ const VERSUS_LINE = { text: 'VS', font: 2, colour: 7, x: 0xa1, y: 0x15c } as con
 const RECORD = { wins: [0x78, 0xcc], y: 0x14e, draws: { x: 0xab, y: 0x181 }, dash: { x: 0xad, y: 0x14e }, word: { x: 0xa6, y: 0x16d }, colour: 7 } as const;
 /** The gauge's labels: their font and colours. */
 const LABELS = { font: 0, life: 5, percent: 6 } as const;
-/** The slot a side's choices show in, by mode: one player's, versus's (and Tekken Ball's). */
+/** The slot a side's choices show in, by mode: one player's, versus's (and Tekken Ball's), Team Battle's. */
 const SINGLE_SLOT = 0;
 const VERSUS_SLOT = 1;
+const TEAM_SLOT = 2;
 
 /** The cell at a side's cursor. */
 const cellOf = (side: VsSelectSide): number => side.column + side.row * COLUMNS;
@@ -79,9 +106,18 @@ export function codeUnder(game: GameState, scenes: SceneTables, side: VsSelectSi
 }
 
 /** The slot a mode shows a side's choices in. */
-export const slotOf = (mode: number): number => (mode === MenuMode.VERSUS || mode === MenuMode.TEKKEN_BALL ? VERSUS_SLOT : SINGLE_SLOT);
+export const slotOf = (mode: number): number => (mode === MenuMode.TEAM_BATTLE ? TEAM_SLOT : mode === MenuMode.VERSUS || mode === MenuMode.TEKKEN_BALL ? VERSUS_SLOT : SINGLE_SLOT);
 
 /* ---- A side's choosing. ---- */
+
+/** A side's cursor put on the cell of `code` (its side's first cell for none); where none has it, left where it was. */
+function placeCursor(scenes: SceneTables, side: VsSelectSide, n: number, code: number): void {
+  const wanted = code < NO_CHOICE ? code & ~3 : scenes.vsSelect.sides[n]!.firstCode;
+  const at = scenes.vsSelect.grid.findIndex((cell) => cell.code === wanted);
+  if (at < 0) return;
+  side.column = at % COLUMNS;
+  side.row = Math.floor(at / COLUMNS);
+}
 
 /** A side set up to choose one character: its choice so far (the one it has, or none), its cursor on it, its last choice, or where it starts. */
 function setUpOne(game: GameState, scenes: SceneTables, n: number): void {
@@ -97,11 +133,17 @@ function setUpOne(game: GameState, scenes: SceneTables, n: number): void {
     code = ((game.entrants.roster[n]! << 2) + game.entrants.costume[n]!) | 0;
     side.chosen[0] = code;
   }
-  const wanted = code < NO_CHOICE ? code & ~3 : scenes.vsSelect.sides[n]!.firstCode;
-  const at = scenes.vsSelect.grid.findIndex((cell) => cell.code === wanted);
-  if (at < 0) return;
-  side.column = at % COLUMNS;
-  side.row = Math.floor(at / COLUMNS);
+  placeCursor(scenes, side, n, code);
+}
+
+/** A side set up to choose a team: none chosen, its size as the team last had it, its cursor where its side starts. */
+function setUpTeam(game: GameState, scenes: SceneTables, n: number): void {
+  const side = game.vsSelect.sides[n]!;
+  side.count = 0;
+  side.kick = 0;
+  side.chosen.fill(NO_CHOICE);
+  side.teamSize = game.world.match.teams[n]!.size;
+  placeCursor(scenes, side, n, side.chosen[0]!);
 }
 
 /**
@@ -169,6 +211,73 @@ function steer(game: GameState, tables: FightTables, side: VsSelectSide, pad: nu
   side.row = row;
 }
 
+/* ---- Tekken Ball's ball. ---- */
+
+/**
+ * The ball being chosen, a field on: turning, sliding toward where it goes, and once off the edge
+ * coming in from the other as the next ball (left the next, right the one before); the chooser's
+ * left or right sends it. Once it stands: select goes back (-1), a button takes it (1, over
+ * select), the arrows beside it blinking meanwhile.
+ */
+function chooseBall(game: GameState, tables: FightTables): -1 | 0 | 1 {
+  const ball = game.vsSelect.ball;
+  const match = game.world.match.ball;
+  game.run.ball.choosing = BALL_CHOOSING;
+  ball.yaw = (ball.yaw + BALL_TURNS.yaw) & 0xffff;
+  ball.pitch = (ball.pitch + BALL_TURNS.pitch) & 0xffff;
+  ball.x += (ball.target - ball.x) >> 3;
+  ball.roll = (ball.roll + BALL_TURNS.roll) & 0xffff;
+  if (ball.x < -BALL_SLIDE.edge + 1 && ball.direction === -1) {
+    match.kind = match.kind + 1 > BALLS - 1 ? 0 : match.kind + 1;
+    ball.x = BALL_SLIDE.edge;
+    ball.target = 0;
+  }
+  if (!(ball.x < BALL_SLIDE.edge) && ball.direction === 1) {
+    match.kind = match.kind === 0 ? BALLS - 1 : match.kind - 1;
+    ball.x = -BALL_SLIDE.edge;
+    ball.target = 0;
+  }
+  const pad = game.world.input.fresh[match.server]!;
+  if ((pad & LEFT) !== 0) {
+    ball.target = -BALL_SLIDE.away;
+    ball.direction = -1;
+    voiceLine(game.world, tables, 0, MOVE_SOUND, 0);
+  }
+  if ((pad & RIGHT) !== 0) {
+    ball.target = BALL_SLIDE.away;
+    ball.direction = 1;
+    voiceLine(game.world, tables, 0, MOVE_SOUND, 0);
+  }
+  if (BALL_SLIDE.still < Math.abs(ball.x - ball.target)) return 0;
+  let choice: -1 | 0 | 1 = (pad & CANCEL) !== 0 ? -1 : 0;
+  if ((game.world.vsyncSeen & BALL_BLINK) !== 0) ball.arrows = 1;
+  if ((pad & BUTTONS) !== 0) {
+    voiceLine(game.world, tables, 0, CHOOSE_SOUND, 0);
+    choice = 1;
+  }
+  return choice;
+}
+
+/** The ball's choosing set up as the select starts: nobody choosing, the ball in the middle and still, about to go right. */
+function setUpBallChoice(game: GameState): void {
+  game.run.ball.choosing = 0;
+  Object.assign(game.vsSelect.ball, { x: 0, target: 0, direction: 1, yaw: 0, pitch: 0, roll: 0, arrows: 0 });
+}
+
+/** The ball turning (drawn by the presentation), and once chosen and standing its level, name and damage. */
+function showBallChoice(game: GameState, tables: FightTables): void {
+  const ball = game.vsSelect.ball;
+  ball.yaw = (ball.yaw + BALL_TURNS.yaw) & 0xffff;
+  if (game.run.ball.choosing !== BALL_CHOOSING || !(Math.abs(ball.x - ball.target) < BALL_SLIDE.still + 1)) return;
+  const kind = game.world.match.ball.kind;
+  const [level, name] = tables.ball.names[kind]!;
+  print(game, 0, BALL_LINES.level.colour, BALL_LINES.middle - ((level!.length * 9) >> 1), BALL_LINES.level.y, level!);
+  print(game, 1, BALL_LINES.name.colour, BALL_LINES.middle - ((name!.length * NAME.advance) >> 1), BALL_LINES.name.y, name!);
+  print(game, 0, BALL_LINES.damage.colour, BALL_LINES.damage.x, BALL_LINES.damage.y, tables.ball.damage);
+  print(game, 1, BALL_LINES.percent.colour, BALL_LINES.percent.x, BALL_LINES.percent.y, String(kind * 0x14 + 0x3c).padStart(3, ' '));
+  print(game, 0, BALL_LINES.percent.colour, BALL_LINES.sign.x, BALL_LINES.sign.y, '%');
+}
+
 /** A side's step; true once it is done. */
 function stepSide(game: GameState, tables: FightTables, scenes: SceneTables, n: number): boolean {
   const vs = game.vsSelect;
@@ -194,6 +303,14 @@ function stepSide(game: GameState, tables: FightTables, scenes: SceneTables, n: 
           side.gaugeTarget = layout.gauge.x;
           side.gaugeX = layout.gauge.x;
           break;
+        case MenuMode.TEKKEN_BALL: {
+          const kind = standing(game, n);
+          side.state = kind === 2 ? VsSideState.CHOOSING : kind === 3 ? VsSideState.BALL_WAIT : VsSideState.COMPUTER;
+          side.handicap = BALL_HANDICAP;
+          side.gaugeTarget = layout.gauge.x;
+          side.gaugeX = layout.gauge.x;
+          break;
+        }
         case MenuMode.TIME_ATTACK:
         case MenuMode.SURVIVAL:
         case MenuMode.TEKKEN_FORCE:
@@ -202,17 +319,84 @@ function stepSide(game: GameState, tables: FightTables, scenes: SceneTables, n: 
         case MenuMode.PRACTICE:
           side.state = joined ? VsSideState.CHOOSING : VsSideState.WAITING;
           break;
+        case MenuMode.TEAM_BATTLE:
+          side.state = joined ? VsSideState.TEAM_SIZE : VsSideState.TEAM_COMPUTER;
+          setUpTeam(game, scenes, n);
+          break;
         default:
           throw new Error(`mode ${vs.mode}'s versus select is not remade`);
       }
-      setUpOne(game, scenes, n);
+      if (vs.mode !== MenuMode.TEAM_BATTLE) setUpOne(game, scenes, n);
       break;
     }
+    case VsSideState.TEAM_SIZE: {
+      const dx = across(game.pads.repeats[n]!);
+      let size = side.teamSize;
+      if (dx !== 0 && 0 <= size + dx && size + dx <= TEAM_MOST) size += dx;
+      size = Math.max(1, Math.min(size, TEAM_MOST));
+      if (side.teamSize !== size) voiceLine(game.world, tables, 0, MOVE_SOUND, 0);
+      side.teamSize = size;
+      if ((pressed(n) & SETTLE) === 0) break;
+      side.kick = (pressed(n) & KICKS) !== 0 ? 1 : 0;
+      voiceLine(game.world, tables, 0, CHOOSE_SOUND, 0);
+      side.state = VsSideState.TEAM_CHOOSING;
+      break;
+    }
+    case VsSideState.TEAM_CHOOSING:
+      steer(game, tables, side, n);
+      if ((pressed(n) & START) !== 0) {
+        voiceLine(game.world, tables, 0, CHOOSE_SOUND, 0);
+        side.state = VsSideState.OUT;
+        break;
+      }
+      if ((pressed(n) & CANCEL) !== 0) {
+        const had = side.count;
+        takeBack(game, tables, side);
+        if (had < 1) {
+          side.state = VsSideState.TEAM_SIZE;
+          break;
+        }
+      }
+      if (!choose(game, tables, scenes, n, pressed(n))) side.state = VsSideState.OUT;
+      break;
+    case VsSideState.TEAM_COMPUTER:
+      side.teamSize = other.teamSize;
+      if (game.run.challengers !== 0 && joinWithStart(game, n)) {
+        side.state = VsSideState.SET_UP;
+        voiceLine(game.world, tables, 0, JOIN_SOUND, 0);
+        break;
+      }
+      done = true;
+      break;
     case VsSideState.CHOOSING:
       steer(game, tables, side, n);
       if (choose(game, tables, scenes, n, pressed(n))) break;
-      side.state = vs.mode === MenuMode.VERSUS ? VsSideState.HANDICAP : VsSideState.CHOSEN;
+      if (vs.mode === MenuMode.VERSUS) side.state = VsSideState.HANDICAP;
+      else if (vs.mode !== MenuMode.TEKKEN_BALL) side.state = VsSideState.CHOSEN;
+      else if (game.run.ball.choosing === 0) {
+        game.run.ball.choosing = 1 << n;
+        side.state = VsSideState.BALL_CHOICE;
+        game.world.match.ball.server = n;
+      } else side.state = VsSideState.BALL_WAIT;
       break;
+    case VsSideState.BALL_WAIT:
+      if ((pressed(n) & CANCEL) !== 0) {
+        takeBack(game, tables, side);
+        side.state = VsSideState.CHOOSING;
+        if (game.run.ball.choosing === 1 << n) game.run.ball.choosing = 0;
+        break;
+      }
+      done = true;
+      break;
+    case VsSideState.BALL_CHOICE: {
+      const choice = chooseBall(game, tables);
+      if (choice === -1) {
+        takeBack(game, tables, side);
+        side.state = VsSideState.CHOOSING;
+        game.run.ball.choosing = 0;
+      } else if (choice === 1) side.state = VsSideState.BALL_WAIT;
+      break;
+    }
     case VsSideState.HANDICAP: {
       side.gaugeTarget = layout.gauge.raised;
       let handicap = side.handicap;
@@ -275,13 +459,32 @@ function stepSide(game: GameState, tables: FightTables, scenes: SceneTables, n: 
   return done;
 }
 
-/** The choices written for the match: each side's last choice kept (and in versus its handicap), and for a human (or practice's partner) its character, chosen, a human's. */
+/**
+ * The choices written for the match: each side's last choice kept (and in versus its handicap),
+ * a team's members, size and how many were chosen, and for a human (or practice's partner) its
+ * character, chosen, a human's; a team not a human's the computer's.
+ */
 function writeChoices(game: GameState): void {
   const vs = game.vsSelect;
   vs.sides.forEach((side, n) => {
     const joined = game.world.joined[n] !== 0;
     if (vs.mode !== MenuMode.PRACTICE || joined) game.options.lastChoices[n] = side.last & 0xff;
     if (vs.mode === MenuMode.VERSUS) game.world.options.handicaps[n] = side.handicap;
+    if (vs.mode === MenuMode.TEAM_BATTLE) {
+      const team = game.world.match.teams[n]!;
+      team.next = 0;
+      team.chosen = side.count;
+      team.size = side.teamSize;
+      team.kick = side.kick;
+      side.chosen.forEach((code, k) => (team.members[k] = code & 0xff));
+      if (!joined) {
+        game.entrants.computer[n] = 1;
+        return;
+      }
+      game.entrants.chosen[n] = 1;
+      game.entrants.computer[n] = 0;
+      return;
+    }
     if (vs.mode !== MenuMode.PRACTICE && !joined) return;
     game.entrants.roster[n] = side.chosen[0]! >> 2;
     game.entrants.costume[n] = side.chosen[0]! & 3;
@@ -327,6 +530,16 @@ function printNames(game: GameState, tables: FightTables, scenes: SceneTables): 
     side.bar.width = 0;
     let code: number;
     switch (side.nameKind) {
+      case 1: {
+        /* The team's size: one to eight, its own lit and blinking, then how many players there are. */
+        const slot = scenes.vsSelect.sides[n]!.slots[slotOf(vs.mode)]!;
+        for (let k = 0; k < TEAM_MOST; k += 1) {
+          const colour = k === side.teamSize - 1 ? ((game.world.vsyncSeen & 2) !== 0 ? 1 : 6) : 10;
+          print(game, NAME.font, colour, slot.x + 8 + k * 0x10, slot.y + 0x18, String(k + 1));
+        }
+        print(game, NAME.font, 5, slot.x + 0xc, slot.y + 0x48, `${side.teamSize} ${side.teamSize < 2 ? 'PLAYER ' : 'PLAYERS'}\n ON TEAM`);
+        return;
+      }
       case 2:
         code = codeUnder(game, scenes, side);
         break;
@@ -399,7 +612,8 @@ function drawVsSelect(game: GameState, tables: FightTables, scenes: SceneTables)
   if (vs.mode === MenuMode.VERSUS) {
     stepGauges(game, scenes);
     printRecord(game, scenes);
-  } else if (vs.mode !== MenuMode.TEKKEN_BALL) print(game, VERSUS_LINE.font, VERSUS_LINE.colour, VERSUS_LINE.x, VERSUS_LINE.y, VERSUS_LINE.text);
+  } else if (vs.mode === MenuMode.TEKKEN_BALL) showBallChoice(game, tables);
+  else print(game, VERSUS_LINE.font, VERSUS_LINE.colour, VERSUS_LINE.x, VERSUS_LINE.y, VERSUS_LINE.text);
   printNames(game, tables, scenes);
   printTitle(game, scenes);
   printBackground(game, scenes);
@@ -408,6 +622,7 @@ function drawVsSelect(game: GameState, tables: FightTables, scenes: SceneTables)
 /** Scene 10. */
 export function vsSelectScene(game: GameState, tables: FightTables, scenes: SceneTables): void {
   const vs = game.vsSelect;
+  vs.ball.arrows = 0;
   if (game.step !== 0 && vs.fading === 0 && softReset(game, tables)) return;
   switch (game.step) {
     case 0:
@@ -426,6 +641,7 @@ export function vsSelectScene(game: GameState, tables: FightTables, scenes: Scen
         side.last = game.options.lastChoices[n]!;
         stepSide(game, tables, scenes, n);
       });
+      if (vs.mode === MenuMode.TEKKEN_BALL) setUpBallChoice(game);
       playSong(game.world, SONG, false);
       keyOffVoices(game.world, false);
       game.step = 2;
