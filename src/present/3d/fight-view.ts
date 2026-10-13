@@ -4,7 +4,10 @@
  * shut, the stage's scenery and ground laid as the game lays them, the fighters' shadows on the
  * floor, a heavy blow's flash as a glow on each fighter, the sparks, dust and bursts as particles,
  * all through the game's own camera and projection, the picture widened past 4:3 to fill the
- * window.
+ * window. Tekken Ball's beach has no scenery: its panorama and sky behind, the court's lines on
+ * the sand, and the ball. Tekken Force's stages have none either: their backdrop far behind, three
+ * fighters (each enemy's soldiers and the boss loaded ahead, as they change mid-stage), and the
+ * +LIFE items.
  */
 import { Camera, computeLightMatrix, createEnvironment, type RendererApi, type ShadowCasters, type SurfaceTextureHandle } from '@driftengine/core';
 import type { ArenaTables } from '../../assets/arena.ts';
@@ -15,6 +18,11 @@ import { Ground } from './stage/ground.ts';
 import { createStage, type Stage } from './stage/stage.ts';
 import { layGround, layScenery, newGround, newScenery } from './layout.ts';
 import { Effects } from './effects/effects.ts';
+import { BallView } from './ball.ts';
+import { Beach, BEACH_STAGE, beachClear } from './stage/beach.ts';
+import { FORCE_STAGES, ForceBackdrop } from './stage/force-backdrop.ts';
+import { ForceItems } from './effects/force-items.ts';
+import { stageCodes } from '../../sim/fight/force-stage.ts';
 
 /**
  * Where the presentation finds a model pack's and a stage's drawing files; whether the textures
@@ -22,18 +30,32 @@ import { Effects } from './effects/effects.ts';
  */
 export interface DrawingFiles {
   fighter(pack: number): Promise<{ mesh: ArrayBuffer; texture: ImageBitmap }>;
-  stage(stage: number): Promise<{ mesh: ArrayBuffer; ground: ArrayBuffer; texture: ImageBitmap }>;
+  /** A stage's scenery, ground and atlas, and Tekken Ball's beach's panorama or a Tekken Force stage's backdrop with them. */
+  stage(stage: number): Promise<{ mesh: ArrayBuffer; ground: ArrayBuffer; texture: ImageBitmap; backdrop?: ImageBitmap }>;
+  /** One of the original pictures by name (Tekken Force's item and its shadow). */
+  picture?(name: string): Promise<ImageBitmap>;
   readonly smooth: boolean;
 }
 
 const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+/** How much deeper the floor's depth lies than the floor (a share of its distance from the eye): a few centimetres at the fight's distances. */
+const FLOOR_DEPTH = 0.003;
 /** The picture's half-height in the game's pixels, which its projection distance is against. */
 const HALF_HEIGHT = 240;
 /** Stage 11's sky behind its clouds, unless True Ogre plays there (8-bit sRGB). */
 const SKY = [0x48, 0x68, 200] as const;
 const SKY_STAGE = 0xb;
+const TEKKEN_BALL = 7;
+const TEKKEN_FORCE = 8;
+/** Tekken Force's final stage, past its four. */
+const FINAL_STAGE = 4;
 const FLASH_FRAMES = 0x30;
+/** Practice's mode, and how strongly its colour lights a fighter. */
+const PRACTICE = 5;
+const TINT = 0.9;
 const SHADOW_STRENGTH = 1;
+/** How far around the fighters the shadow map reaches (metres): a wider square, softer edges. */
+const SHADOW_RADIUS = 4;
 
 const linear = (c: number): number => {
   const v = c / 255;
@@ -64,11 +86,17 @@ export class FightView {
   /** The floor's tint, undoing what the light adds where nothing shades it, so it keeps the game's colours. */
   private readonly groundTint: [number, number, number];
   private readonly white: SurfaceTextureHandle;
-  private readonly sides: ({ pack: number; fighter: Fighter | null } | null)[] = [null, null];
-  private readonly stages = new Map<number, { stage: Stage; ground: Ground } | null>();
+  /** Per side, its models by pack: the one it shows, and in Tekken Force those it may change to. */
+  private readonly sides: Map<number, { fighter: Fighter | null }>[] = [new Map(), new Map(), new Map()];
+  private readonly stages = new Map<number, { stage: Stage; ground: Ground; beach: Beach | null; force: ForceBackdrop | null } | null>();
+  /** Tekken Ball's ball, made for the first match that has one. */
+  private ball: BallView | null = null;
+  /** Tekken Force's items, made once their pictures are loaded for the first match that has them. */
+  private items: ForceItems | null | undefined;
   private readonly ground = newGround();
   private readonly scenery = newScenery();
   private readonly sceneryModel = new Float32Array(16);
+  private readonly floorModel = new Float32Array(16);
   private readonly casting: Fighter[] = [];
   private readonly effects: Effects;
   /** The fighters' packs and stage `prepare` found ready, and those it waits on the compiles of. */
@@ -90,20 +118,42 @@ export class FightView {
     this.effects = new Effects(renderer);
   }
 
-  /** A side's fighter for its model pack, loaded the first time it is asked for (null until then). */
-  private fighterFor(side: number, pack: number): Fighter | null {
-    const current = this.sides[side] ?? null;
-    if (current !== null && current.pack === pack) return current.fighter;
-    current?.fighter?.dispose();
-    const next: { pack: number; fighter: Fighter | null } = { pack, fighter: null };
-    this.sides[side] = next;
+  /**
+   * A side's fighter for its model pack, loaded the first time it is asked for (null until then);
+   * the side's other models are let go but those in `kept` (the packs it may change to).
+   */
+  private fighterFor(side: number, pack: number, kept: readonly number[] = []): Fighter | null {
+    if (pack < 0) return null;
+    const models = this.sides[side]!;
+    for (const [other, entry] of models) {
+      if (other === pack || kept.includes(other)) continue;
+      entry.fighter?.dispose();
+      models.delete(other);
+    }
+    const found = models.get(pack);
+    if (found !== undefined) return found.fighter;
+    const next: { fighter: Fighter | null } = { fighter: null };
+    models.set(pack, next);
     void this.files.fighter(pack).then(({ mesh, texture }) => {
       const handle = this.renderer.createSurfaceTexture(texture, this.textureOptions(false));
       const fighter = new Fighter(this.renderer, readFighterMesh(mesh), handle, this.white);
-      if (this.sides[side] === next) next.fighter = fighter;
+      if (models.get(pack) === next) next.fighter = fighter;
       else fighter.dispose();
     });
     return null;
+  }
+
+  /** The sides a fight draws: three in Tekken Force (the third not on its final stage), else two. */
+  private sidesOf(state: FightState): number {
+    if (state.mode !== TEKKEN_FORCE) return 2;
+    return state.force.stage < FINAL_STAGE ? 3 : 2;
+  }
+
+  /** The packs a side may change to mid-stage: in Tekken Force each enemy's soldiers and the boss, none for the player or elsewhere. */
+  private packsAhead(state: FightState, side: number): number[] {
+    if (state.mode !== TEKKEN_FORCE || side === 0) return [];
+    const codes = stageCodes(this.data, state.fighters[0]!.rosterCode, state.force.stage);
+    return codes.map((code) => this.data.roster.codes[code]?.pack ?? -1).filter((pack) => pack >= 0);
   }
 
   /**
@@ -116,16 +166,34 @@ export class FightView {
   }
 
   /** The stage's scenery and ground, loaded the first time it is asked for (null until then). */
-  private stageFor(id: number): { stage: Stage; ground: Ground } | null {
+  private stageFor(id: number): { stage: Stage; ground: Ground; beach: Beach | null; force: ForceBackdrop | null } | null {
     if (!this.stages.has(id)) {
       this.stages.set(id, null);
-      void this.files.stage(id).then(({ mesh, ground, texture }) => {
+      void this.files.stage(id).then(({ mesh, ground, texture, backdrop }) => {
         const handle = this.renderer.createSurfaceTexture(texture, this.textureOptions(true));
         const stage = createStage(this.renderer, mesh, handle);
-        this.stages.set(id, { stage, ground: new Ground(this.renderer, ground, stage.atlasWidth, stage.atlasHeight, handle) });
+        const force = backdrop !== undefined && FORCE_STAGES.first <= id && id <= FORCE_STAGES.last;
+        const beach = backdrop === undefined || force ? null : new Beach(this.renderer, backdrop, this.white);
+        const forceBackdrop = force ? new ForceBackdrop(this.renderer, backdrop) : null;
+        this.stages.set(id, { stage, ground: new Ground(this.renderer, ground, stage.atlasWidth, stage.atlasHeight, handle, this.groundTint), beach, force: forceBackdrop });
       });
     }
     return this.stages.get(id) ?? null;
+  }
+
+  /** Tekken Force's items, their pictures loaded the first time they are asked for (null until then, or with no pictures to load). */
+  private itemsFor(): ForceItems | null {
+    if (this.items === undefined) {
+      this.items = null;
+      const picture = this.files.picture?.bind(this.files);
+      if (picture !== undefined) {
+        void Promise.all([picture('force-item'), picture('force-glow')]).then(([item, glow]) => {
+          const options = { colorSpace: 'srgb', filter: 'linear', mipmap: false, wrap: 'clamp' } as const;
+          this.items = new ForceItems(this.renderer, this.renderer.createSurfaceTexture(item, options), this.renderer.createSurfaceTexture(glow, options));
+        });
+      }
+    }
+    return this.items;
   }
 
   /**
@@ -135,10 +203,11 @@ export class FightView {
    * which then draws it without them, and the frames after wait on their pipelines.
    */
   prepare(state: FightState, stageAlone = false): boolean {
-    const packs = stageAlone ? [] : [0, 1].map((i) => state.fighters[i]!.costume);
-    const key = `${stageAlone ? 'alone' : packs.join(' ')} ${state.stage}`;
-    const fighters = packs.map((pack, i) => this.fighterFor(i, pack));
+    const sides = stageAlone ? [] : Array.from({ length: this.sidesOf(state) }, (_, i) => ({ pack: state.fighters[i]!.costume, ahead: this.packsAhead(state, i) }));
+    const key = `${stageAlone ? 'alone' : sides.map((side) => [side.pack, ...side.ahead].join(',')).join(' ')} ${state.stage}`;
+    const fighters = sides.flatMap(({ pack, ahead }, i) => [pack, ...ahead].map((p) => this.fighterFor(i, p, [pack, ...ahead])));
     const drawn = this.stageFor(state.stage);
+    if (state.mode === TEKKEN_FORCE && !stageAlone) this.itemsFor();
     if (drawn === null || fighters.includes(null)) return false;
     if (this.prepared === key) return true;
     if (this.preparing === key) return false;
@@ -181,6 +250,12 @@ export class FightView {
 
   /** The flash's glow on a fighter: its colour at the strength left, by how much of the blow's side the camera sees. */
   private light(state: FightState, fighter: Fighter, f: FighterState): void {
+    /* Practice's HIT ANALYSIS colours a fighter wholly in place of its light. */
+    const tint = state.mode === PRACTICE ? state.practice.colours[f.movesetSlot] : undefined;
+    if (tint !== undefined && tint[0] !== 0) {
+      fighter.light((tint[1]! / 0xff) * TINT, (tint[2]! / 0xff) * TINT, (tint[3]! / 0xff) * TINT);
+      return;
+    }
     const flash = state.flash;
     const strength = 0 < flash.left ? flash.left / FLASH_FRAMES / 0x1000 : 0;
     if (strength === 0) {
@@ -197,17 +272,17 @@ export class FightView {
     fighter.light(glow(0), glow(1), glow(2));
   }
 
-  /** The fighters' shadow map this field, around their midpoint. */
-  private castShadows(state: FightState): void {
+  /** The fighters' shadow map this field, around their midpoint (in Tekken Force the midpoint of those drawn). */
+  private castShadows(state: FightState, drawn: readonly FighterState[]): void {
     const casting = this.casting;
     if (casting.length === 0) {
       this.env.shadowStrength = 0;
       return;
     }
-    const [a, b] = state.fighters;
-    const x = (a.skeleton.base.translation[0]! + b.skeleton.base.translation[0]!) / 2000;
-    const z = -(a.skeleton.base.translation[2]! + b.skeleton.base.translation[2]!) / 2000;
-    this.env.shadowDepthSpan = computeLightMatrix(this.env.directionalDir, x, 0.8, z, 4, this.renderer.shadowMapSize, this.lightMatrix);
+    const around = state.mode === TEKKEN_FORCE ? drawn : state.fighters.slice(0, 2);
+    const x = around.reduce((sum, f) => sum + f.skeleton.base.translation[0]!, 0) / around.length / 1000;
+    const z = -around.reduce((sum, f) => sum + f.skeleton.base.translation[2]!, 0) / around.length / 1000;
+    this.env.shadowDepthSpan = computeLightMatrix(this.env.directionalDir, x, 0.8, z, SHADOW_RADIUS, this.renderer.shadowMapSize, this.lightMatrix);
     this.env.shadowStrength = SHADOW_STRENGTH;
     const casters: ShadowCasters = (sink) => {
       for (const fighter of casting) sink.mesh(fighter.handle, IDENTITY, fighter.material);
@@ -215,6 +290,15 @@ export class FightView {
     this.renderer.beginShadowPass(this.lightMatrix, 'dynamic');
     this.renderer.drawShadowCasters(casters);
     this.renderer.endShadowPass();
+  }
+
+  /** The floor pushed away from the eye along each line of sight: every point on the same pixel, a little deeper. */
+  private floorMatrix(state: FightState): Float32Array {
+    const eye = state.camera.drawn.eye;
+    const k = 1 + FLOOR_DEPTH;
+    const [ex, ey, ez] = [eye[0]! / 1000, -eye[1]! / 1000, -eye[2]! / 1000];
+    this.floorModel.set([k, 0, 0, 0, 0, k, 0, 0, 0, 0, k, 0, (1 - k) * ex, (1 - k) * ey, (1 - k) * ez, 1]);
+    return this.floorModel;
   }
 
   /** Where the scenery stands, in the engine's axes: at its place and the stage's height, turned by minus its yaw. */
@@ -237,11 +321,21 @@ export class FightView {
     const widening = Math.max(1, aspect / (4 / 3));
     this.adoptCamera(state, aspect);
     this.casting.length = 0;
-    for (let i = 0; i < 2 && !stageAlone; i += 1) {
-      if (((state.posed >> i) & 1) === 0) continue;
+    const posed: FighterState[] = [];
+    const sides = this.sidesOf(state);
+    /* A side no longer drawn (the third, after Tekken Force) lets its models go. */
+    for (let i = sides; i < this.sides.length; i += 1) {
+      for (const entry of this.sides[i]!.values()) entry.fighter?.dispose();
+      this.sides[i]!.clear();
+    }
+    for (let i = 0; i < sides && !stageAlone; i += 1) {
       const f = state.fighters[i]!;
-      const fighter = this.fighterFor(i, f.costume);
-      if (fighter === null) continue;
+      const ahead = this.packsAhead(state, i);
+      /* Every model the side may change to is loading or loaded, whether or not it is on screen now. */
+      for (const pack of ahead) this.fighterFor(i, pack, [f.costume, ...ahead]);
+      const fighter = this.fighterFor(i, f.costume, ahead);
+      if (((state.posed >> i) & 1) === 0 || fighter === null) continue;
+      posed.push(f);
       for (let hand = 0; hand < 2; hand += 1) fighter.shape(handPart(f.roster, hand), f.hands.drawn[hand]!);
       fighter.shape(wingsPart(f.roster), f.trueOgre.wingDrawn);
       fighter.face(f.eyesShut !== 0 ? 1 : 0);
@@ -249,23 +343,20 @@ export class FightView {
       this.light(state, fighter, f);
       this.casting.push(fighter);
     }
-    this.castShadows(state);
+    this.castShadows(state, posed);
     if (!stageAlone && only.effects) this.effects.prepare(state, this.data, this.env, this.view, this.camera.position);
     else this.env.lightCount = 0;
     const sky = state.stage === SKY_STAGE && state.match.trueOgres === 0;
     const backdrop = sky ? SKY : ([0, 0, 0] as const);
-    renderer.beginFrame([linear(backdrop[0]), linear(backdrop[1]), linear(backdrop[2])]);
+    renderer.beginFrame(state.stage === BEACH_STAGE ? beachClear(state) : [linear(backdrop[0]), linear(backdrop[1]), linear(backdrop[2])]);
     renderer.bindMeshPass(this.camera, this.env);
     const drawn = this.stageFor(state.stage);
     const layout = this.arena.stages[state.stage];
+    const ball = state.mode === TEKKEN_BALL && !stageAlone;
+    /* Tekken Force's backdrop is the farthest thing drawn: everything after it lies over it. */
+    if (drawn?.force != null && state.mode === TEKKEN_FORCE) drawn.force.draw(state, this.data, aspect);
     if (drawn !== null && layout != null) {
-      layGround(state, this.data, this.arena, layout, { widening }, this.ground);
-      drawn.ground.update(this.ground);
-      if (drawn.ground.mesh !== null) {
-        renderer.setMaterial(drawn.ground.material);
-        renderer.drawTranslucentMesh(drawn.ground.mesh, IDENTITY, 1, { lit: true, fog: false, tint: this.groundTint });
-      }
-      if (only.scenery && state.match.trueOgres === 0) {
+      if (only.scenery && state.match.trueOgres === 0 && layout.cellSize !== 0) {
         layScenery(state, this.data, this.arena, layout, { widening }, this.scenery);
         renderer.setMaterial(drawn.stage.material);
         const model = this.sceneryMatrix();
@@ -274,6 +365,22 @@ export class FightView {
         });
         renderer.setMaterial(null);
       }
+      /*
+       * The floor is solid, so the fighters' shadows and the occlusion where they stand land on it;
+       * its depth lies a little past it, so a sole the pose sinks into it stays in sight as the
+       * game, drawing the floor first and everything over it, keeps it.
+       */
+      layGround(state, this.data, this.arena, layout, { widening }, this.ground);
+      drawn.ground.update(this.ground);
+      if (drawn.ground.mesh !== null) {
+        renderer.setMaterial(drawn.ground.material);
+        renderer.drawMesh(drawn.ground.mesh, this.floorMatrix(state));
+        renderer.setMaterial(null);
+      }
+      if (drawn.beach !== null) {
+        if (ball) drawn.beach.drawCourt(state, (this.data.ball.kinds[state.match.ball.kind] ?? this.data.ball.kinds[0]!).strip);
+        drawn.beach.drawPanorama(state, this.data, aspect);
+      }
     }
     behind?.();
     for (const fighter of this.casting) {
@@ -281,7 +388,13 @@ export class FightView {
       renderer.drawMesh(fighter.handle, IDENTITY);
       renderer.setMaterial(null);
     }
+    if (ball) {
+      this.ball ??= new BallView(renderer, this.data.ball, this.data.math, this.white);
+      this.ball.draw(state, this.view);
+    }
+    if (state.mode === TEKKEN_FORCE && !stageAlone) this.itemsFor()?.draw(state);
     if (!stageAlone && only.effects) this.effects.draw(this.camera, this.env, state.frameCount / 60);
+    if (ball) this.ball?.drawBeams(state, aspect);
     renderer.endFrame();
     after?.();
   }

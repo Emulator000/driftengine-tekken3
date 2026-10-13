@@ -17,7 +17,9 @@
  * plus three (`random.mix`), in the original's order.
  */
 import type { Cancel, Move } from '../data/moveset.ts';
-import { div, s16, s8 } from '../math/integers.ts';
+import { angle4096 } from '../math/angles.ts';
+import { cpuDiv, div, s16, s8 } from '../math/integers.ts';
+import { isqrt } from '../math/roots.ts';
 import { nextRandom } from '../math/random.ts';
 import { cancelTest } from './cancel.ts';
 import { hitOf, moveAt, sameMove } from './moves.ts';
@@ -85,13 +87,24 @@ const OUT_OF_REACH = 0xb87;
 /** At most this many candidates. */
 const CANDIDATES = 0xb4;
 
-/** One frame's decisions for a fighter. */
+/**
+ * Tekken Ball's court as the computer sees it: where each fighter stands along the line from the
+ * first to the second (the first always the lesser), where the ball is along it and how far off it.
+ */
+interface Court {
+  readonly along: readonly [number, number];
+  readonly ball: number;
+  readonly across: number;
+}
+
+/** One frame's decisions for a fighter (and in Tekken Ball the court). */
 interface Turn {
   readonly state: FightState;
   readonly data: FightData;
   readonly self: Fighter;
   readonly opponent: Fighter;
   readonly rec: ComputerRecord;
+  readonly court: Court | null;
 }
 
 /** What a frame's decisions read of both fighters' moves: the moves and each one's active window and frame. */
@@ -281,8 +294,9 @@ const recordOf = (state: FightState, f: Fighter): ComputerRecord => state.comput
 export function computerInput(state: FightState, self: Fighter, data: FightData): [number, number] {
   const rec = recordOf(state, self);
   const opponent = state.fighters[rec.opponent]!;
-  const t: Turn = { state, data, self, opponent, rec };
-  if (state.mode === TEKKEN_BALL) throw new Error("Tekken Ball's computer players are not remade");
+  const t: Turn = { state, data, self, opponent, rec, court: state.mode === TEKKEN_BALL ? measureCourt(state, data) : null };
+  state.computer.lastSelf = self.slot;
+  state.computer.lastOpponent = opponent.slot;
   rec.performed = null;
   const lastFrame = rec.lastFrame;
   rec.lastFrame = s16(self.frame);
@@ -330,6 +344,50 @@ export function computerInput(state: FightState, self: Fighter, data: FightData)
 
 const TEKKEN_BALL = 7;
 
+/* ---- Tekken Ball's court. ---- */
+
+/** A product's sum rounded toward zero out of 12 fraction bits. */
+const r12 = (v: number): number => ((v | 0) < 0 ? (v | 0) + 0xfff : v | 0) >> 12;
+
+/** The court measured along the line from the first fighter to the second, crossing x = 0. */
+function measureCourt(state: FightState, data: FightData): Court {
+  const [x0, , z0] = state.fighters[0]!.skeleton.base.translation as [number, number, number];
+  const [x1, , z1] = state.fighters[1]!.skeleton.base.translation as [number, number, number];
+  const [bx, , bz] = state.ball.position as [number, number, number];
+  const dx = (x1 - x0) | 0;
+  const dz = (z1 - z0) | 0;
+  const a = -angle4096(dx, dz, data.math) & 0xfff;
+  const sin = data.math.sine[a]!;
+  const cos = data.math.sine[a + 0x400]!;
+  const k = (z0 - cpuDiv(Math.imul(dz, x0), dx)) | 0;
+  const along = (x: number, z: number): number => r12(Math.imul(x, cos) - Math.imul((z - k) | 0, sin));
+  return { along: [along(x0, z0), along(x1, z1)], ball: along(bx, bz), across: r12(Math.imul(bx, sin) + Math.imul((bz - k) | 0, cos)) };
+}
+
+/** How far the ball is from a fighter. */
+function ballDistance(court: Court, f: Fighter): number {
+  const d = (court.along[f.movesetSlot]! - court.ball) | 0;
+  return isqrt((Math.imul(d, d) + Math.imul(court.across, court.across)) | 0);
+}
+
+/** The ball behind the fighter: it backs away. */
+function backFromBall(m: Moment): boolean {
+  const court = m.court!;
+  const behind = m.rec.index === 0 ? court.ball < court.along[0] : court.along[1] < court.ball;
+  if (behind) startScript(m, m.data.computer.backAway);
+  return behind;
+}
+
+/** The ball ahead of the fighter: for the first, well ahead; for the second, ahead but near. */
+function ballAhead(m: Moment): boolean {
+  const court = m.court!;
+  if (m.rec.index === 0) return court.along[0] + BALL_AHEAD < court.ball;
+  return court.along[1] - BALL_AHEAD < court.ball && court.ball < court.along[1];
+}
+
+/** How far ahead the ball must be (or within, for the second fighter). */
+const BALL_AHEAD = 0x7d0;
+
 /**
  * The first byte of a move's hit data, signed (its first code). A move with none has -1 for its
  * pointer, and the byte read there is the scratchpad's last, which nothing writes: 0.
@@ -360,8 +418,12 @@ function holding(t: Turn): boolean {
     rec.pad = (rec.ownFlags & 4) << 10;
     return true;
   }
-  if (t.state.mode === Mode.TEKKEN_FORCE) throw new Error("Tekken Force's computer players are not remade");
   if (t.state.computer.halfRate !== 0 && (t.state.frameCount & rec.index & 1) !== 0) {
+    rec.pad = rec.lastPad & HELD_DIRECTION;
+    return true;
+  }
+  /* Tekken Force: an enemy the other's attack holds still keeps its direction. */
+  if (t.state.mode === Mode.TEKKEN_FORCE && 0 < t.state.computer.forceHold[rec.index]!) {
     rec.pad = rec.lastPad & HELD_DIRECTION;
     return true;
   }
@@ -379,11 +441,24 @@ function decide(m: Moment): void {
   m.rec.takenCount = 0;
   m.rec.candidateCount = 0;
   if (followUps(m) || ranLong(m)) return;
+  if (m.court !== null && backFromBall(m)) return;
   if (holdThrough(m) || answerComing(m) || respond(m)) return;
   dropFollowUps(m);
   if (turnToFace(m)) return;
-  if (attack(m)) return;
+  if (!hangsBack(m) && attack(m)) return;
   walk(m);
+}
+
+/**
+ * Tekken Force: an enemy walks instead of attacking while the other's attack makes it wait, or,
+ * by its pacing's odds, while the player is not facing it.
+ */
+function hangsBack(m: Moment): boolean {
+  const { state, self, rec } = m;
+  if (state.mode !== Mode.TEKKEN_FORCE) return false;
+  if (0 < state.computer.forceWait[rec.index]!) return true;
+  if (state.fighters[0].opponent === self.slot) return false;
+  return mix12(m) < rec.pacing![2];
 }
 
 /** Whether neither fighter is being pushed. */
@@ -428,6 +503,11 @@ function notice(m: Moment): void {
     if (10 < rec.theirAttacks) rec.theirAttacks = 10;
   }
   let distance = rec.distance;
+  /* In Tekken Ball the ball nearer than the opponent is what is near. */
+  if (m.court !== null) {
+    const ball = ballDistance(m.court, self);
+    if (ball < distance) distance = ball;
+  }
   const before = rec.lastDistance;
   rec.lastDistance = distance;
   const reach = distance - rec.theirCharacter[5]! - 0x80;
@@ -1433,6 +1513,7 @@ function plan(m: Moment, wait: number, chance: number): number {
     chance = 0;
     rec.press = 0;
   }
+  if (m.court !== null && ballAhead(m)) return markApproaches(m);
   const low = (move: Move): boolean => {
     const kind = kindOf(move);
     return move.activeWindow.first < 0x51 && ((kind & 0x10000) !== 0 || (kind & 0xffff) === SPECIAL_LOW) && (kind & 0x400000) === 0;
@@ -1774,6 +1855,11 @@ function settle(t: Turn): [number, number] {
   rec.answerHold = countDown(rec.answerHold);
   if (rec.retune === 0) tune(t, -1, -1, -1);
   rec.retune = countDown(rec.retune);
+  if (t.state.mode === Mode.TEKKEN_FORCE) {
+    const computer = t.state.computer;
+    if (0 <= computer.forceWait[rec.index]!) computer.forceWait[rec.index] = computer.forceWait[rec.index]! - 1;
+    if (0 <= computer.forceHold[rec.index]!) computer.forceHold[rec.index] = computer.forceHold[rec.index]! - 1;
+  }
   const guardMoveHeld = (flags & 0xffff) === STANDING_GUARD || (flags & 0xffff) === CROUCHING_GUARD;
   rec.inGuard = guardMoveHeld ? 1 : 0;
   if (s8(self.hitReacting) !== 0) {
@@ -1949,6 +2035,13 @@ function noteChosen(t: Turn, entry: Cancel): void {
   if ((kindOf(move) & 0x400000) !== 0) rec.throwFollowUps = s16(rec.throwFollowUps + 1);
   if (s8(move.activeWindow.first) === 0) return;
   rec.wait = s16(rec.tuning[Tune.WAIT]! + rec.tuning[Tune.WAIT_EXTRAS + mixBits(t, 3)]!);
+  /* Tekken Force: an enemy's attack makes the other wait before attacking, and hold still unless it already is. */
+  if (t.state.mode === Mode.TEKKEN_FORCE) {
+    const other = 2 - t.self.slot;
+    const computer = t.state.computer;
+    computer.forceWait[other] = rec.pacing![0];
+    if (computer.forceHold[other]! < 0) computer.forceHold[other] = rec.pacing![1];
+  }
   rec.guardPlan = -1;
   if (0 < rec.travelPlan) rec.travelPlan = -1;
   calm(rec);
@@ -2467,7 +2560,8 @@ function tune(t: Turn, level: number, stage: number, mode: number): void {
   row(t.self).forEach((v, i) => (rec.ownCharacter[i] = v));
   row(t.opponent).forEach((v, i) => (rec.theirCharacter[i] = v));
   rec.attackLimit = Math.max(rec.tuning[Tune.ATTACK_LIMIT_TOO]!, rec.tuning[Tune.ATTACK_LIMIT]!);
-  if (t.state.mode === Mode.TEKKEN_FORCE) throw new Error("Tekken Force's tuning is not remade");
+  /* Tekken Force's pacing: the first stage's entry, or the later stages'. */
+  if (t.state.mode === Mode.TEKKEN_FORCE) rec.pacing = t.data.computer.forcePacing[level & 3]![2 < stage ? 3 : stage]!;
 }
 
 /** A moveset's character answers: the one for playing against it, and its own. */
@@ -2476,11 +2570,15 @@ function answersOf(data: FightData, moveset: number): { against: ComputerRecord[
   return entry === undefined ? { against: 'none', own: 'none' } : { against: entry.against, own: entry.own };
 }
 
+/** Each fighter's computer record (-1 none) and the fighter it plays against: the pair's, or Tekken Force's two enemies against the player. */
+const RECORDS: { readonly own: readonly number[]; readonly against: readonly number[] } = { own: [0, 1, -1], against: [1, 0, -1] };
+const FORCE_RECORDS: typeof RECORDS = { own: [-1, 0, 1], against: [-1, 0, 0] };
+
 /** The tuning the attract's demo halves (and the crouch, quartered): it plays a gentler computer. */
 const ATTRACT_HALVED = [Tune.WAIT_EXTRAS, 4, 5, 6];
 
 /** A record's state cleared for a round, its tuning chosen, its calm set going. */
-function resetRecord(t: Turn): void {
+function resetRecord(t: Turn, level = -1, stage = -1, mode = -1): void {
   const rec = t.rec;
   rec.lastFrame = -1;
   rec.guarding = 0;
@@ -2530,7 +2628,7 @@ function resetRecord(t: Turn): void {
   rec.pressNext = 0;
   rec.crouch = 0;
   rec.retreat = 0;
-  tune(t, -1, -1, -1);
+  tune(t, level, stage, mode);
   rec.againstAnswer = answersOf(t.data, t.opponent.character).against;
   rec.ownAnswer = answersOf(t.data, t.self.character).own;
   if (t.state.attract !== 0) {
@@ -2542,21 +2640,43 @@ function resetRecord(t: Turn): void {
   for (const candidate of t.state.computer.candidates) candidate.taken = -1;
 }
 
-/** Each round: a record for each fighter (each the other's opponent), its pads cleared and the record reset. */
+/**
+ * Each round: a record for each fighter (each the other's opponent), its pads cleared and the
+ * record reset; in Tekken Force a record for each enemy, both against the player. Tekken Force's
+ * waits and holds none.
+ */
 export function resetComputers(state: FightState, data: FightData): void {
   state.computer.halfRate = state.attract !== 0 || state.mode === Mode.TEKKEN_FORCE ? 1 : 0;
-  if (state.mode === Mode.TEKKEN_FORCE) throw new Error("Tekken Force's computer players are not remade");
+  state.computer.forceWait.fill(-1);
+  state.computer.forceHold.fill(-1);
+  const force = state.mode === Mode.TEKKEN_FORCE;
+  const own = force ? FORCE_RECORDS.own : RECORDS.own;
+  const against = force ? FORCE_RECORDS.against : RECORDS.against;
   for (let i = 0; i < 3; i += 1) {
     const self = state.fighters[i]!;
-    self.computerRecord = i < 2 ? i : 0xff;
-    if (i >= 2) continue;
-    const opponent = state.fighters[1 - i]!;
-    const rec = state.computer.records[i]!;
-    rec.steps = i;
-    rec.index = i;
-    rec.opponent = 1 - i;
+    const index = own[i]!;
+    self.computerRecord = index < 0 ? 0xff : index;
+    if (index < 0) continue;
+    const opponent = state.fighters[against[i]!]!;
+    const rec = state.computer.records[index]!;
+    rec.steps = index;
+    rec.index = index;
+    rec.opponent = against[i]!;
     rec.lastPad = 0;
     rec.pad = 0;
-    resetRecord({ state, data, self, opponent, rec });
+    state.computer.lastSelf = self.slot;
+    state.computer.lastOpponent = opponent.slot;
+    resetRecord({ state, data, self, opponent, rec, court: null });
   }
+}
+
+/**
+ * A computer record reset at a difficulty and stage (practice's): its state cleared, its tuning
+ * chosen by them, played as the pair the computer last played (whose health and characters it
+ * reads).
+ */
+export function resetComputerRecord(state: FightState, data: FightData, rec: ComputerRecord, level: number, stage: number, mode: number): void {
+  const self = state.fighters[state.computer.lastSelf]!;
+  const opponent = state.fighters[state.computer.lastOpponent]!;
+  resetRecord({ state, data, self, opponent, rec, court: null }, level, stage, mode);
 }

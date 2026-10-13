@@ -14,15 +14,21 @@ import type { FightData, FightState } from '../../sim/fight/state.ts';
 import { PaintAtlas, TILES, type AtlasPicture } from '../2d/atlas.ts';
 import { screenTint } from '../2d/tint.ts';
 import { setType, type TypeStyle } from '../2d/type.ts';
-import { DISPLAY } from '../2d/typefaces.ts';
+import { DISPLAY, NUMERALS } from '../2d/typefaces.ts';
 import { printStyle } from './theme.ts';
-import { pauseView, type PauseList } from './pause-layout.ts';
+import { pauseView, type PauseList, type PauseView } from './pause-layout.ts';
 
 type Context = OffscreenCanvasRenderingContext2D;
 
 const LINES = 480;
 const ACROSS = 288;
 const MIDDLE = 184;
+/**
+ * The rules page in the original's texels: its size, the title's box, the margin and the gutter
+ * beside the box, the first line's baseline, the type's largest and least sizes and its leading,
+ * and the ink's grey.
+ */
+const RULES_PAGE = { w: 0x100, h: 0xcc, box: { x: 1, y: 6, w: 134, h: 55 }, margin: 3, gutter: 6, first: 19, size: 22, least: 11, leading: 1.3, ink: '#1c1c1c' } as const;
 /** The rows' layout within a row, in units: the bar's top and bottom, the name's and the command's baselines. */
 const ROW = { height: 0x40, barTop: -2, barBottom: 0x18, name: 0x10, command: 0x34, inset: 6 };
 const ICON = 26;
@@ -51,6 +57,48 @@ const GOLD: TypeStyle = {
   tracking: 0.06,
 };
 const LABEL: TypeStyle = { ...SILVER, outlines: [[0.14, '#000000']], tracking: 0.03 };
+
+/**
+ * The rules page as the original lays it out, set new in a page `w` by `h` device pixels: the title
+ * in a box at its top left, the words flowing beside the box and then across the page below it,
+ * as large as fits.
+ */
+function setRules(g: OffscreenCanvasRenderingContext2D, title: string, text: string, left: number, top: number, w: number, h: number): void {
+  const [u, v] = [w / RULES_PAGE.w, h / RULES_PAGE.h];
+  const box = RULES_PAGE.box;
+  g.strokeStyle = RULES_PAGE.ink;
+  g.lineWidth = Math.max(1, 1.6 * v);
+  g.strokeRect(left + box.x * u, top + box.y * v, box.w * u, box.h * v);
+  g.fillStyle = RULES_PAGE.ink;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.font = `${NUMERALS.weight} ${box.h * 0.42 * v}px "${NUMERALS.family}", sans-serif`;
+  g.fillText(title, left + (box.x + box.w / 2) * u, top + (box.y + box.h / 2) * v, box.w * 0.9 * u);
+  g.textAlign = 'left';
+  g.textBaseline = 'alphabetic';
+  const words = text.split(' ');
+  /* The largest type the words fit the page in, the box's side a narrower measure. */
+  for (let size = RULES_PAGE.size; RULES_PAGE.least <= size; size -= 0.5) {
+    g.font = `500 ${size * v}px sans-serif`;
+    g.fontStretch = 'condensed';
+    const pitch = size * RULES_PAGE.leading;
+    const lines: { x: number; words: string[] }[] = [];
+    let at = 0;
+    for (let line = 0; at < words.length; line += 1) {
+      const y = RULES_PAGE.first + line * pitch;
+      if (RULES_PAGE.h < y) break;
+      const x = y - size < box.y + box.h ? box.x + box.w + RULES_PAGE.gutter : RULES_PAGE.margin;
+      const room = (RULES_PAGE.w - RULES_PAGE.margin - x) * u;
+      const taken: string[] = [];
+      while (at < words.length && g.measureText([...taken, words[at]!].join(' ')).width <= room) taken.push(words[at++]!);
+      if (taken.length === 0) break;
+      lines.push({ x, words: taken });
+    }
+    if (at < words.length) continue;
+    lines.forEach((line, k) => g.fillText(line.words.join(' '), left + line.x * u, top + (RULES_PAGE.first + k * pitch) * v));
+    return;
+  }
+}
 
 export class PauseScreen {
   private readonly pass: SpritePass;
@@ -330,6 +378,17 @@ export class PauseScreen {
     if (title) this.text('WHEN FACING RIGHT', LABEL, TYPE.title, list.left + list.width / 2 - title.ink / 2, 0x6e);
   }
 
+  /** Tekken Ball's rules page: its shadow, its white frame, and its words set on it at the screen's resolution. */
+  private rules(rules: NonNullable<PauseView['rules']>): void {
+    const { shadow, frame, picture } = rules;
+    this.fill(shadow.x, shadow.y, shadow.w, shadow.h, [0, 0, 0, 1]);
+    this.fill(frame.x, frame.y, frame.w, frame.h, [1, 1, 1, 1]);
+    const { title, text } = this.data.ball.rules;
+    const [pw, ph] = [Math.round(picture.w * this.kx), Math.round(picture.h * this.ky)];
+    const page = this.atlas.picture(`rules ${pw} ${ph} ${title} ${text.length}`, pw, ph, (g, left, top) => setRules(g, title, text, left, top, pw, ph));
+    if (page) this.put(page, picture.x, picture.y, picture.w, picture.h);
+  }
+
   /** This field's pause screen laid out, for a window `width` by `height` device pixels. */
   prepare(state: FightState, width: number, height: number): void {
     this.width = width;
@@ -344,8 +403,9 @@ export class PauseScreen {
     this.pass.setTransform(this.transform);
     this.pass.reset();
     const view = pauseView(state, this.data);
-    this.shown = view.menu !== null || view.lists.length > 0;
+    this.shown = view.menu !== null || view.lists.length > 0 || view.rules !== null;
     if (!this.shown) return;
+    if (view.rules) this.rules(view.rules);
     if (view.menu) {
       const { box, items } = view.menu;
       const panel = this.panel('menu', box.w + 4, box.h + 6);

@@ -2,7 +2,8 @@
  * The pads' vibration the fight asks for: a pattern on a pad, or on both. A camera shake shakes
  * both pads; a move's own spark shakes the mover's pad and answers on the other; and each frame,
  * each fighter's pad feels what happened to it while the side that caused it feels an answer.
- * Nothing is asked for while a replay plays. The presentation plays the patterns on the gamepads.
+ * Nothing is asked for while a replay plays (nor through Tekken Ball's knockout replays). The
+ * presentation plays the patterns on the gamepads.
  */
 import { moveAt } from './moves.ts';
 import { Mode, type FightData, type FightState } from './state.ts';
@@ -15,14 +16,14 @@ export interface VibrationCommand {
 
 const BOTH = 2;
 
+/** Nothing is asked for during a replay, nor through Tekken Ball's knockout replays. */
 function quiet(state: FightState): boolean {
-  if (state.mode === Mode.TEKKEN_BALL) throw new Error("Tekken Ball's rally is not remade");
-  return state.replaying !== 0;
+  return state.replaying !== 0 || (state.mode === Mode.TEKKEN_BALL && state.match.ball.replaysShown !== 0);
 }
 
-/** The pad a slot plays on: its fighter's side. */
+/** The pad a slot plays on: its fighter's side; in Tekken Force the player's the human's pad, the enemies' the other. */
 function padOf(state: FightState, slot: number): number {
-  if (state.mode === Mode.TEKKEN_FORCE) throw new Error("Tekken Force's pads are not remade");
+  if (state.mode === Mode.TEKKEN_FORCE) return state.fighters[slot]!.slot === 0 ? state.force.pad : (state.force.pad + 1) & 1;
   return state.fighters[slot]!.movesetSlot;
 }
 
@@ -44,7 +45,7 @@ const SPARK_PATTERNS: readonly (readonly [number, number | null])[] = [
   [5, null],
 ];
 
-/** A move's own spark (kind 1 from a move's event). */
+/** A spark's vibration by its kind: 0 a burn, 1 a move's own spark, 2 a move's dust, 3 fire breath, 4 Gon's fire, 5 Tekken Ball's ball. */
 export function sparkVibration(state: FightState, slot: number, kind: number): void {
   if (quiet(state)) return;
   const pad = padOf(state, slot & 0xff);

@@ -63,9 +63,13 @@ function groundCells(map) {
 /** The ground file (`GND1`, little-endian): u32 magic, u32 version, then per map cell four corners of u16 u, v atlas texels. */
 export const GND_MAGIC = 0x31444e47;
 
-export function exportStage(modelBytes, textureMembers, encodePng) {
-  const view = new DataView(modelBytes.buffer, modelBytes.byteOffset, modelBytes.byteLength);
-  const cellCount = view.getUint32(8, true);
+/**
+ * A stage's files. With no model (`modelBytes` null: Tekken Ball's beach) the mesh has no polygons
+ * and a cell size of 0; `tims` are its textures when they are not a chain in the first member.
+ */
+export function exportStage(modelBytes, textureMembers, encodePng, tims = readTimChain(textureMembers[0])) {
+  const view = modelBytes === null ? null : new DataView(modelBytes.buffer, modelBytes.byteOffset, modelBytes.byteLength);
+  const cellCount = view === null ? 0 : view.getUint32(8, true);
   const polygons = [];
 
   for (let c = 0; c < cellCount; c += 1) {
@@ -102,7 +106,7 @@ export function exportStage(modelBytes, textureMembers, encodePng) {
 
   const cells = textureMembers[1]?.length === 808 ? groundCells(textureMembers[1]) : [];
 
-  const vram = absoluteVram(readTimChain(textureMembers[0]));
+  const vram = absoluteVram(tims);
   const packed = packAtlas(vram, [
     ...polygons.map((p) => ({ target: p.target, uvs: p.corners.map((c) => c.uv) })),
     ...cells.map((c) => ({ target: c.target, uvs: c.uvs })),
@@ -129,7 +133,7 @@ export function exportStage(modelBytes, textureMembers, encodePng) {
   out.setUint32(12, indices.length, true);
   out.setUint16(16, width, true);
   out.setUint16(18, height, true);
-  out.setUint32(20, view.getUint32(4, true), true);
+  out.setUint32(20, view === null ? 0 : view.getUint32(4, true), true);
   let at = 24;
   for (const [start, count] of cellRanges) {
     out.setUint32(at, start, true);

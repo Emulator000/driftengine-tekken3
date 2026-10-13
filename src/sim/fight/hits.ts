@@ -59,7 +59,7 @@ export function clearOutcome(f: Fighter): void {
  * Whether a segment meets a hit sphere: within the box of the segment's extent padded by the
  * radius, then, the segment clipped to the sphere's height, closest in the floor plane within it.
  */
-function segmentMeetsSphere(from: readonly number[], to: readonly number[], sphere: Fighter['hitSpheres'][number]): boolean {
+export function segmentMeetsSphere(from: readonly number[], to: readonly number[], sphere: Fighter['hitSpheres'][number]): boolean {
   const radius = sphere.radius;
   const halfExtent = (a: number, b: number): number => Math.abs(b - a) >> 1;
   const mid = (a: number, b: number): number => div(a + b, 2);
@@ -160,7 +160,7 @@ export function detectHit(state: FightState, data: FightData, attacker: Fighter,
       const frame = defender.frame;
       if ((theirs.stepWindow.first <= frame && frame <= theirs.stepWindow.last - 5) || s8(defender.inAir) !== 0) blockedOut = true;
     }
-    if (!blockedOut && (!(state.mode === 7 || state.mode === Mode.TEKKEN_FORCE) || s8(defender.throwing) === 0)) {
+    if (!blockedOut && (!(state.mode === Mode.TEKKEN_BALL || state.mode === Mode.TEKKEN_FORCE) || s8(defender.throwing) === 0)) {
       let level = attacker.level & 0xffff;
       if (s8(defender.guardMode) === 2) level |= 1;
       let landed: boolean;
@@ -289,8 +289,9 @@ function reactionOf(word: number): { source: number; index: number } {
 
 /**
  * A fighter's hits this frame applied: each record classified and its damage dealt, the weightiest
- * one's outcome kept, the reaction its attacker's move names, health taken in 16.16 and held within
- * 0 and the maximum, the sparks, and a knockout starting the replay.
+ * one's outcome kept, the reaction its attacker's move names (in Tekken Ball the ball's, the move that
+ * charged it), health taken in 16.16 and held within 0 and the maximum, the sparks, and a knockout
+ * starting the replay.
  */
 export function applyHits(state: FightState, data: FightData, f: Fighter): void {
   let attacker = targetOf(state, f);
@@ -316,15 +317,18 @@ export function applyHits(state: FightState, data: FightData, f: Fighter): void 
     f.hitClean = best.clean;
     f.counterHit = best.counter;
     f.struckBySlot = best.attacker;
-    if (state.mode === 5) throw new Error("practice mode's counters are not remade");
+    /* Practice's COUNTER ATTACKS: every clean hit on its partner a counter hit. */
+    if (state.mode === Mode.PRACTICE && state.practice.counters[f.slot] !== 0 && f.holds[1] === 0 && f.hitClean !== 0) f.counterHit = 1;
     f.hitTravel.splice(0, 3, ...attacker.handTravel);
-    if (state.mode === 7) throw new Error("Tekken Ball's reactions are not remade");
-    if (s8(f.hitByEffect) !== 0) f.reaction = { source: 2, index: 0 };
+    if (state.mode === Mode.TEKKEN_BALL && state.ball.struck !== 0) f.reaction = reactionOf(moveAt(data, state.fighters[2]!.move!).throwReaction);
+    else if (s8(f.hitByEffect) !== 0) f.reaction = { source: 2, index: 0 };
     else if (s8(f.fromBehind) === 0) f.reaction = reactionOf(moveAt(data, attacker.move!).throwReaction);
     else f.reaction = reactionOf(data.reactions.backKinds[moveAt(data, attacker.move!).reactionKind]! & 0xffff);
   }
   const before = f.health;
   if (state.freezeHealth === 0 && state.freezeHealthToo === 0) f.health = (before + (own + dealt) * -0x10000) | 0;
+  /* In Tekken Ball only the ball's strikes (the third fighter's) take health. */
+  if (state.mode === Mode.TEKKEN_BALL && attacker.slot !== 2) f.health = before;
   if (f.health < 0) f.health = 0;
   if (f.maxHealth < f.health) f.health = f.maxHealth;
   if (f.health === 0 && before !== 0) f.knockedOut = 1;
@@ -337,7 +341,19 @@ export function applyHits(state: FightState, data: FightData, f: Fighter): void 
     knockoutReplayStart(state, attacker);
     state.knockoutReplay = 1;
   }
-  if (state.mode === Mode.TEKKEN_FORCE) throw new Error("Tekken Force's scoring is not remade");
+  /* Tekken Force scores an enemy's damage: ten a point of the raw damage of the player's hits (and of bodies flung as attacks), twenty a point of a throw's. */
+  if (state.mode === Mode.TEKKEN_FORCE && f.computer !== 0) {
+    let sum = 0;
+    if (s8(f.hitReacting) !== 0) {
+      for (const r of f.hitRecords) {
+        if (s8(r.used) === 0) continue;
+        const a = state.fighters[r.attacker]!;
+        if (a.slot === 0 || a.effectHit !== 0) sum += s16(r.raw);
+      }
+    }
+    if (0 < own) sum += own * 2;
+    if (sum !== 0) state.force.score += sum * 10;
+  }
   f.ownDamage = s16(own);
 }
 
@@ -349,7 +365,7 @@ function hitEffects(state: FightState, data: FightData, f: Fighter, best: HitRec
     return;
   }
   const damage = Math.max(dealt, s16(best.raw));
-  hitSpark(state, data, damage, best.attacker, f, best);
+  hitSpark(state, data, damage, state.mode === Mode.TEKKEN_BALL ? 1 - f.slot : best.attacker, f, best);
 }
 
 /** When a knockout lands, the replay starts thirty frames before the finishing move began, on the ring of 300 recorded frames. */

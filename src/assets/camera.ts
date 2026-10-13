@@ -95,6 +95,7 @@ export function parseCameraTables(json: unknown, where = 'tables/camera.json'): 
     sceneCalls,
     scenes,
     openingSweeps: expectArray(o.openingSweeps, `${where} openingSweeps`, 10).map((v, i) => halves(v, `${where} openingSweeps[${i}]`, 3)),
+    ballSweep: halves(o.ballSweep, `${where} ballSweep`, 3),
     knockout: { ahead: halves(knockout.ahead, `${where} knockout.ahead`, 3), out: halves(knockout.out, `${where} knockout.out`, 3), heights: halves(knockout.heights, `${where} knockout.heights`, 3) },
     attractShots: [...expectInts(o.attractShots, `${where} attractShots`, 4, (n) => new Uint16Array(n), 0, 0xffff)],
     orbitPitches: [...expectInts(o.orbitPitches, `${where} orbitPitches`, 8, (n) => new Int16Array(n), -0x8000, 0x7fff)],

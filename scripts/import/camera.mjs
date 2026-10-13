@@ -106,6 +106,8 @@ export function cameraTables(exe) {
     sceneCalls,
     scenes,
     openingSweeps: Array.from({ length: 10 }, (_, i) => halves(exe, OPENING_SWEEPS + i * 6, 3)),
+    /** Tekken Ball's opening sweep, after the ten. */
+    ballSweep: halves(exe, OPENING_SWEEPS + 10 * 6, 3),
     knockout: { ahead: halves(exe, KNOCKOUT_AHEAD, 3), out: halves(exe, KNOCKOUT_OUT, 3), heights: halves(exe, KNOCKOUT_HEIGHT, 3) },
     attractShots: Array.from({ length: 4 }, (_, i) => exe.u16(ATTRACT_SHOTS + i * 2)),
     orbitPitches: Array.from({ length: 8 }, (_, i) => exe.s16(ORBIT_PITCHES + i * 2)),

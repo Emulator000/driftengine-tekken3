@@ -88,6 +88,8 @@ export interface CameraTables {
   readonly scenes: readonly Scene[];
   /** The round's opening sweeps: where the eye starts, off the follow camera's. */
   readonly openingSweeps: readonly (readonly number[])[];
+  /** Tekken Ball's opening sweep, in place of the ten. */
+  readonly ballSweep: readonly number[];
   /** The second knockout camera's placings: how far ahead, how far out and how high, three of each. */
   readonly knockout: { readonly ahead: readonly number[]; readonly out: readonly number[]; readonly heights: readonly number[] };
   /** The attract mode's four shots, by their step; its orbit's heights (18-bit pitches) and speeds. */

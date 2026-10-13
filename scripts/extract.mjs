@@ -18,7 +18,8 @@
  *   intro/I-PP.*     per attract intro and model pair in its archive: the mesh, skeleton, atlas and
  *                    model file, as a fighter's
  *   stages/NN.*      per stage: its scenery (.stg) and atlas (.png), its ground's cells (.gnd),
- *                    and the ground map itself (.map), which the fight reads
+ *                    and the ground map itself (.map), which the fight reads; Tekken Force's
+ *                    stages (15 to 18) and Tekken Ball's beach (19) with no scenery
  *   bns/NNN.bin      every file of TEKKEN3.BNS as it is, which the game's own loader reads by
  *                    logical id (the overlays, the menus' textures), their count in the manifest
  *   music/NN.xa      each XA song's own sectors (scripts/lib/xa.mjs)
@@ -45,6 +46,7 @@ import { readMoveset } from './lib/t4/moveset.mjs';
 import { exportFighter, partTable } from './lib/fighter.mjs';
 import { parseModel } from './lib/model.mjs';
 import { exportStage } from './lib/stage.mjs';
+import { readTimChain } from './lib/texture.mjs';
 import { decodePng, encodePng } from './lib/png.mjs';
 import { openDisc } from './lib/iso.mjs';
 import { readXaSongs, xaSongTable } from './lib/xa.mjs';
@@ -57,7 +59,7 @@ const out = path.join(root, 'public/data');
 const exePath = path.join(root, '.cache/disc/SLUS_004.02');
 if (!existsSync(exePath)) throw new Error('no disc data: run npm run disc first');
 /** The format of what this writes, in its manifest: raised when the output changes, so `npm run dev` extracts again. */
-const DATA_FORMAT = 8;
+const DATA_FORMAT = 11;
 const extracted = (() => {
   try {
     return JSON.parse(readFileSync(path.join(out, 'manifest.json'), 'utf8')).format === DATA_FORMAT && existsSync(path.join(out, 'movies/streams.json'));
@@ -145,13 +147,31 @@ function shapesFromOf(pack) {
   return null;
 }
 
+/** A pack's costume: the low bits of the first roster code that takes it. */
+function costumeOf(pack) {
+  for (let code = 0; code < 0x5c; code += 1) if (exe.readInt8(at(0x800958c4) + code) === pack) return code & 3;
+  return 0;
+}
+
+/**
+ * A pack's archive with its textures as one TIM chain: as it is, or where its first member is
+ * itself an archive of TIMs, one a costume (the soldiers', which their four packs share), the
+ * pack's costume's own.
+ */
+function texturesOf(pack, members) {
+  const first = members[0];
+  if (first === undefined || first.length < 4 || first.readUInt32LE(0) === 0x10) return members;
+  const tims = arcMembers(first);
+  return [tims[costumeOf(pack)] ?? tims[0], ...members.slice(1)];
+}
+
 /* Character packs: four files each from BNS 71; the model, a sound bank, the archive, a copy of a moveset. */
 const fighters = [];
 for (let pack = 0; 71 + pack * 4 + 3 <= 278; pack += 1) {
   const first = 71 + pack * 4;
   const id = String(pack).padStart(2, '0');
   const parts = partTable(exe, pack);
-  const result = exportFighter(file(first), arcMembers(Buffer.from(file(first + 2))), parts, parseModel, encodePng, { eyes: eyesOf(pack), shapesFrom: shapesFromOf(pack) });
+  const result = exportFighter(file(first), texturesOf(pack, arcMembers(Buffer.from(file(first + 2)))), parts, parseModel, encodePng, { eyes: eyesOf(pack), shapesFrom: shapesFromOf(pack) });
   put(`fighters/${id}.ftr`, result.mesh);
   put(`fighters/${id}.json`, JSON.stringify({ skeleton: result.skeleton }));
   put(`fighters/${id}.png`, result.atlas);
@@ -279,6 +299,16 @@ for (let s = 0; s < 15; s += 1) {
   put(`stages/${id}.gnd`, result.ground);
   put(`stages/${id}.map`, result.map);
   put(`stages/${id}.png`, result.atlas);
+  stages.push({ stage: s, height: exe.readInt16LE(at(0x80025138) + s * 4), ...result.stats });
+}
+/* Tekken Force's four stages (15 to 18) and Tekken Ball's beach (19): no model, their textures an archive of TIMs in the first member. */
+for (let s = 15; s < 20; s += 1) {
+  const members = arcMembers(Buffer.from(file(36 + s)));
+  const result = exportStage(null, members, encodePng, arcMembers(members[0]).flatMap((tim) => readTimChain(tim)));
+  put(`stages/${s}.stg`, result.mesh);
+  put(`stages/${s}.gnd`, result.ground);
+  put(`stages/${s}.map`, result.map);
+  put(`stages/${s}.png`, result.atlas);
   stages.push({ stage: s, height: exe.readInt16LE(at(0x80025138) + s * 4), ...result.stats });
 }
 

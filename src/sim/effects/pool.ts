@@ -14,8 +14,9 @@
  * from the mouth, rolling along the floor, burning and dying out, an attack while fresh; 7 the
  * embers they throw off; 9 a flame flickering on the floor; 0xb the flames a fire's hit leaves on
  * the fighter struck, one on each of ten joints (one when Gon struck), leaving it unlit while they
- * burn; 0x13 Gon's flames, rising in a row of columns (0x14). Kind 0xf, Tekken Ball's, is not
- * remade and is released as soon as it runs.
+ * burn; 0x13 Gon's flames, rising in a row of columns (0x14); and 0xf Tekken Ball's, a glow in a
+ * side's colour on the charged ball or a fire on the burning one, following it until its look
+ * changes.
  *
  * An elemental move is one whose hit data starts with 0x18 to 0x1c: each frame of its active window
  * it spawns an object of its kind.
@@ -55,7 +56,8 @@ const AFTER_LINE = 0x86da;
 /** The joints whose glow is set up each round, bit 15 the second fighter's. */
 const GLOW_JOINTS = [6, 10, 0xe, 0x11, 0x8006, 0x800a, 0x800e, 0x8011];
 
-const objectAt = (state: FightState, i: number): EffectObject => state.effects.objects[i]!;
+/** The pool's object at an index. */
+export const objectAt = (state: FightState, i: number): EffectObject => state.effects.objects[i]!;
 
 /** Every object free, in order, none running. */
 export function clearPool(state: FightState): void {
@@ -420,6 +422,92 @@ export function spawnBurst(state: FightState, data: FightData, code: number, at:
   else if (code === 2) burnFighter(state, data, kind);
   else if (code === 3) spawn(state, 0xc, 6, at);
   else if (code === 4) spawn(state, 0xd, 0x14, at);
+  else if (code === 0xf) spawnBallGlow(state, kind);
+}
+
+/* ---- Tekken Ball's ball's glow (kind 0xf). ---- */
+
+/** The glow's two kinds (its fourth word): a side's glow, the fire; its side (first word) and its frame (third). */
+const BALL_KIND = 3;
+const BALL_SIDE = 0;
+const BALL_FRAME = 2;
+/** The ball's looks the glow reads: held without flashing; each side's charge; burning. */
+const BallLook = { HELD: 5, CHAINED: 8, LEFT: 6, RIGHT: 7, BURNING: 9 } as const;
+/** The flashes' colours: the glow's, the fire's. */
+const BALL_FLASHES: readonly (readonly number[])[] = [
+  [0xc0, 0xc0, 0xff],
+  [0xff, 0x80, 0],
+];
+
+/** A glow on Tekken Ball's ball, once a time for each `index` (a side, plus 2 for the fire). */
+export function spawnBallGlow(state: FightState, index: number): void {
+  const ball = state.ball;
+  const bit = 1 << (index & 0xff);
+  if ((ball.glows & bit) !== 0) return;
+  const i = takeObject(state);
+  if (i === -1) return;
+  const object = objectAt(state, i);
+  object.kind = 0xf;
+  object.words[BALL_SIDE] = index & 1;
+  object.words[BALL_KIND] = (index & 0xff) >> 1;
+  ball.glows |= bit;
+}
+
+/** The glow dressed: drawn, its frame before the first; the fire an attack of the second fighter's; a random turn, still. */
+function startBallGlow(state: FightState, data: FightData, object: EffectObject): void {
+  object.state += 1;
+  object.flags |= DRAWN;
+  object.speed = 0;
+  object.words[BALL_FRAME] = -1;
+  if (object.words[BALL_KIND] === 0) object.look = 'ball glow';
+  else {
+    object.look = 'ball fire';
+    object.flags |= ATTACK;
+  }
+  const r = (nextRandom(state.random) | (nextRandom(state.random) << 16)) | 0;
+  object.climb = (object.climb - 0x3f + ((r >> 4) & 0x7f)) | 0;
+  object.heading = (object.heading - 0x1f + ((r >> 6) & 0x3f)) | 0;
+  aim(data, object);
+}
+
+/**
+ * The ball's glow a frame on: its frames turning (the glow's twelve round, the fire's seven then
+ * eight round from a random one), at the ball's next place, flashing now and then; let go once the
+ * ball no longer looks so (all glows then free to start again).
+ */
+function ballGlow(state: FightState, data: FightData, object: EffectObject): void {
+  const ball = state.ball;
+  const r = nextRandom(state.random);
+  nextRandom(state.random);
+  const kind = object.words[BALL_KIND]!;
+  if (kind === 0 && object.state < 2) {
+    if (object.state === 0) startBallGlow(state, data, object);
+    object.words[BALL_FRAME] = object.words[BALL_FRAME]! + 1 > 0xb ? 0 : object.words[BALL_FRAME]! + 1;
+  } else if (kind === 1) {
+    if (object.state === 0) startBallGlow(state, data, object);
+    if (object.state === 1) {
+      object.words[BALL_FRAME] = object.words[BALL_FRAME]! + 1;
+      if (6 < object.words[BALL_FRAME]!) {
+        object.state += 1;
+        object.words[BALL_FRAME] = nextRandom(state.random);
+      }
+    } else if (object.state === 2) object.words[BALL_FRAME] = object.words[BALL_FRAME]! + 1;
+  }
+  for (let k = 0; k < 3; k += 1) {
+    object.last[k] = object.position[k]!;
+    object.position[k] = (ball.position[k]! + (ball.velocity[k]! >> 8)) | 0;
+  }
+  const look = ball.look;
+  if (look === BallLook.HELD || look === BallLook.CHAINED) return;
+  if (kind === 0) {
+    if ((r & 0xf) === 0) flashAt(state, object.position, BALL_FLASHES[0]!);
+    if (look === (object.words[BALL_SIDE] === 0 ? BallLook.LEFT : BallLook.RIGHT)) return;
+  } else if (kind === 1) {
+    if ((r & 0xf) === 0) flashAt(state, object.position, BALL_FLASHES[1]!);
+    if (look === BallLook.BURNING) return;
+  } else return;
+  ball.glows = 0;
+  release(object);
 }
 
 /* ---- The charged glow (kinds 3 to 5). ---- */
@@ -1036,8 +1124,9 @@ function step(state: FightState, data: FightData, i: number): void {
       return echo(state, data, object);
     case 0x12:
       return replayEchoes(state, data, object);
+    case 0xf:
+      return ballGlow(state, data, object);
     default:
-      /* Tekken Ball's kind is not remade: let it go rather than hold a slot. */
       return release(object);
   }
 }

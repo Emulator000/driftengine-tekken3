@@ -104,9 +104,11 @@ export const STRETCH = 0.04;
 
 /**
  * How large the effects are against the sizes their recipes are written in: an original frame is
- * about half a metre across where it is drawn, measured against the fighters' bodies.
+ * about half a metre across where it is drawn, measured against the fighters' bodies. A piece
+ * drawn larger than its recipe (Tekken Ball's glow) scales it while it is filled.
  */
-const SCALE = 1.6;
+const BASE_SCALE = 1.6;
+let SCALE = BASE_SCALE;
 
 /** The view's right and up, in the world: what shapes across the view are laid on. */
 export interface ViewBasis {
@@ -550,26 +552,63 @@ const GOLD: Vec3 = [1, 0.8, 0.2];
 const FIRE: Vec3 = [1, 0.12, 0.02];
 const EMBER: Vec3 = [1, 0.35, 0.05];
 
+/** An original spark frame's half-width, in the recipes' units (32 texels drawn about three quarters of a metre across). */
+const FRAME = 0.236;
+
+/**
+ * Paul's spark, as his sheet runs: a thin ring flashing out about a bright point; a swirling core
+ * throwing curls and spikes of flame; a thick ring of fire, yellow along its body and red at its
+ * ragged rim, round a dark heart, growing as it thins; at last breaking into curling tendrils.
+ */
+function paulFire(out: EffectBuffers, p: EffectPiece, view: ViewBasis): void {
+  const c = p.colour;
+  const t = p.age;
+  const body = mixed(c, GOLD, 0.7);
+  const rim = mixed(c, FIRE, 0.4);
+  const turn = unit(p.seed, 1) * Math.PI * 2;
+  const size = (frac: number): number => FRAME * frac * SCALE;
+  const flicker = (i: number): number => 0.8 + 0.2 * twinkle(p, i, 2);
+  const flame = mixed(rim, body, 0.5);
+  if (t < 0.2) {
+    const k = within(t, 0, 0.2);
+    shape(out, Shape.FIRE_RING_THIN, p.position, size(0.4 + 0.6 * easeOut(k)), scaled(flame, 2.6 * (1 - k) ** 0.7 * flicker(0)), turn, t, p.seed + 1);
+    shape(out, Shape.FIRE_RING_THICK, p.position, size(0.2), scaled(body, 2.2 * (1 - k)), turn, t, p.seed + 2);
+  }
+  if (0.08 < t && t < 0.44) {
+    const k = within(t, 0.08, 0.44);
+    const fade = Math.sin(Math.PI * k);
+    for (let i = 0; i < 3; i += 1) shape(out, Shape.FIRE_CURL, p.position, size(0.55 + 0.35 * k), scaled(flame, 2.4 * fade * flicker(i)), turn + (i * Math.PI * 2) / 3 + k * 2.4, t, p.seed + 10 + i);
+    const spikes = within(t, 0.16, 0.44);
+    if (0 < spikes) shape(out, Shape.FIRE_SPIKES, p.position, size(0.62 + 0.36 * easeOut(spikes)), scaled(mixed(body, rim, 0.35), 2.6 * Math.sin(Math.PI * spikes) * flicker(4)), turn + spikes * 0.6, t, p.seed + 20);
+  }
+  if (0.3 < t && t < 0.78) {
+    const k = within(t, 0.3, 0.75);
+    const fade = within(t, 0.3, 0.4) * (1 - within(t, 0.66, 0.78));
+    const across = size(0.66 + 0.32 * easeOut(k));
+    const thin = within(t, 0.42, 0.72);
+    const spin = turn + k * 0.8;
+    shape(out, Shape.FIRE_RING_THICK, p.position, across, scaled(rim, 2 * fade * (1 - thin) * flicker(5)), spin, t, p.seed + 30);
+    shape(out, Shape.FIRE_RING_THIN, p.position, across, scaled(rim, 2 * fade * thin * flicker(6)), spin + 1.3, t, p.seed + 31);
+    shape(out, thin < 0.5 ? Shape.FIRE_RING_THICK : Shape.FIRE_RING_THIN, p.position, across * 0.96, scaled(flame, 1.2 * fade * flicker(7)), spin + 2.1, t, p.seed + 32);
+    shape(out, thin < 0.5 ? Shape.FIRE_RING_THICK : Shape.FIRE_RING_THIN, p.position, across * 0.93, scaled(body, 0.8 * fade * flicker(8)), spin + 3.7, t, p.seed + 33);
+  }
+  if (0.66 < t) {
+    const k = within(t, 0.66, 1);
+    for (let i = 0; i < 5; i += 1) {
+      const a = turn + unit(p.seed, 40 + i) * Math.PI * 2 + k * (i % 2 === 0 ? 0.9 : -0.9);
+      shape(out, Shape.FIRE_CURL, acrossView(view, p.position, a, size(0.2 + 0.35 * k * unit(p.seed, 50 + i))), size(0.4 + 0.25 * unit(p.seed, 60 + i)), scaled(flame, 2.2 * (1 - k) ** 1.3 * flicker(9 + i)), a + (i % 2 === 0 ? 0 : Math.PI), t, p.seed + 40 + i);
+    }
+  }
+  light(out, p, c, 2.2, 1.5);
+}
+
 function heavy(out: EffectBuffers, p: EffectPiece, view: ViewBasis): void {
   const c = p.colour;
   const t = p.age;
   switch (p.design) {
-    case 'fire ring': {
-      /* Paul: a ring of fire bursting out, red at its body and yellow at its edges, flame tongues off it, embers falling. */
-      const fire = mixed(c, FIRE, 0.45);
-      flash(out, p, mixed(c, GOLD, 0.5), 0.09, 5, 0.3);
-      bloomShape(out, p, Shape.GLOW, fire, 0.13, 0.22, 1.4, 0, 0.5);
-      bloomShape(out, p, Shape.RING, fire, 0.07, 0.25, 3.5, 0, 0.8);
-      bloomShape(out, p, Shape.RING, mixed(c, GOLD, 0.6), 0.06, 0.22, 2, 0, 0.6);
-      const r = (0.05 + 0.17 * easeOut(Math.min(1, t * 1.6))) * SCALE;
-      for (let i = 0; i < 14; i += 1) {
-        const a = unit(p.seed, 800 + i) * Math.PI * 2;
-        shape(out, Shape.FLAME, acrossView(view, p.position, a, r), (0.08 * (1 - t) + 0.02) * SCALE, scaled(mixed(fire, GOLD, unit(p.seed, 850 + i) * 0.5), 2.6 * (1 - t) ** 1.3 * twinkle(p, i, 2)), a, t, p.seed + 800 + i);
-      }
-      shards(out, p, mixed(c, EMBER, 0.5), 22, 4.5, 4, 2.6);
-      light(out, p, c, 2.2, 1.5);
+    case 'fire ring':
+      paulFire(out, p, view);
       return;
-    }
     case 'swirl':
       /* Law: crescents sweeping round the point, then breaking into embers. */
       flash(out, p, c, 0.07, 4, 0.25);
@@ -817,6 +856,7 @@ export function fillEffects(pieces: readonly EffectPiece[], view: ViewBasis, out
   out.lights.count = 0;
   for (const p of pieces) {
     const t = p.age;
+    SCALE = BASE_SCALE * (p.size ?? 1);
     switch (p.look) {
       case 'heavy':
         heavy(out, p, view);

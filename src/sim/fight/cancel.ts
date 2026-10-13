@@ -92,6 +92,54 @@ export function findCancel(state: FightState, data: FightData, list: Cursor, fra
   }
 }
 
+/** The extra tests (the stances') an open cancel needs no test for when practice looks; a cancel by the punch at frame 0 practice does not count. */
+const STANCE_TESTS = { first: 0x3a, count: 3 } as const;
+const PUNCH = { command: 0x10, type: 2 } as const;
+
+/**
+ * Whether any of a move's cancels is open at a frame, whatever the input (practice's HIT ANALYSIS):
+ * an entry within its frames whose condition and extra test hold (a stance's test needing none
+ * the first time); at the list's end, while the fighter's root still lags, the follower's own
+ * cancels at its first frame, its stances' tests too.
+ */
+export function cancelOpen(state: FightState, data: FightData, f: Fighter, opponent: Fighter): boolean {
+  if (f.move === null) return false;
+  const open = (entry: Cancel, frame: number, testStances: boolean): boolean =>
+    entry.from <= frame &&
+    frame <= entry.to &&
+    conditionHolds(entry, f, opponent) &&
+    entry.test < REACTION_TESTS &&
+    !(entry.command === PUNCH.command && entry.test === 0 && entry.type === PUNCH.type) &&
+    (entry.test === 0 || (!testStances && ((entry.test - STANCE_TESTS.first) & 0xff) < STANCE_TESTS.count) || cancelTest(state, data, entry, f, opponent));
+  /** The list's walk: the first open entry, or its end's entry (null when one was open). */
+  const walk = (list: Cursor, frame: number, testStances: boolean): Cancel | null => {
+    let at = list;
+    let saved = at;
+    for (;;) {
+      let entry = entryAt(data, at);
+      if (entry.command === END) return entry;
+      if (entry.command === RETURN) {
+        at = nextEntry(saved);
+        continue;
+      }
+      if (entry.command === CALL) {
+        saved = at;
+        at = { shared: true, set: at.set, index: entry.target };
+        entry = entryAt(data, at);
+        if (entry.command === END) return entry;
+      }
+      if (open(entry, frame, testStances)) return null;
+      at = nextEntry(at);
+    }
+  };
+  const frame = f.frame;
+  const end = walk(listOf(data, f.move), frame, false);
+  if (end === null) return true;
+  if (!(end.from - 5 <= frame && frame <= end.to && 0 < f.rootLag)) return false;
+  const follower = moveById(data, f, end.target);
+  return follower !== null && walk(listOf(data, follower), 1, true) === null;
+}
+
 /** The opponent's attack as the guard tests read it, worked out on first use in a frame. */
 function attackClass(state: FightState, f: Fighter, opponent: Fighter): number {
   if (state.attackClasses[f.slot] === 0) classifyAttack(state, f, opponent);
@@ -339,8 +387,9 @@ export function chooseCancel(state: FightState, data: FightData, f: Fighter, opp
   else if (frame >= start) early = false;
   else early = f.rootLag > 0 && (f.input.history[f.input.cursor]! & 0xf0) !== 0;
   const inWindow = frame >= start && frame <= end.to && f.rootLag > 0;
-  if (state.mode === 7) throw new Error("Tekken Ball's forced window is not remade");
-  if (early || inWindow) {
+  /* Tekken Ball's shove opens its move's follow-up from its own frame on. */
+  const forced = state.mode === Mode.TEKKEN_BALL ? state.ball.shoves[f.movesetSlot]!.cancelFrame : 0;
+  if (early || inWindow || (forced !== 0 && frame >= forced && f.rootLag >= 1)) {
     const followUp = moveById(data, f, s16(end.target))!;
     const heading = f.heading;
     f.heading = s16(heading + playing.facingOffset);
@@ -417,7 +466,7 @@ function hitReaction(data: FightData, f: Fighter, opponent: Fighter): void {
   const alternate = (f.stance & 2) !== 0;
   const pick = (type: number, field: number): void => {
     f.next.type = transitionType(data, f, type);
-    f.next.id = reactionField(data.reactions, f.reaction!, alternate ? field : field + 1);
+    f.next.id = reactionField(data.reactions, f.reaction, alternate ? field : field + 1);
   };
   if (f.guarded !== 0) pick(0x23, Reaction.GUARDED);
   else if (f.inAir !== 0 || (moveAt(data, f.move!).flags & 0x400) !== 0) {
@@ -425,10 +474,10 @@ function hitReaction(data: FightData, f: Fighter, opponent: Fighter): void {
     launchKind(data, f, opponent);
   } else if ((f.stance & 0x200) !== 0) {
     f.next.type = transitionType(data, f, 0x25);
-    f.next.id = reactionField(data.reactions, f.reaction!, Reaction.LOW_STATE);
+    f.next.id = reactionField(data.reactions, f.reaction, Reaction.LOW_STATE);
   } else if ((f.stance & 4) !== 0) {
     f.next.type = transitionType(data, f, 0x25);
-    f.next.id = reactionField(data.reactions, f.reaction!, Reaction.CROUCHING);
+    f.next.id = reactionField(data.reactions, f.reaction, Reaction.CROUCHING);
   } else if (f.counterHit !== 0) pick(0x26, Reaction.COUNTER);
   else {
     const from = f.facingQuadrant;
@@ -503,7 +552,15 @@ function chooseMove(state: FightState, data: FightData, f: Fighter): void {
       if (f.throwHold > 0) f.damageKind = 1;
     }
   }
-  if (state.mode === 7) throw new Error("Tekken Ball's reactions are not remade");
+  /* Tekken Ball's point: the fighter whose half the ball fell on is blasted off its feet from where it fell. */
+  if (state.mode === Mode.TEKKEN_BALL && state.ball.pointAgainst === f.slot + 1) {
+    f.inAir = 1;
+    f.guarded = 0;
+    f.hitClean = 1;
+    face(data, f, state.fighters[2]!);
+    hitReaction(data, f, opponent);
+    f.damageKind = 1;
+  }
   if (f.next.move === null) chooseCancel(state, data, f, opponent);
   const falling = (ref: MoveRef | null): boolean => ref !== null && FALLS.includes(s16(moveAt(data, ref).next));
   if (f.health === 0 && f.hitClean !== 0) {
@@ -531,9 +588,9 @@ function chooseMove(state: FightState, data: FightData, f: Fighter): void {
   }
 }
 
-/** Both fighters' next moves, the order alternating by frame. */
+/** Both fighters' next moves, the order alternating by frame; in Tekken Force the third's after them, until the boss is on. */
 export function chooseMoves(state: FightState, data: FightData): void {
   const order = (state.frameCount & 1) === 0 ? [1, 0] : [0, 1];
   for (const i of order) chooseMove(state, data, state.fighters[i]!);
-  if (state.mode === Mode.TEKKEN_FORCE) throw new Error("Tekken Force's third fighter's choice is not remade");
+  if (state.mode === Mode.TEKKEN_FORCE && state.force.bossPhase === 0) chooseMove(state, data, state.fighters[2]);
 }

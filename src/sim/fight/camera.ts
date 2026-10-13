@@ -11,7 +11,7 @@
 import type { CameraScript, ScriptSegment, ShotChoice } from '../data/camera.ts';
 import type { Moveset } from '../data/moveset.ts';
 import { angle4096, cosine, sine } from '../math/angles.ts';
-import { div, s16 } from '../math/integers.ts';
+import { cpuDiv, div, s16 } from '../math/integers.ts';
 import { multiply, multiplyInto, type Matrix } from '../math/matrix.ts';
 import { nextRandom, randomBelow } from '../math/random.ts';
 import { isqrt, tableRoot } from '../math/roots.ts';
@@ -397,7 +397,9 @@ function followYaw(c: Camera, a: Fighter, b: Fighter, snap: number, slot: number
 /**
  * Places a slot's eye to frame both fighters at the given angles: their average depth at
  * `distance` (800 or more), sideways so both are on screen with room, pulled back when they spread
- * past 280 pixels, raised so the higher head clears the top, and, unless `snap`, eased there.
+ * past 280 pixels, raised so the higher head clears the top, and, unless `snap`, eased there. In
+ * Tekken Ball the ball is framed too: past either fighter it takes that fighter's edge, and above
+ * the higher head it is the top.
  */
 function frameFighters(c: Camera, pitch: number, yaw: number, snap: number, distance: number, slot: number): void {
   const cam = c.state.camera;
@@ -445,7 +447,15 @@ function frameFighters(c: Camera, pitch: number, yaw: number, snap: number, dist
     Y[i] = q12(mul(sp, d) + mul(cp, tracked.at[1]! - sy));
     depth[i] = d;
   });
-  if (c.state.mode === TEKKEN_BALL) throw new Error("Tekken Ball's camera is not remade");
+  /* Tekken Ball's ball in the same frame, from where it is. */
+  const ballAt = c.state.ball.position;
+  const ball = c.state.mode === TEKKEN_BALL;
+  const brx = ballAt[0]! - cx;
+  const brz = ballAt[2]! - cz;
+  const bd = q12(mul(st, brx) + mul(ct, brz));
+  const ballX = q12(mul(ct, brx) - mul(st, brz));
+  const ballZ = q12(mul(cp, bd) - mul(sp, ballAt[1]! - sy));
+  const ballY = q12(mul(sp, bd) + mul(cp, ballAt[1]! - sy));
   const average = div(depth[0]! + depth[1]!, 2);
   const across = q12(mul(cp, average) - mul(sp, -0x1c2 - sy));
   const ground = q12(mul(sp, average) + mul(cp, -0x1c2 - sy));
@@ -454,6 +464,17 @@ function frameFighters(c: Camera, pitch: number, yaw: number, snap: number, dist
   offsets[2] = offsets[2]! - push;
   Z[1] = Z[1]! + push;
   Z[0] = Z[0]! + push;
+  /* The ball past either fighter widens the frame to it (its depth not pushed). */
+  if (ball) {
+    const [near, far] = X[0]! < X[1]! ? [0, 1] : [1, 0];
+    if (ballX < X[near]!) {
+      X[near] = ballX - 0x96;
+      Z[near] = ballZ;
+    } else if (X[far]! < ballX) {
+      X[far] = ballX + 0x96;
+      Z[far] = ballZ;
+    }
+  }
 
   /* Left and right edges on screen, with a margin of 150 either side. */
   const leftIsSecond = X[1]! <= X[0]!;
@@ -532,6 +553,11 @@ function frameFighters(c: Camera, pitch: number, yaw: number, snap: number, dist
     headY = first.at[1]!;
   }
   let head = q12(mul(headY, cp));
+  if (ball && ballY < topY) {
+    head = q12(mul(ballAt[1]!, cp));
+    topY = ballY;
+    topZ = ballZ;
+  }
   let margin = 100;
   if (slot === SHOT && pitch < 0) margin = 0x80;
   let lift = 0;
@@ -1198,11 +1224,10 @@ function startOpening(c: Camera, a: Fighter, b: Fighter): void {
   opening.from.screen = zero[5]!;
 }
 
-/** A frame of the sweep in the script slot; returns its weight, fading over the last 16 frames. */
+/** A frame of the sweep in the script slot (Tekken Ball's own); returns its weight, fading over the last 16 frames. */
 function stepOpening(c: Camera): number {
   const opening = c.state.camera.opening;
-  if (c.state.mode === TEKKEN_BALL) throw new Error("Tekken Ball's opening is not remade");
-  const sweep = c.data.camera.openingSweeps[opening.sweep]!;
+  const sweep = c.state.mode === TEKKEN_BALL ? c.data.camera.ballSweep : c.data.camera.openingSweeps[opening.sweep]!;
   const out = readSlot(c, FOLLOW);
   const ease = sin(c, div(opening.left << 10, opening.length) + 0xc00) + 0x1000;
   const [fx, fy, fz] = opening.from.eye as [number, number, number];
@@ -1724,6 +1749,20 @@ export function introCamera(state: FightState, data: FightData, kind: number, si
 }
 
 /**
+ * The camera set back to following after practice's combo replay: reset, the attract shots and
+ * the slots started over about the two fighters (the partner first), no script, the replay's
+ * camera off.
+ */
+export function resetCameraAfterReplay(state: FightState, data: FightData, a: Fighter, b: Fighter): void {
+  const c: Camera = { state, data };
+  resetCamera(c);
+  startAttract(c, a, b);
+  resetSlots(c, a, b);
+  state.camera.script = null;
+  state.camera.replay.active = 0;
+}
+
+/**
  * The intro's camera set up: the camera reset, the attract shots and slots started over, a script
  * set started (`kind` 1 the intro's first, 2 Ogre's change's).
  */
@@ -1734,6 +1773,77 @@ export function startIntroCamera(state: FightState, data: FightData, kind = 1): 
   startAttract(c, a, b);
   resetSlots(c, a, b);
   introCamera(state, data, kind);
+}
+
+/* ---- Tekken Force's camera. ---- */
+
+/**
+ * Tekken Force's camera: its eye high behind the street, MISHIMA FORTRESS's view rolled; the
+ * player's place across the picture past which it moves (five millimetres for each unit over),
+ * the window it moves in both ways within, how far the pitch steps as the player rises or drops
+ * past the picture's band, and the pitch's range.
+ */
+const FORCE_CAMERA = { y: -3500, z: -7000, pitch: 0x2aaa, screen: 500, fortress: 3, fortressRoll: 0x82, push: 5, window: 5000, leftEdge: -100, rightEdge: 0x3c, depth: 2500, step: 0x2d8, high: 0xd5, low: 0xbc, most: 0x10000 } as const;
+/** How the camera follows: only to the right, still, both ways within its window. */
+export const ForceCameraMode = { RIGHT: 0, STILL: 1, WINDOW: 2 } as const;
+
+/** Tekken Force's camera told how to follow (the window set about where it stands). */
+export function setForceCameraMode(state: FightState, mode: number): void {
+  const f = state.camera.force;
+  if (mode === ForceCameraMode.RIGHT) f.rightEdge = 1;
+  if (mode === ForceCameraMode.WINDOW) {
+    f.leftEdge = FORCE_CAMERA.leftEdge;
+    f.rightEdge = FORCE_CAMERA.rightEdge;
+    f.min = f.x - FORCE_CAMERA.window;
+    f.max = f.x + FORCE_CAMERA.window;
+  }
+  f.mode = mode;
+}
+
+/** Tekken Force's camera at a stage's start. */
+function forceCameraStart(c: Camera): void {
+  const cam = c.state.camera;
+  const f = cam.force;
+  cam.drawn.roll = c.state.match.stage === FORCE_CAMERA.fortress ? FORCE_CAMERA.fortressRoll : 0;
+  Object.assign(f, { x: 0, y: FORCE_CAMERA.y, z: FORCE_CAMERA.z, pitch: FORCE_CAMERA.pitch, yaw: 0, screen: FORCE_CAMERA.screen, pitchTarget: FORCE_CAMERA.pitch, xTarget: 0, mode: ForceCameraMode.RIGHT, rightEdge: 1 });
+  f.origin = f.x;
+}
+
+/**
+ * A frame of Tekken Force's camera: the player's root seen from the eye (the view's roll undone),
+ * its place across the picture moving the eye toward the side it is on (never left while it only
+ * follows right; held to its window while it follows both ways), and its height on the picture
+ * stepping the pitch to keep it in the picture's band, eased and held to its range.
+ */
+function forceCameraFrame(c: Camera): void {
+  const cam = c.state.camera;
+  const f = cam.force;
+  const root = c.state.fighters[0].skeleton.base.translation;
+  const p = shr(-f.pitch, 6) & 0xfff;
+  const r = -cam.drawn.roll & 0xfff;
+  const dx = root[0]! - f.x;
+  const dz = root[2]! - f.z;
+  const x1 = q12(mul(cos(c, r), dx) + mul(sin(c, r), f.y));
+  const y1 = q12(mul(sin(c, r), dx) + mul(cos(c, r), -f.y));
+  const depth = q12(mul(cos(c, p), dz) - mul(sin(c, p), y1));
+  const vertical = q12(mul(sin(c, p), dz) + mul(cos(c, p), y1));
+  const up = cpuDiv(cpuDiv(mul(vertical, FORCE_CAMERA.depth), depth), 3);
+  const across = cpuDiv(mul(x1, FORCE_CAMERA.screen), depth);
+  f.xTarget = f.x;
+  if (f.mode === ForceCameraMode.RIGHT) {
+    if (f.rightEdge < across) f.xTarget = f.x + (across - f.rightEdge) * FORCE_CAMERA.push;
+  } else if (f.mode === ForceCameraMode.WINDOW) {
+    if (across < f.leftEdge) f.xTarget = f.x - (f.leftEdge - across) * FORCE_CAMERA.push;
+    if (f.rightEdge < across) f.xTarget = f.x + (across - f.rightEdge) * FORCE_CAMERA.push;
+  }
+  if ((0 < across && f.x < f.xTarget) || (across < 0 && f.xTarget < f.x)) f.x = f.xTarget;
+  if (f.mode === ForceCameraMode.WINDOW) f.x = Math.min(Math.max(f.x, f.min), f.max);
+  if (FORCE_CAMERA.high <= up) f.pitchTarget = f.pitch + FORCE_CAMERA.step;
+  else if (up < FORCE_CAMERA.low) f.pitchTarget = f.pitch - FORCE_CAMERA.step;
+  if (f.pitch !== f.pitchTarget) f.pitch -= div(f.pitch - f.pitchTarget, 8);
+  f.pitch = Math.min(Math.max(f.pitch, FORCE_CAMERA.pitch), FORCE_CAMERA.most);
+  writeSlot(c, [f.x, f.y, f.z, f.pitch, f.yaw, f.screen], FOLLOW);
+  useSlot(c, FOLLOW);
 }
 
 /* ---- The frame. ---- */
@@ -1749,7 +1859,19 @@ export function stepCamera(state: FightState, data: FightData): void {
   const cam = state.camera;
   cam.lockedOn = lockedOn(c);
   const mode = state.attract !== 0 ? ATTRACT : state.mode;
-  if (mode === Mode.TEKKEN_FORCE) throw new Error("Tekken Force's camera is not remade");
+  if (mode === Mode.TEKKEN_FORCE) {
+    if (state.status === 0) {
+      resetCamera(c);
+      startAttract(c, a, b);
+      resetSlots(c, a, b);
+      cam.script = null;
+      cam.replay.active = 0;
+      forceCameraStart(c);
+      state.status = 2;
+    } else if (state.status !== 2) return;
+    forceCameraFrame(c);
+    return;
+  }
   if (mode === ATTRACT) {
     if (cam.attractStarted === 0) {
       resetCamera(c);

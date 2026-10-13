@@ -76,9 +76,13 @@ export function fadeFlash(state: FightState): void {
 
 /** A flash's pull on a fighter: toward the flash, weaker with distance. */
 function flashPull(state: FightState, data: FightData, f: Fighter): void {
+  flashPullFrom(state, data, f.skeleton.base.translation);
+}
+
+/** The flash's pull toward a point (the fighter's root, or Tekken Ball's ball). */
+export function flashPullFrom(state: FightState, data: FightData, at: readonly number[]): void {
   const flash = state.flash;
   if (!(flash.left > 0)) return;
-  const at = f.skeleton.base.translation;
   let x = (at[0]! - flash.at[0]!) | 0;
   let y = (at[1]! - flash.at[1]!) | 0;
   let z = (at[2]! - flash.at[2]!) | 0;
@@ -98,10 +102,10 @@ function flashPull(state: FightState, data: FightData, f: Fighter): void {
   flash.pull[2] = s16(-z);
 }
 
-/** A hit's flash on a fighter's colour counts up to 32 (outside practice's own colours). */
+/** A hit's flash on a fighter's colour counts up to 32 (not while practice colours it). */
 function hitFlash(state: FightState, f: Fighter): void {
-  if (state.mode === Mode.PRACTICE) throw new Error("practice mode's colours are not remade");
   const slot = f.movesetSlot;
+  if (state.mode === Mode.PRACTICE && state.practice.colours[slot]![0] !== 0) return;
   const flash = state.hitFlash[slot]!;
   if (flash === 0) return;
   state.hitFlash[slot] = ((flash + 1) & 0xff) > 0x20 ? 0 : (flash + 1) & 0xff;

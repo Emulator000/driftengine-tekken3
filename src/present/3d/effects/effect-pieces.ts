@@ -4,7 +4,8 @@
  * (a burst's spark, a breath's puff). A piece is where the effect is (metres, in the engine's axes:
  * the game's y and z turned over), how it moves (metres a second), how far through its life it is
  * (0 to 1), how many frames that life is, its colour (0 to 1), and a seed stable over its life, so
- * a frame held or played again draws the same.
+ * a frame held or played again draws the same. Tekken Ball's ball carries its glow: the side's own
+ * heavy spark looping about it, or the burning ball's fire.
  */
 import { sparkRow } from '../../../sim/effects/sparks.ts';
 import type { LightningStroke } from '../../../sim/data/effects.ts';
@@ -89,6 +90,8 @@ export interface EffectPiece {
   readonly frames: number;
   readonly colour: readonly [number, number, number];
   readonly seed: number;
+  /** How large it is against its recipe's own size (1 when not given). */
+  readonly size?: number;
 }
 
 /**
@@ -155,6 +158,18 @@ const LIFE = 1;
 const BREATH_FRAME = 2;
 const BREATH_KIND = 3;
 const BREATH_FRAMES = 0x15;
+/**
+ * Tekken Ball's glow on the ball: its kind, its words (its side, its frame, a side's spark or the
+ * fire); a side's spark loops its sheet's frames 9 to 20; the fire grows over seven steps,
+ * then flickers; how large the glow is against a spark's frame, and the fire against a breath's.
+ */
+const BALL_GLOW = 0xf;
+const BALL_SIDE = 0;
+const BALL_FRAME = 2;
+const BALL_FIRE = 3;
+const BALL_SPARK_FIRST = 9;
+const BALL_GROWTH = 7;
+const BALL_SIZES = { spark: 1.8, fire: 1.6 } as const;
 /** Yoshimitsu's breath (magenta), and Doctor B.'s (a sickly yellow). */
 const BREATH_COLOURS: readonly (readonly [number, number, number])[] = [
   [0.7, 0.04, 0.66],
@@ -205,6 +220,30 @@ function sparkPiece(state: FightState, data: FightData, slot: Spark, index: numb
     frames: slot.last,
     colour,
     seed: sparkSeed(slot, index),
+  };
+}
+
+/** The ball's glow: the side's own heavy spark in its design and colour, looping about the ball; or the burning ball's fireball, swelling, then flickering. */
+function ballGlowPiece(state: FightState, data: FightData, object: EffectObject, index: number): EffectPiece | null {
+  const position = toEngine(object.position, POOL_UNIT);
+  const frame = object.words[BALL_FRAME]!;
+  if (object.words[BALL_FIRE] !== 0) {
+    const age = object.state <= 1 ? (0.35 * Math.max(0, frame)) / BALL_GROWTH : 0.35 + 0.15 * ((frame & 7) / 8);
+    return { look: 'fireball', design: 'fire ring', position, velocity: [0, 0, 0], age, frames: 24, colour: WHITE, seed: mix(index, BALL_GLOW), size: BALL_SIZES.fire };
+  }
+  const row = sparkRow(state, data, object.words[BALL_SIDE]! & 1);
+  const spark = data.effects.characterSparks[row];
+  if (spark === undefined) return null;
+  return {
+    look: 'heavy',
+    design: DESIGNS[row] ?? 'fire ring',
+    position,
+    velocity: [0, 0, 0],
+    age: (BALL_SPARK_FIRST + Math.max(0, frame)) / spark.frames,
+    frames: spark.frames,
+    colour: [spark.colour[0]! / 255, spark.colour[1]! / 255, spark.colour[2]! / 255],
+    seed: mix(index, BALL_GLOW, object.words[BALL_SIDE]!),
+    size: BALL_SIZES.spark,
   };
 }
 
@@ -273,6 +312,9 @@ export function effectPieces(state: FightState, data: FightData): EffectPiece[] 
     } else if (FIRE_KINDS.has(object.kind)) {
       const piece = firePiece(object);
       pieces.push({ ...piece, design: 'fire ring', position, velocity, colour: WHITE, seed: mix(i, object.kind) });
+    } else if (object.kind === BALL_GLOW) {
+      const piece = ballGlowPiece(state, data, object, i);
+      if (piece) pieces.push(piece);
     } else if (object.kind === BREATH) {
       const frame = Math.max(0, object.words[BREATH_FRAME]!);
       pieces.push({ look: 'breath', design: 'fire ring', position, velocity, age: frame / BREATH_FRAMES, frames: BREATH_FRAMES, colour: BREATH_COLOURS[object.words[BREATH_KIND] === 0 ? 0 : 1]!, seed: mix(i, object.climb, object.heading) });

@@ -36,9 +36,20 @@ const rounded = (): boolean => {
 /** A fighter's or an intro model's mesh by its file's name: the rounded one, or the original. */
 const fighterMesh = (kind: string, name: string): Promise<ArrayBuffer> => (rounded() ? assetBytes(`models/${kind}/${name}.ftr`) : dataBytes(`${kind}/${name}.ftr`));
 
-const stage = async (id: number): Promise<{ mesh: ArrayBuffer; ground: ArrayBuffer; texture: ImageBitmap }> => {
-  const [mesh, ground, texture] = await Promise.all([dataBytes(`stages/${two(id)}.stg`), dataBytes(`stages/${two(id)}.gnd`), atlas('stages', two(id))]);
-  return { mesh, ground, texture };
+/** Tekken Ball's beach, whose panorama comes with it, and Tekken Force's stages, whose backdrops come with them. */
+const BEACH = 0x13;
+const FORCE_STAGES = { first: 0xf, last: 0x12 } as const;
+
+/** A stage's backdrop picture, for the stages that have one. */
+const backdropOf = (id: number): Promise<ImageBitmap> | undefined => {
+  if (id === BEACH) return assetImage('pictures/ball-backdrop.png');
+  if (FORCE_STAGES.first <= id && id <= FORCE_STAGES.last) return assetImage(`pictures/force-backdrop-${id}.png`);
+  return undefined;
+};
+
+const stage = async (id: number): Promise<{ mesh: ArrayBuffer; ground: ArrayBuffer; texture: ImageBitmap; backdrop?: ImageBitmap }> => {
+  const [mesh, ground, texture, backdrop] = await Promise.all([dataBytes(`stages/${two(id)}.stg`), dataBytes(`stages/${two(id)}.gnd`), atlas('stages', two(id)), backdropOf(id)]);
+  return backdrop === undefined ? { mesh, ground, texture } : { mesh, ground, texture, backdrop };
 };
 
 /** The fighters' and stages' drawing data, by pack and stage. */
@@ -48,6 +59,7 @@ export const drawingFiles: DrawingFiles = {
     return { mesh, texture };
   },
   stage,
+  picture: (name) => assetImage(`pictures/${name}.png`),
   smooth,
 };
 
