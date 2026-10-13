@@ -5,15 +5,17 @@
  * fields its waits spend and reading the pads at each (so start stops the movie); then the credits
  * set up, the Theater's sound (its own bank, the reverb), its song readied, and the roll each frame
  * until it ends or a button cuts it short, on to the records. A song the last match's win has not
- * yet faded out is stopped before the movie starts, so the movie keeps its volume. The Theater
- * mode's own menu is not remade.
+ * yet faded out is stopped before the movie starts, so the movie keeps its volume. From the mode
+ * menu the scene is the Theater mode's menu (`theater-menu.ts`), a movie chosen there played the
+ * same way and the menu back after it, with no credits.
  */
 import type { SceneTables } from '../data/scenes.ts';
 import type { FightData } from '../fight/state.ts';
 import { keyOffVoices, playSong, stopMusic, theaterSound } from '../fight/voices.ts';
 import { syncMusic } from '../sound/music.ts';
 import { startCredits, stepCredits } from './credits.ts';
-import { holdPicture } from './logo.ts';
+import { goToLogo, holdPicture } from './logo.ts';
+import { allSeen, resetCursor, TheaterChoice, theaterMenu } from './theater-menu.ts';
 import { stampSound, startMovie, stepMovie } from './movie.ts';
 import { Scene, type GameState } from './state.ts';
 
@@ -58,6 +60,10 @@ function playEnding(game: GameState, data: Pick<FightData, 'sound' | 'music'>, s
   }
   game.theater.playing = 0;
   stampSound(game);
+  if (game.theater.mode !== 0) {
+    game.step = 1;
+    return;
+  }
   startCredits(game.credits);
   theaterSound(world);
   playSong(world, SONG, true);
@@ -74,9 +80,21 @@ export function theaterScene(game: GameState, data: Pick<FightData, 'sound' | 'm
       game.credits.pressed = 0;
       game.credits.end = 0;
       game.theater.movie = endingMovie(game, scenes);
-      if (game.theater.mode !== 0) throw new Error("the Theater mode's menu is not remade");
-      game.step = 2;
+      if (game.theater.mode === 0) {
+        game.step = 2;
+        break;
+      }
+      game.theater.allSeen = allSeen(game, scenes.theater) ? 1 : 0;
+      resetCursor(game);
+      game.theater.cursor = game.theater.movie;
+      game.step = 1;
       break;
+    case 1: {
+      const choice = theaterMenu(game, data, scenes);
+      if (choice === TheaterChoice.LEAVE) game.step = 10;
+      else if (choice === TheaterChoice.PLAY && game.theater.mode === 1) game.step = 2;
+      break;
+    }
     case 2:
       if (game.theater.playing === 0) {
         if (0 <= syncMusic(world.sound, data.music).song) stopMusic(world);
@@ -91,6 +109,10 @@ export function theaterScene(game: GameState, data: Pick<FightData, 'sound' | 'm
       holdPicture(game, 1);
       game.scene = Scene.RECORDS_LOADER;
       game.step = 0;
+      break;
+    case 10:
+      stopMusic(world);
+      goToLogo(game, Scene.MENU);
       break;
     default:
       throw new Error(`the Theater's state ${game.step} is not remade`);

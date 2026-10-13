@@ -103,7 +103,7 @@ export class MoviePicture {
         video.pause();
         video.currentTime = 0;
         this.reading = { file, video };
-      } else if (c.key === 'drive pause' || c.key === 'song') {
+      } else if (c.key === 'drive pause' || c.key === 'song' || c.key === 'theater song') {
         this.reading?.video.pause();
         this.reading = null;
       }
