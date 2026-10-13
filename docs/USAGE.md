@@ -42,9 +42,13 @@ Add them to the address, for example `http://localhost:5190/?quick&p1=9&p2=13&st
 | `cpu` | Which sides the computer plays: `2` (the default), `1`, `12` to watch it play itself, `0` for two players |
 | `arcade=ROSTER`, `arcade=ROSTER,COSTUME` or `arcade=ROSTER,COSTUME,STAGE` | Starts Arcade at once with that character on the first pad, at that stage (1 to 10; by default the tenth, against Ogre, who becomes True Ogre once a round is won against him) |
 | `versus` | Starts Versus at once, both pads in, on its character select |
+| `ball` | Starts Tekken Ball at once, the first pad in, on its character select (where the first to choose a character chooses the ball) |
+| `force`, `force=ROSTER`, `force=ROSTER,COSTUME` or `force=ROSTER,COSTUME,STAGE` | Starts Tekken Force at once, the first pad in: on its character select, or with that character chosen at that stage (1 to 4, 5 the final stage; by default the first) |
 | `ending=ROSTER` or `ending=ROSTER,COSTUME` | Plays that character's ending at once |
 | `unlock` | Earns everything the game unlocks, as its last unlock does: every character (the character select then shows its two rows), the costumes, Tekken Ball and the Theater |
-| `record=time,ROSTER` or `record=survival,ROSTER,WINS` | Goes to the records with a new best time for that character (ten stages of 30 seconds) or a survival record of that many wins (more than the tenth best has), its name to enter, on the first pad |
+| `unlock=ball` or `unlock=theater` | Earns Tekken Ball alone, or the Theater alone, as the game's own unlock does (the mode menu lists it, new) |
+| `record=time,ROSTER` or `record=survival,ROSTER,WINS` | Goes to the records with a new best time for that character (ten stages of 30 seconds, through Time Attack's results) or a survival record of that many wins (more than the tenth best has, through Survival's results), its name to enter, on the first pad |
+| `record=force,ROSTER` or `record=force,ROSTER,FLAGS` | Goes to Tekken Force's results for that character on the first side, a run cleared with a new best score, then the records; `FLAGS` 1 a copper key (the default), 8 Dr. B saved, 0x10 the bosses beaten shown |
 | `textures=psx` | Draws the fighters' and stages' textures as the console did, each texel sharp, instead of enlarged and smoothed |
 | `models=psx`, `models=rounded` | Draws the fighters with the console's meshes, or the rounded ones (by default the rounded ones, but at `quality=verylow`) |
 | `quality=high` | The whole picture: ambient occlusion and bloom over the multisampled HDR scene; the default but on a phone |
@@ -71,17 +75,34 @@ Add them to the address, for example `http://localhost:5190/?quick&p1=9&p2=13&st
 | 9 | Jin | 21 | Tekken Force |
 | 10 | Julia | 22 | Kazuya (with Tekken 4's files) |
 
-Mokujin (15) is not in a fight yet.
+Mokujin (15) plays the moves of a character drawn each round, as in the game.
 
 ## The progress
 
 The game keeps what it keeps on a memory card on the console: the characters, costumes and modes
-earned, the endings seen, each character's plays, the best records and the options. It saves them
-where the console saves (on the way back to the title, and before the records), on the device
-you play on: in the browser's storage for the page's address, or in the app's own. A page started
-with `arcade`, `versus`, `ending`, `record` or `unlock` reads the progress but never saves it, so those
-shortcuts leave it as it was. Clearing the site's data in the browser (or the app's) starts the
-game afresh.
+earned, the endings seen, each character's plays, the best records and the options (the key
+configuration, the music, the display's place). Here it keeps them on the device you play on: in
+the browser's storage for the page's address, or in the app's own. The Options' SAVE DATA page
+(the console's memory card page) saves them (SAVE), brings back what was last saved (LOAD), and
+turns the auto save on or off. With AUTO SAVE on, the game saves where the console saves on its
+own (on the way back to the title, and before the records) whenever the records changed; options
+changed in the Options are kept by a SAVE, or by the next of those. A device with nothing saved yet
+starts with AUTO SAVE and both pads' VIBRATION on. A page started with `arcade`, `versus`, `ball`,
+`force`, `ending`, `record` or `unlock` reads the progress but never saves it, so those shortcuts
+leave it as it was. Clearing the site's data in the browser (or the app's) starts the game afresh.
+
+## Controllers
+
+Each player plays on the controller it last pressed anything on: the keyboard, the touch pad, or
+a gamepad. The buttons the game shows (the Options' prompts, the pad in the key configuration)
+are that controller's: a PlayStation pad's symbols, an Xbox pad's A B X Y and LB RB LT RT (A is
+the cross, at the bottom), a Nintendo pad's B A Y X and L R ZL ZR, the keys a keyboard player
+presses, the touch pad's 1 to 4. A keyboard player reads START as ENTER where the game names it.
+
+A gamepad with motors vibrates as the console's DualShock does, the small motor and the large one
+playing the game's own patterns while VIBRATION is on in the Options' key configuration (on to
+start, where the console starts it off; YES or NO there for each pad). The browser has to drive
+gamepad motors: Chromium-based browsers and the desktop app do.
 
 ## As an app
 

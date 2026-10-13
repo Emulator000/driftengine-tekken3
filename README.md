@@ -163,10 +163,10 @@ are for your own devices. Never share or upload an app built from your disc.
 
 The game starts as the console does: the logo, the opening movie, the title (Enter), the mode menu.
 
-| | Move | Left punch | Right punch | Left kick | Right kick | Sidestep | Start |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Player 1 | W A S D | U | I | J | K | Q, E | Enter |
-| Player 2 | arrows | numpad 4 | numpad 5 | numpad 1 | numpad 2 | numpad 7, 9 | numpad Enter |
+| | Move | Left punch | Right punch | Left kick | Right kick | L2, L1 | R1, R2 | Start | Select |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Player 1 | W A S D | U | I | J | K | Q, E | R, F | Enter | Backspace |
+| Player 2 | arrows | numpad 4 | numpad 5 | numpad 1 | numpad 2 | numpad 7, 9 | numpad 6, 3 | numpad Enter | numpad . |
 
 A gamepad drives the player of its index, and on a touch screen the pad over the picture drives
 the first. Alt+Enter takes the game to full screen and back. `?quick` in the address skips the menus for a match at
@@ -196,30 +196,30 @@ field. What is done and what is not yet:
 | **The game's flow** | | |
 | Power-on: the logo, the opening movie, the title | Done | |
 | The attract cycle: the in-engine intros, the demo fights, the other movie | Done | |
-| The mode menu | Done | Arcade and Versus start a game; the other modes not yet |
+| The mode menu | Done | Every mode starts |
 | The character select | Done | Both its layouts: one row, and two once more characters are earned (`?unlock` earns them all); Kazuya in a cell of his own when his files are built |
 | The versus select: both players at once, the handicaps, the record of wins and draws | Done | Also Arcade's, with start and both shoulders held as it is chosen; `?versus` starts Versus |
 | The versus screen | Done | |
 | Arcade: its ten opponents, Ogre's change into True Ogre, the continue, game over | Done | `?arcade=ROSTER` starts it at Ogre's stage |
 | The endings: each character's movie and captions, the credits | Done | |
-| The records screens and the name entry | Done | A new record's name comes from Time Attack and Survival, not yet in; `?record` enters one |
-| The progress kept between plays: characters and costumes earned, the unlocks, the plays, the records, the options | Done | Saved on your device where the console saves to its memory card |
+| The records screens and the name entry | Done | A new record's name comes from Time Attack and Survival; `?record` enters one |
+| The progress kept between plays: characters and costumes earned, the unlocks, the plays, the records, the options | Done | Saved on your device: the Options' SAVE DATA page (the memory card's), and the auto save |
 | A quick match without the menus (`?quick`) | Done | |
 | **The modes** | | |
 | Versus (two players) | Done | |
-| Team Battle | Not yet | |
-| Time Attack | Not yet | |
-| Survival | Not yet | |
-| Practice | Not yet | |
-| Tekken Force | Not yet | |
-| Tekken Ball | Not yet | |
-| The Theater's menu | Not yet | The endings play from Arcade |
-| The options | Not yet | |
+| Team Battle | Done | Its results too |
+| Time Attack | Done | Its results too |
+| Survival | Done | Its results too |
+| Practice | Done | 1P FREESTYLE with its training dummy, VS CPU, COMBO TRAINING with each character's combos, ATTACK DATA, COUNTER ATTACKS, HIT ANALYSIS, COMBO REPLAY, the command lists |
+| Tekken Force | Done | Its four stages' streets and the final stage, the soldiers brought on by each stage's script as the camera moves, the bosses each character meets, +LIFE items, the stage clear's tally, the keys and Dr. B to win, the run's results; `?force` starts it |
+| Tekken Ball | Done | The ball chosen on the select (the first to choose a character chooses it), the beach and its court, the ball's touches, charges, strikes, points and burns, its glow in the side's spark, the charge gauges, the knockout's replays, the computer players, the rules page set in type |
+| The Theater: its movies and its music player | Done | The movies open as their endings are seen; the music page once all are. The DISC button (for the Tekken and Tekken 2 discs) is left out |
+| The Options: game options, key configuration, records, display adjust, save data | Done | The key configuration and the prompts show your controller's buttons |
 | **The fight** | | |
 | Input, moves, throws, hits, the camera, the rounds, the replay | Done | The original's on every field, checked against it frame by frame |
 | The computer opponent | Done | |
 | The HUD, the round calls, the pause menu and the command lists | Done | |
-| The fighters | Partly | Every fighter but Mokujin |
+| The fighters | Done | Mokujin with a character's moves drawn each round |
 | Hit sparks, dust, bursts, the charged glow, breath and fire | Done | |
 | Hair and accessories swinging | Done | On the original's springs, checked against it frame by frame |
 | Hands opening and clenching, eyes blinking | Done | Each hand's shapes from the model, rounded alike; the costume's closed eyes over its face. Gon's face colours not yet |
@@ -231,7 +231,8 @@ field. What is done and what is not yet:
 | The movies | Done | Converted from the disc when FFmpeg is installed |
 | The voices, effects, music and the audio track | Done | Played from the game's own banks and songs |
 | **Around the game** | | |
-| Keyboard and gamepads | Done | |
+| Keyboard and gamepads | Done | The buttons shown are the controller's you play on: PlayStation, Xbox, Nintendo, keyboard, touch |
+| The pads' vibration | Done | The original's patterns on a gamepad's two motors, where the browser drives them (Chromium, the desktop app); on to start, VIBRATION in the key configuration turns it off and on |
 | Touch controls | Done | A stick where the left thumb lands, the four buttons, Select and Start |
 | Phones and tablets, in the browser | Done | Over your home network, `npm run dev:lan` |
 | An app for Windows, macOS or Linux built from your disc | Done | `npm run desktop`; the Linux app is the one played so far |
