@@ -24,7 +24,7 @@ import { joinWithStart } from './join.ts';
 import { goToLogo, goToScene, holdPicture, queueFile, START_SOUND, startPressed } from './logo.ts';
 import { MenuMode, stopMotors } from './menu.ts';
 import { startOgreChange, stepOgreChange } from './ogre-change.ts';
-import { addStreakWin, countArcadePlay, countVersusResult, earnOnDefeat, recordEnding, recordStageTime, setStreakSide } from './records.ts';
+import { addStreakWin, countArcadePlay, countVersusDraw, countVersusResult, earnOnDefeat, recordEnding, recordStageTime, setStreakSide } from './records.ts';
 import { Scene, type GameState } from './state.ts';
 
 /** The buttons a soft reset needs held (start and select, nothing but the shoulders besides), and select newly pressed. */
@@ -33,8 +33,6 @@ const RESET_MASK = 0xfff3;
 const SELECT = 0x100;
 /** The pause menu's choice that resets. */
 const PAUSE_RESET = 3;
-/** The versus screens' scene a mode that chose its characters goes to. */
-const VERSUS_CHOSEN = 10;
 /** The fight scene's states. */
 export const FightStep = {
   FROM_MENUS: 0,
@@ -60,8 +58,8 @@ export const FightStep = {
   TRUE_OGRE: 0x14,
   DEMO_OVER: 0x18,
 } as const;
-/** The pause menu's quit and its states, not remade. */
-const QUITTING = { first: 0x15, last: 0x17 } as const;
+/** Tekken Force's states between its stages, not remade. */
+const FORCE_STAGE = { first: 0x15, last: 0x17 } as const;
 /** Arcade's last opponent, Ogre, who changes into True Ogre. */
 const LAST_OPPONENT = 9;
 const TRUE_OGRE = 0x14;
@@ -188,6 +186,32 @@ function arcadeResult(game: GameState, scenes: SceneTables): void {
 }
 
 /**
+ * Versus's match over: counted; a win adds to the winner's wins and streak and counts both
+ * characters (the winner's as a play too), a draw adds to the draws, starts the streak afresh and
+ * counts both; then both sides choose again.
+ */
+export function versusResult(game: GameState, scenes: SceneTables): void {
+  const world = game.world;
+  const record = game.run.versusRecord;
+  const { roster } = game.entrants;
+  game.run.versusMatches += 1;
+  const winner = world.match.winnerSide;
+  if (world.match.winner !== 0 && world.match.winner < 3) {
+    addStreakWin(game, winner);
+    record.wins[winner] = (record.wins[winner]! + 1) & 0xffff;
+    countVersusResult(game, scenes, roster[winner]!, roster[world.match.loserSide]!);
+    countArcadePlay(game, scenes, roster[winner]!);
+  } else if (world.match.winner === 3) {
+    setStreakSide(game, world.match.streakSide);
+    record.draws = (record.draws + 1) & 0xffff;
+    countVersusDraw(game, scenes, roster[0]!, roster[1]!);
+  }
+  game.entrants.chosen[1] = 0;
+  game.entrants.chosen[0] = 0;
+  game.step = FightStep.FROM_MENUS;
+}
+
+/**
  * "CONTINUE? n" counting down from nine (a button skips a count, the announcer says each); start
  * continues: 1 with the same character, 2 to choose again (the option). -1 when the count runs
  * out, 0 while it runs.
@@ -250,20 +274,21 @@ function fighting(game: GameState, data: FightSceneData): void {
     game.step = FightStep.DEMO_OVER;
     return;
   }
-  if (flow === 7) throw new Error("the pause menu's quit is not remade");
+  if (flow === 7) throw new Error("Tekken Force's step between its stages is not remade");
   if (flow < 9) return;
   if (flow === Flow.TRUE_OGRE) {
     holdPicture(game, 1);
     game.step = mode !== MenuMode.TIME_ATTACK ? FightStep.OGRE_CHANGE : FightStep.TRUE_OGRE_SHOWN;
     return;
   }
-  if (flow === 0xb) throw new Error(`the round flow's step ${flow} is not remade`);
+  if (flow === 0xb) throw new Error("practice's way out is not remade");
   if (mode === MenuMode.PRACTICE) throw new Error("practice's end is not remade");
   if (world.match.winner === 0) {
     game.step = FightStep.HOLD;
     return;
   }
   if (mode === MenuMode.ARCADE) arcadeResult(game, data.scenes);
+  else if (mode === MenuMode.VERSUS) versusResult(game, data.scenes);
   else if (mode === MenuMode.DEMO) game.step = FightStep.DEMO_OVER;
   else throw new Error(`mode ${mode}'s result is not remade`);
 }
@@ -318,7 +343,7 @@ function step(game: GameState, data: FightSceneData): void {
         return;
       }
       holdPicture(game, 1);
-      game.scene = VERSUS_CHOSEN;
+      game.scene = Scene.VS_SELECT;
       return;
     case FightStep.MODE_SETUP:
       if (mode === MenuMode.ARCADE || mode === MenuMode.TIME_ATTACK) arcadeStart(game, data.scenes);
@@ -447,8 +472,8 @@ function step(game: GameState, data: FightSceneData): void {
       else goToLogo(game, Scene.TITLE);
       return;
     default:
-      if (QUITTING.first <= game.step && game.step <= QUITTING.last) throw new Error(`the fight scene's state 0x${game.step.toString(16)} (the pause menu's quit) is not remade`);
-      /* Quitting from the pause menu: back to the mode menu. */
+      if (FORCE_STAGE.first <= game.step && game.step <= FORCE_STAGE.last) throw new Error(`the fight scene's state 0x${game.step.toString(16)} (Tekken Force's) is not remade`);
+      /* Practice's way out: back to the mode menu. */
       stopSounds(world, true);
       voiceLine(world, data.tables, 0, START_SOUND, 0);
       stopMotors(game);

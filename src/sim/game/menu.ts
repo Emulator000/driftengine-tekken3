@@ -245,9 +245,8 @@ export function startMode(game: GameState, mode: number, choosers: number, choos
       world.joined[0] = 1;
       world.options.handicaps[0] = 3;
       world.options.handicaps[1] = 3;
-      run.stageTimes[0]!.frames &= 0xffff0000;
-      run.teams[0] = 0;
-      run.teams[1] = 0;
+      run.versusRecord.wins.fill(0);
+      run.versusRecord.draws = 0;
       Object.assign(run.versusStage, { code: -1, first: -1, second: -1 });
       break;
     case MenuMode.TIME_ATTACK:

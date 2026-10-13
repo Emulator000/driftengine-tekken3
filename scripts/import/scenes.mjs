@@ -51,8 +51,8 @@ const KAZUYA = { roster: 22, cell: 10, look: (22 | 0x20 | (0x9c1c6c << 8)) >>> 0
 /**
  * The versus screen, from the Arcade mode's overlay (BNS 5, loaded at `0x800b0548`): each side's
  * portrait place and its name's (`0x800b4a08`, `0x800b4a18`: x, y, then the slide's offsets), the
- * line between the portraits and the stage's line (their formats' leading colour, font and place
- * codes dropped); from the executable each background's band (`0x80022694` colour, `0x800226b0`
+ * line between the portraits, the stage's line and a versus match's (their formats' leading colour,
+ * font and place codes dropped); from the executable each background's band (`0x80022694` colour, `0x800226b0`
  * width) and archive (`0x80022690`, a logical file).
  */
 const MODE_OVERLAY = 0x800b0548;
@@ -75,9 +75,77 @@ function versusTables(exe, root) {
     names: [0, 1].map((side) => place(0x800b4a18, side)),
     versus: text(0x800b06e4),
     stage: text(0x800b06f0),
+    fight: text(0x800b0704),
     demoStage: text(0x800b0718),
     bands: [0, 1].map((band) => ({ colour: exe.u32(0x80022694 + band * 4), width: exe.u16(0x800226b0 + band * 2) })),
     backgrounds: [0, 1].map((picture) => exe.u16(0x80022690 + picture * 2)),
+  };
+}
+
+/**
+ * The versus select (scene 10), from the executable: its grid of seven cells by three
+ * (`0x80022768`, six bytes each: x, y, the character's code), by a side's state its cursor's,
+ * name's and slot's kinds (`0x80022824`, three bytes) and the kinds kept apart (`0x80022804`, two),
+ * each side's layout (`0x80098160`, thirteen words: its cursor's colour, two tag pictures, the
+ * code its cursor starts on, its tags' offsets, its name's place, its slots' places for one
+ * player, for versus and for teams, its gauge's side, raised place and place, and its gauge's two
+ * labels' offsets), the titles by mode (`0x800981c8`), the hint (`0x800981e0`), the tournament's
+ * line (`0x800981ec`), each mode's two colours (`0x80022b4c`), and the background's quads, four
+ * opaque (`0x80022a8c`) and two added (`0x80022b0c`), each four corners and four colours (all
+ * ones the mode's colour); from the mode overlay (BNS 5) the wins' and the draws' colours by hundreds (`0x800b49e0`, `0x800b49e4`), and the handicap
+ * gauge's segments' widths (`0x800b065c`, six bytes each) and labels (`0x800b06cc`, and
+ * `0x800b49e8` one by handicap).
+ */
+const VS_GRID = 0x80022768;
+const VS_KINDS = 0x80022824;
+const VS_APART = 0x80022804;
+const VS_SIDES = 0x80098160;
+const VS_TITLES = 0x800981c8;
+const VS_HINT = 0x800981e0;
+const VS_TOURNAMENT = 0x800981ec;
+const VS_COLOURS = 0x80022b4c;
+const VS_OPAQUE = 0x80022a8c;
+const VS_ADDED = 0x80022b0c;
+function vsSelectTables(exe, root) {
+  const overlay = new Uint8Array(readFileSync(path.join(root, 'public/data/bns/005.bin')));
+  const view = new DataView(overlay.buffer, overlay.byteOffset, overlay.byteLength);
+  const at = (address) => address - MODE_OVERLAY;
+  const byte = (offset) => overlay[offset] ?? 0;
+  const half = (word) => [(word << 16) >> 16, word >> 16];
+  const place = (word) => ({ x: (word << 16) >> 16, y: word >> 16 });
+  const quads = (table, count) =>
+    Array.from({ length: count }, (_, q) => ({
+      corners: Array.from({ length: 4 }, (_, k) => place(exe.u32(table + q * 0x20 + k * 4))),
+      colours: Array.from({ length: 4 }, (_, k) => exe.u32(table + q * 0x20 + 0x10 + k * 4) >>> 0),
+    }));
+  return {
+    grid: Array.from({ length: 21 }, (_, k) => ({ x: exe.s16(VS_GRID + k * 6), y: exe.s16(VS_GRID + k * 6 + 2), code: exe.u8(VS_GRID + k * 6 + 4) })),
+    kinds: Array.from({ length: 16 }, (_, k) => [0, 1, 2].map((i) => exe.u8(VS_KINDS + k * 3 + i))),
+    apart: Array.from({ length: 16 }, (_, k) => [0, 1].map((i) => exe.u8(VS_APART + k * 2 + i))),
+    sides: [0, 1].map((n) => {
+      const word = (k) => exe.u32(VS_SIDES + n * 0x34 + k * 4);
+      const [mirrored, raised] = half(word(8));
+      const gauge = place(word(9));
+      return {
+        cursor: word(0),
+        firstCode: word(3),
+        tags: half(word(4)),
+        name: place(word(5)),
+        slots: [place(word(6)), place(word(7)), place(word(12))],
+        gauge: { mirrored, raised, x: gauge.x, y: gauge.y, life: place(word(10)), percent: place(word(11)) },
+      };
+    }),
+    titles: Array.from({ length: 9 }, (_, mode) => cString(exe.u8, exe.u32(VS_TITLES + mode * 4))),
+    hint: cString(exe.u8, exe.u32(VS_HINT)),
+    tournament: cString(exe.u8, VS_TOURNAMENT),
+    modeColours: Array.from({ length: 9 }, (_, mode) => [exe.u32(VS_COLOURS + mode * 8) >>> 0, exe.u32(VS_COLOURS + mode * 8 + 4) >>> 0]),
+    opaque: quads(VS_OPAQUE, 4),
+    added: quads(VS_ADDED, 2),
+    winColours: Array.from(overlay.subarray(at(0x800b49e0), at(0x800b49e0) + 4)),
+    drawColours: Array.from(overlay.subarray(at(0x800b49e4), at(0x800b49e4) + 4)),
+    segments: Array.from({ length: 8 }, (_, k) => byte(at(0x800b065c) + k * 6)),
+    life: cString(byte, at(0x800b06cc)),
+    percents: Array.from({ length: 8 }, (_, k) => cString(byte, at(view.getUint32(at(0x800b49e8) + k * 4, true))).replace('%%', '%')),
   };
 }
 
@@ -281,6 +349,7 @@ export function sceneTables(exe, root) {
     fixedKeys: Array.from({ length: 8 }, (_, i) => view.getUint16(FIXED_KEYS + i * 2, true)),
     select: selectTables(exe, root),
     versus: versusTables(exe, root),
+    vsSelect: vsSelectTables(exe, root),
     records: recordsTables(root),
     /** The attract demo's characters (`0x800e2a74` in the title's overlay; the attract overlay has the same). */
     intros: introTables(root),

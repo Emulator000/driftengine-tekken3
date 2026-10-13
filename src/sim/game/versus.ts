@@ -50,13 +50,20 @@ function name(tables: FightTables, scenes: SceneTables, side: number, code: numb
   return { kind: 'name', text, colour: NAME.colour, font: NAME.font, x: left, y: place.y, slideX, slideY: place.slideY };
 }
 
-/** Arcade's (or the demo's) layout: each side's portrait and name, the line between them, the stage's line, the band and background (the two-player one with two humans). */
+/**
+ * Arcade's, versus's or the demo's layout: each side's portrait and name, the line between them,
+ * the stage's line (versus's match, the demo's own), the band and background (the two-player one
+ * with two humans, and always in versus).
+ */
 function layOut(game: GameState, tables: FightTables, scenes: SceneTables): VersusRecord[] {
   const world = game.world;
   const codes = [0, 1].map((side) => (game.entrants.roster[side]! << 2) | game.entrants.costume[side]!);
-  const picture = world.match.humanCount !== 1 ? 1 : 0;
-  const stageLine = world.mode === MenuMode.DEMO ? scenes.versus.demoStage : scenes.versus.stage.replace('%d', String(world.match.stage + 1));
-  if (world.mode !== MenuMode.ARCADE && world.mode !== MenuMode.TIME_ATTACK && world.mode !== MenuMode.DEMO) throw new Error(`mode ${world.mode}'s versus layout is not remade`);
+  const picture = world.match.humanCount !== 1 || world.mode === MenuMode.VERSUS ? 1 : 0;
+  let stageLine: string;
+  if (world.mode === MenuMode.DEMO) stageLine = scenes.versus.demoStage;
+  else if (world.mode === MenuMode.VERSUS) stageLine = scenes.versus.fight.replace('%d', String(game.run.versusMatches + 1));
+  else if (world.mode === MenuMode.ARCADE || world.mode === MenuMode.TIME_ATTACK) stageLine = scenes.versus.stage.replace('%d', String(world.match.stage + 1));
+  else throw new Error(`mode ${world.mode}'s versus layout is not remade`);
   const band = scenes.versus.bands[world.mode === MenuMode.DEMO ? 1 : picture]!;
   return [
     portrait(game, scenes, 0, codes[0]!),

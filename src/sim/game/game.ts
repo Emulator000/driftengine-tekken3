@@ -23,6 +23,7 @@ import { goToScene, holdPicture, queueFile } from './logo.ts';
 import { stopMotors } from './menu.ts';
 import { versusScene } from './versus.ts';
 import { selectScene } from './select.ts';
+import { vsSelectScene } from './vs-select.ts';
 import { blankGameState, Scene, type GameState } from './state.ts';
 
 /** What the game reads: the fight's tables and the scenes', each match's data once it is loaded (null until then), and each attract intro's (its moveset and models). */
@@ -248,6 +249,8 @@ export class Game {
         return theaterScene(game, this.data.tables, this.data.scenes);
       case Scene.SELECT:
         return selectScene(game, this.data.tables, this.data.scenes);
+      case Scene.VS_SELECT:
+        return vsSelectScene(game, this.data.tables, this.data.scenes);
       case Scene.RECORDS_LOADER:
         return recordsLoaderScene(game, this.data.tables, this.data.scenes);
       case Scene.RECORDS:

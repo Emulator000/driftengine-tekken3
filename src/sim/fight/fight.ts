@@ -184,10 +184,10 @@ export class Fight {
     state.nothingDrawn = 0;
     const flow = fightFrame(state, this.data);
     state.nothingDrawn = 0;
-    if (flow === 7) throw new Error("the pause menu's quit is not remade");
+    if (flow === 7) throw new Error("Tekken Force's step 7 is not a quick match's");
     if (flow < 9) return;
     if (flow === 10) throw new Error("Ogre's change into True Ogre is Arcade's, not a quick match's");
-    if (flow === 0xb) throw new Error("a match's eleventh flow step is not remade");
+    if (flow === 0xb) throw new Error("practice's way out is not a quick match's");
     if (state.mode === Mode.PRACTICE) throw new Error("practice's end is not remade");
     if (state.match.winner === 0) {
       this.step = Step.HOLD;

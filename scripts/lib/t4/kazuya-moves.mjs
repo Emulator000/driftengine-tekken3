@@ -16,8 +16,10 @@
  * crouch dash), which Tekken 3 has as well, on ids every Mishima shares (102, 103, 105): his take
  * those ids, with his own motions and cancels.
  *
- * No list of his leads to an attack of Heihachi's he does not have; what is still Heihachi's is
- * reported (`left`): the throws, which need their victims' half to be taken across.
+ * His crouch's attacks, and those rising out of it, take Tekken 4's for the same inputs as his
+ * stance's do. No list of his stance leads to an attack of Heihachi's he does not have; what his
+ * lists still reach of Heihachi's own motions is reported (`left`): his rising attacks from the
+ * ground, some from a dash or a sidestep, and the victims' halves of Heihachi's throws.
  */
 import { encodeT3Motion } from './t3motion.mjs';
 import { convertFrame, restRotation } from './retarget.mjs';
@@ -55,12 +57,6 @@ const CROUCH = 40;
 const FACE_DOWN = 157;
 /** A Tekken 4 motion code's bit for one of his own (the rest are the shared bank's, 0x8000). */
 const OWN_MOTION = 0x4000;
-/**
- * Tekken 3's entrances (0, the short one; 2, the long one with its camera shot), win poses (0xd67
- * to 0xd6a, by the button held) and time-up loser's stand (0xd6c), and his own Tekken 4 motions for
- * them: arms folded into his stance (110), his back turned into it (109); the fist raised (119), the
- * fist to the ground (118), the kata (113), the horse stance (115); arms folded (108).
- */
 /** Tekken 3's 1+3 and 2+4 throws and Tekken 4's (his stance's 1+3 and 2+4, moves 419 and 420). */
 const THROWS = [
   [2792, 419],
@@ -81,15 +77,27 @@ const THROW_CONNECT = 0x21;
 /** Tekken 4's property for a throw's damage at its frame, and Tekken 3's thrower event for it. */
 const DAMAGE_PROPERTY = 0x8022;
 const THROWER_HURTS = 0xb;
+/**
+ * Tekken 3's entrances (0, the short one; 2, the long one with its camera shot), win poses (0xd67
+ * to 0xd6a, by the button held, 1 to 4) and time-up loser's stand (0xd6c), and his own Tekken 4
+ * motions for them: his back turned into his stance (109), arms folded into it (110); the fist to
+ * the ground (118), arms folded (108) and his two others (113, 114), the ones Tekken 4 plays for
+ * the same buttons; arms folded (108). Tekken 4's lift of the beaten opponent by the neck (119) is
+ * left out: it needs the opponent in it, and Tekken 3's winner poses alone.
+ */
 const POSES = new Map([
   [0, 109],
   [2, 110],
-  [0xd67, 119],
-  [0xd68, 118],
+  [0xd67, 118],
+  [0xd68, 108],
   [0xd69, 113],
-  [0xd6a, 115],
+  [0xd6a, 114],
   [0xd6c, 108],
 ]);
+/** Where a round opens after the first (his stance, held), and the stand a round lost at time-up holds after 0xd6c, looping (his arms held folded, 108's last pose). */
+const ROUND_OPENING = 1;
+const BEATEN_HOLD = 0xd6d;
+const HOLD_FRAMES = 60;
 
 /* ---- Tekken 3's moveset file. ---- */
 
@@ -199,10 +207,10 @@ function expanded(list, exe) {
   return out;
 }
 
-/** The ids his stance starts with a plain input (directions and buttons), in the order the game tries them. */
-function stanceSlots(heihachi, exe) {
-  const stance = heihachi.moves[heihachi.ids[STANCE]];
-  const list = listAt(heihachi.cancels, moveView(stance).getUint32(0xc, true));
+/** The ids a state of his (`id`) starts with a plain input (directions and buttons), in the order the game tries them. */
+function inputSlots(heihachi, exe, id) {
+  const state = heihachi.moves[heihachi.ids[id]];
+  const list = listAt(heihachi.cancels, moveView(state).getUint32(0xc, true));
   return expanded(list, exe).filter((e) => e.command < 0xc000 && (e.command & 0xf) !== 0 && (e.command & 0x10) === 0 && e.test === 0 && conditionHolds(e.cond));
 }
 
@@ -290,6 +298,7 @@ const limbOf = (joint) => (joint === 0 ? -1 : ARM_JOINTS.includes(joint) ? 0 : 1
  */
 export function buildKazuyaMoveset({ heihachiBytes, commonBytes, movesets, exe, t4, ownBank, commonBank, nodes, tables, skeleton }) {
   const set = readT3(heihachiBytes);
+  const originalIds = set.ids.slice();
   const common = readT3(commonBytes);
   /* Heihachi's own moves, before his are added. */
   const original = set.moves.length;
@@ -647,32 +656,44 @@ export function buildKazuyaMoveset({ heihachiBytes, commonBytes, movesets, exe, 
     setPresent(id);
   };
 
-  /* The stance's inputs: each id takes Tekken 4's move for the same input. */
+  /*
+   * A state's inputs: each id it starts takes Tekken 4's move for the same input in its own state,
+   * where that is an attack. `matches` says whether Tekken 4's directions (numpad bits) stand for
+   * Tekken 3's, and `only` which of the ids to take.
+   */
   const report = [];
   const shared = [];
-  /* Inputs whose id still plays Heihachi's move: Tekken 4 starts a throw there, or nothing. */
-  const left = [];
   /* Heihachi's move and Kazuya's for the same input, for learning how Tekken 4's reactions read in Tekken 3. */
   const pairs = [];
-  const t4Stance = applicable(t4, t4.aliases[1]);
-  const slots = stanceSlots(set, exe);
   const taken = [];
-  for (const slot of slots) {
-    const directions = (slot.command >> 5) & 0x1ff;
-    const buttons = slot.command & 0xf;
-    const match = t4Stance.find((e) => isPlain(e.command) && t4Buttons(e.command) === buttons && (t4Directions(e.command) & directions) === directions && directions !== 0);
-    if (taken.includes(slot.target)) continue;
-    if (!match || !isAttack(match.target)) {
-      if (heihachiMove(slot.target)) left.push({ id: slot.target, command: slot.command, t4: match?.target ?? -1 });
-      continue;
+  const pairInputs = (slots, t4List, matches, only = () => true) => {
+    for (const slot of slots) {
+      if (taken.includes(slot.target) || !only(slot.target)) continue;
+      const directions = (slot.command >> 5) & 0x1ff;
+      const buttons = slot.command & 0xf;
+      const match = t4List.find((e) => isPlain(e.command) && t4Buttons(e.command) === buttons && matches(t4Directions(e.command), directions));
+      if (!match || !isAttack(match.target)) continue;
+      taken.push(slot.target);
+      pairs.push({ heihachi: heihachiMove(slot.target), t4: match.target });
+      /* Two inputs Tekken 4 sends to one move both play it. */
+      if (converted.has(match.target)) shared.push({ id: slot.target, t4: match.target });
+      else idFor(match.target, slot.target, heihachiMove(slot.target));
+      report.push({ id: slot.target, command: slot.command, t4: match.target });
     }
-    taken.push(slot.target);
-    pairs.push({ heihachi: heihachiMove(slot.target), t4: match.target });
-    /* Two inputs Tekken 4 sends to one move both play it. */
-    if (converted.has(match.target)) shared.push({ id: slot.target, t4: match.target });
-    else idFor(match.target, slot.target, heihachiMove(slot.target));
-    report.push({ id: slot.target, command: slot.command, t4: match.target });
-  }
+  };
+  /* His stance's. */
+  const t4Stance = applicable(t4, t4.aliases[1]);
+  pairInputs(inputSlots(set, exe, STANCE), t4Stance, (t4Dirs, dirs) => dirs !== 0 && (t4Dirs & dirs) === dirs);
+  /*
+   * His crouch's, those of Heihachi's own (the attacks from a crouch and from rising out of it, which
+   * the other crouching states reach on the same ids): a Tekken 3 input of no direction is one held
+   * down with any, as a Tekken 4 one of none is.
+   */
+  const heihachiOwnAttack = (id) => {
+    const record = heihachiMove(id);
+    return record !== null && moveView(record).getUint32(8, true) !== 0 && moveView(record).getUint32(0, true) < SHARED;
+  };
+  pairInputs(inputSlots(set, exe, CROUCH), applicable(t4, t4.aliases[2]), (t4Dirs, dirs) => (dirs === 0 ? t4Dirs === 0 : t4Dirs === 0 || (t4Dirs & dirs) === dirs), heihachiOwnAttack);
 
   /*
    * The Mishima states, on Tekken 3's ids for them: forward then neutral (102), then down (103), then
@@ -705,6 +726,15 @@ export function buildKazuyaMoveset({ heihachiBytes, commonBytes, movesets, exe, 
   for (const { id, t4: index } of shared) {
     set.ids[id] = set.ids[converted.get(index)];
     setPresent(id);
+  }
+  /*
+   * Where Heihachi's file plays two ids as one move (his d/f+1+2 is his d/f+1, his d+1+2 and
+   * d/b+1+2 his d/b+1), the one left plays as the one taken across.
+   */
+  const twinOf = new Map(report.map(({ id }) => [originalIds[id], id]));
+  for (let id = 0; id < IDS; id += 1) {
+    const twin = twinOf.get(originalIds[id]);
+    if (twin !== undefined && twin !== id && set.ids[id] === originalIds[id]) set.ids[id] = set.ids[twin];
   }
 
   /* His stance's own motion. */
@@ -745,12 +775,11 @@ export function buildKazuyaMoveset({ heihachiBytes, commonBytes, movesets, exe, 
     if (match) pairState(e.target, match.target, 0);
   }
   /* A Tekken 3 move by id kept, his motion in it and its end at his motion's (where Tekken 3's waits for its own to finish). */
-  const withMotion = (id, code, index = -1) => {
+  const withMotion = (id, code, index = -1, frames = motionFrames(code, 0)) => {
     const entry = set.ids[id];
     const own = entry < SHARED;
     const record = Uint8Array.from(own ? set.moves[entry] : common.moves[entry - SHARED]);
     const view = moveView(record);
-    const frames = motionFrames(code, 0);
     const list = listAt(own ? set.cancels : common.cancels, view.getUint32(0xc, true)).map((e) =>
       e.command === END && e.from > 0 ? { ...e, from: Math.min(frames.length, 0xff), at: Math.min(frames.length, 0xff) } : e,
     );
@@ -769,9 +798,13 @@ export function buildKazuyaMoveset({ heihachiBytes, commonBytes, movesets, exe, 
   /*
    * His entrances, win poses and the stand of a round lost at time-up: Tekken 3 starts them by id,
    * Tekken 4 plays his from the moves past its stance's (893 to 907), each a motion of his own:
-   * Heihachi's records and camera shots keep them, his motions in them.
+   * Heihachi's records and camera shots keep them, his motions in them. A round after the first
+   * opens on his stance, and a round lost at time-up holds his last pose.
    */
   for (const [id, motion] of POSES) withMotion(id, OWN_MOTION | motion);
+  withMotion(ROUND_OPENING, t4.moves[t4.aliases[1]].motion);
+  const folded = motionFrames(OWN_MOTION | POSES.get(0xd6c), 0);
+  withMotion(BEATEN_HOLD, OWN_MOTION | POSES.get(0xd6c), -1, Array.from({ length: HOLD_FRAMES }, () => folded[folded.length - 1]));
 
   /*
    * His throws. Tekken 4's descend from Tekken 3's: an attempt's cancels on its connect test the
@@ -845,15 +878,37 @@ export function buildKazuyaMoveset({ heihachiBytes, commonBytes, movesets, exe, 
   for (const { view, list, last, heihachi } of states) {
     view.setUint32(0xc, addList([...list, ...(heihachi ? generic(listAt(set.cancels, moveView(heihachi).getUint32(0xc, true))) : []), last]), true);
   }
-  const ownStates = new Set([set.ids[STANCE], ...[...moving.keys()].map((id) => set.ids[id])]);
+  /* An id still on a move of Heihachi's file with a motion of his own. */
+  const heihachiOwn = (id) => set.ids[id] < original && moveView(set.moves[set.ids[id]]).getUint32(0, true) < SHARED;
+  /* His stance's buttons start nothing of Heihachi's own besides (his poses on 1+2+3+4 and 2+3+4). */
+  const ownStance = set.ids[STANCE];
+  const button = (e) => e.command < 0xc000 && (e.command & 0xf) !== 0;
+  const ownStates = new Set([ownStance, ...[...moving.keys()].map((id) => set.ids[id])]);
   for (let i = 0; i < set.moves.length; i += 1) {
     if (i >= original && !ownStates.has(i)) continue;
     const view = moveView(set.moves[i]);
     if (view.getUint32(8, true) !== 0) continue;
     const list = listAt(set.cancels, view.getUint32(0xc, true));
-    const kept = list.filter((e) => e.command === END || e.command === CALL || !heihachiAttack(e.target));
+    const kept = list.filter((e) => e.command === END || e.command === CALL || !(heihachiAttack(e.target) || (i === ownStance && button(e) && heihachiOwn(e.target))));
     if (kept.length !== list.length) view.setUint32(0xc, addList(kept), true);
   }
 
-  return { bytes: writeT3(set), moves: converted.size, report, converted, moving, left: left.filter((l) => !taken.includes(l.id)) };
+  /* What his lists still reach of Heihachi's own motions, from his stance. */
+  const left = [];
+  const seen = new Set();
+  const queue = [STANCE];
+  while (queue.length > 0) {
+    const id = queue.shift();
+    if (id >= IDS || seen.has(id) || missingBit(id)) continue;
+    seen.add(id);
+    if (heihachiOwn(id)) left.push(id);
+    const entry = set.ids[id];
+    const record = entry < SHARED ? set.moves[entry] : common.moves[entry - SHARED];
+    if (!record) continue;
+    const list = listAt(entry < SHARED ? set.cancels : common.cancels, moveView(record).getUint32(0xc, true));
+    for (const e of expanded(list, exe)) if (conditionHolds(e.cond)) queue.push(e.target);
+    queue.push(moveView(record).getUint16(0x10, true));
+  }
+
+  return { bytes: writeT3(set), moves: converted.size, report, converted, moving, left: left.sort((a, b) => a - b) };
 }

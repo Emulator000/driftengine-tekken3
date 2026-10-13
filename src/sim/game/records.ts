@@ -31,7 +31,7 @@ const popcount = (bits: number): number => {
   return count;
 };
 
-/** How often a character has been played: its Arcade plays, versus losses and the fourth count. */
+/** How often a character has been played: its Arcade plays, versus losses and versus draws. */
 export function playCount(game: GameState, roster: number): number {
   const counts = playsOf(game, roster);
   return counts[0]! + counts[2]! + counts[3]!;
@@ -61,6 +61,15 @@ export function countVersusResult(game: GameState, scenes: SceneTables, winner: 
   bump(playsOf(game, winner), 1);
   bump(playsOf(game, loser), 2);
   bumpSince(game);
+  recordsChanged(game, scenes);
+}
+
+/** A versus match drawn: both characters counted. */
+export function countVersusDraw(game: GameState, scenes: SceneTables, first: number, second: number): void {
+  for (const roster of [first, second]) {
+    bump(playsOf(game, roster), 3);
+    bumpSince(game);
+  }
   recordsChanged(game, scenes);
 }
 

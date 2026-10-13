@@ -15,6 +15,7 @@ import { TitleShows } from '../../sim/game/title.ts';
 import { drawMenu } from './menu.ts';
 import { drawSelect, paintSelectAhead, type SelectPictures } from './select.ts';
 import { drawVersus, paintVersusAhead } from './versus.ts';
+import { drawVsSelect } from './vs-select.ts';
 import { drawRecords } from './records.ts';
 import type { SceneTables } from '../../sim/data/scenes.ts';
 import type { RosterTables } from '../../sim/data/roster.ts';
@@ -233,6 +234,9 @@ export class ScenePresenter {
         break;
       case Scene.SELECT:
         drawSelect(game, this.data.scenes, this.data.roster, this.art, this.light, layer, this.pictures.select);
+        break;
+      case Scene.VS_SELECT:
+        drawVsSelect(game, this.data.scenes, this.art, this.light, layer, this.pictures.select.smallIcons);
         break;
       case Scene.VERSUS:
         drawVersus(game, this.art, layer, this.pictures.select.portraits);

@@ -220,6 +220,17 @@ export function convertFrame(values, fixup, offsets, rest, bones) {
   const local = rest.slice();
   /* Group 6 is a place, not a turn: its node is no node, and read as one it would undo the root's turn (group 3). */
   for (let g = 3; g < 23; g += 1) if (isRotation(g * 3)) local[NODE_OF_GROUP[g]] = groupRotation(values[g * 3], values[g * 3 + 1], values[g * 3 + 2]);
+  /*
+   * The root's turn about the vertical goes to the chest and the hips (its children), the pose
+   * unchanged: Tekken 3 never eases its root from one move to the next, so a motion held turned
+   * there (his long entrance's quarter turn) turned him on past his stance as it blended into it.
+   */
+  const yaw = Math.atan2(local[0][2], local[0][8]);
+  const root = mul([Math.cos(yaw), 0, -Math.sin(yaw), 0, 1, 0, Math.sin(yaw), 0, Math.cos(yaw)], local[0]);
+  const carried = mul(transpose(root), local[0]);
+  local[1] = mul(carried, local[1]);
+  local[13] = mul(carried, local[13]);
+  local[0] = root;
   return convertPose(local, [values[0] + values[3], values[1] + values[4], values[2] + values[5]], fixup, offsets, bones);
 }
 

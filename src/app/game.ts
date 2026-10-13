@@ -30,7 +30,7 @@ import { MoviePicture } from '../present/scenes/movie.ts';
 /** The frames each of the ten stages takes in the time record `?record=time` sets. */
 const RECORD_STAGE_FRAMES = 30 * 60;
 /** The page's shortcuts: a page started with one never saves the progress. */
-const SHORTCUTS = ['arcade', 'ending', 'record', 'unlock'] as const;
+const SHORTCUTS = ['arcade', 'versus', 'ending', 'record', 'unlock'] as const;
 /** The unlock schedule's steps, its last earning everything. */
 const UNLOCK_STEPS = 14;
 /** Arcade's stages; the roster ids `?arcade` takes past Mokujin's (his draw not remade), Kazuya's with his files. */
@@ -121,6 +121,8 @@ export async function playGame(): Promise<void> {
     game.state.modeOverlay = run.overlay;
     Object.assign(game.state, { scene: Scene.FIGHT, step: FightStep.MODE_SETUP });
   }
+  /* `?versus` starts Versus at once, both pads in, on to its select. */
+  if (params.has('versus')) startMode(game.state, MenuMode.VERSUS, 1);
   /* `?ending=ROSTER[,COSTUME]` goes straight to that character's Arcade ending (the first side the one human). */
   const ending = params.get('ending');
   if (ending !== null) {

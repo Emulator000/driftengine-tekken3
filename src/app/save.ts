@@ -1,7 +1,7 @@
 /**
  * The progress kept on this device, in the engine's store (the browser's storage, or the app's):
  * read as the page starts and written whenever the game saves (`Progress`). A page started with
- * one of its shortcuts (`arcade`, `ending`, `record`, `unlock`) reads it and never writes it, so a
+ * one of its shortcuts (`arcade`, `versus`, `ending`, `record`, `unlock`) reads it and never writes it, so a
  * shortcut's run leaves the progress as it was.
  */
 import { defaultStore, type KeyValueStore } from '@driftengine/core';

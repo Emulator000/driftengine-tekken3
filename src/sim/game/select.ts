@@ -271,7 +271,7 @@ function placeCursor(game: GameState, scenes: SceneTables, side: SelectSide, n: 
 }
 
 /** Two choices of one character in one costume made different, the later one giving way. */
-function keepApart(a: SelectSide['apart'], b: SelectSide['apart']): void {
+export function keepApart(a: SelectSide['apart'], b: SelectSide['apart']): void {
   if (b.chosen === 0 || a.roster !== b.roster || a.costume !== b.costume) return;
   const costume = a.costume;
   if (b.human === 0 && a.human !== 0) b.costume = costume < 2 ? costume ^ 1 : 0;

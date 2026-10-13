@@ -3,7 +3,9 @@
  * follow-up that Tekken 4 plays on the same motion carries the frame on, and one that Tekken 4 takes
  * by itself at a frame is taken, so his Spinning Demon plays its first kick through and then its
  * second, his body turning smoothly all the way; his whole body turns as Tekken 4's root does, and a
- * move that leaves him on the ground leaves him lying there.
+ * move that leaves him on the ground leaves him lying there. What Tekken 3 starts by id plays his
+ * own: his crouch's attacks, the inputs Heihachi's file sends to one move, a round's opening, and
+ * his long entrance, which unfolds into his stance without turning past it.
  */
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
@@ -14,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { loadFightTables, loadMoveset } from '../src/assets/load.ts';
 import { Fight } from '../src/sim/fight/fight.ts';
 import { fightDataFor, matchMovesets } from '../src/sim/fight/match.ts';
-import { transitionType } from '../src/sim/fight/move.ts';
+import { startRound, transitionType } from '../src/sim/fight/move.ts';
 import { motionOf, moveById } from '../src/sim/fight/moves.ts';
 
 const assets = path.join(path.dirname(fileURLToPath(import.meta.url)), '../public/assets');
@@ -237,4 +239,95 @@ test('in his stance his ankles stand as high as Tekken 4 holds them', { skip: !k
     },
   );
   assert.ok(ankles.every((h) => h >= 90), `his ankles are ${ankles.join(' and ')} mm up`);
+});
+
+/** His moves by id, and Heihachi's, as a match of his loads them. */
+async function bothMovesets() {
+  let his = null;
+  await play(
+    () => 0,
+    1,
+    () => {},
+    (field, f, data) => (his = { data, f }),
+  );
+  const heihachi = await loadMoveset(json, '13');
+  /* The motion of Heihachi's own an id plays, if it plays one. */
+  const heihachiMotion = (id) => {
+    const ref = heihachi.moveset.moveIds[id];
+    const motion = ref === null || ref.common ? null : heihachi.moveset.moves[ref.index].motion;
+    return motion === null || motion.common ? null : same(heihachi.motions[motion.index]);
+  };
+  const motion = (id) => same(motionOf(his.data, moveById(his.data, his.f, id)));
+  return { motion, heihachiMotion };
+}
+
+test('his crouch\'s attacks, and those rising out of it, are his own', { skip: !kazuya }, async () => {
+  const { motion, heihachiMotion } = await bothMovesets();
+  const CROUCHING = [330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341, 372, 373, 380];
+  const heihachis = CROUCHING.filter((id) => motion(id) === heihachiMotion(id));
+  assert.deepEqual(heihachis, [], 'these play Heihachi\'s motion');
+});
+
+/* Heihachi's file plays his d/f+1+2 as his d/f+1, and his d+1+2 and d/b+1+2 as his d/b+1; his Twin Pistons came out of it. */
+test('the inputs Heihachi\'s file sends to one move send his to one too', { skip: !kazuya }, async () => {
+  const { motion, heihachiMotion } = await bothMovesets();
+  for (const [id, as] of [[368, 357], [366, 362], [370, 362]]) {
+    assert.equal(motion(id), motion(as), `${id} plays as ${as}`);
+    assert.notEqual(motion(id), heihachiMotion(id), `${id} is not Heihachi's`);
+  }
+});
+
+test('a round after the first opens on his own stance', { skip: !kazuya }, async () => {
+  const { motion, heihachiMotion } = await bothMovesets();
+  let opening = null;
+  await play(
+    () => 0,
+    300,
+    (field, f, data, state) => {
+      if (field !== 299) return;
+      state.round.number = 2;
+      startRound(state, data, f, state.fighters[1]);
+      opening = f.moveId;
+    },
+  );
+  assert.equal(opening, 1);
+  assert.notEqual(motion(1), heihachiMotion(3), 'not Heihachi\'s stance');
+  assert.equal(motion(1), motion(3), 'his stance');
+});
+
+/*
+ * His long entrance holds his root a quarter turn round, his chest and hips turned back; Tekken 3
+ * never eases a root, so as it blended into his stance he turned on past it (his shoulders 48
+ * degrees round from the opponent where his stance holds them at -29), then snapped back.
+ */
+test('his long entrance unfolds into his stance without turning past it', { skip: !kazuya }, async () => {
+  const LONG_ENTRANCE = 2;
+  const CROSS = 0x40;
+  const SHOULDERS = [3, 7];
+  /* The line across his shoulders, in degrees round from the line to the opponent. */
+  const shoulders = (f, state) => {
+    const [a, b] = SHOULDERS.map((j) => f.skeleton.joints[j].world.translation);
+    const me = f.skeleton.base.translation;
+    const them = state.fighters[1].skeleton.base.translation;
+    let by = (Math.atan2(b[0] - a[0], b[2] - a[2]) - Math.atan2(them[0] - me[0], them[2] - me[2])) * (180 / Math.PI);
+    while (by > 180) by -= 360;
+    while (by < -180) by += 360;
+    return by;
+  };
+  let entered = false;
+  let ending = -Infinity;
+  const stance = [];
+  await play(
+    () => (entered ? 0 : CROSS),
+    700,
+    (field, f, data, state) => {
+      if (f.moveId === LONG_ENTRANCE) {
+        entered = true;
+        if (f.frame >= 180) ending = Math.max(ending, shoulders(f, state));
+      } else if (entered && stance.length < 30) stance.push(shoulders(f, state));
+    },
+  );
+  assert.ok(entered && stance.length === 30, 'he played his long entrance into his stance');
+  const settled = stance.at(-1);
+  assert.ok(ending <= settled + 10, `his shoulders turned to ${ending.toFixed(1)} degrees as the entrance ended, his stance holding them at ${settled.toFixed(1)}`);
 });

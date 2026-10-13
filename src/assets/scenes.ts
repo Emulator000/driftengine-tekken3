@@ -2,7 +2,7 @@
  * The scenes' tables (`tables/scenes.json`), validated: the values the game's state starts with,
  * the title's lines and the mode menu's entries.
  */
-import type { CreditsTables, IntroTables, MovieRecord, MovieStream, MovieTables, NameTables, OgreChangeTables, RecordsTables, SceneTables, SelectTables, StartLine, SurvivalRecord, TimeRecord, VersusPlace, VersusTables } from '../sim/data/scenes.ts';
+import type { CreditsTables, IntroTables, MovieRecord, MovieStream, MovieTables, NameTables, OgreChangeTables, RecordsTables, SceneTables, SelectTables, StartLine, SurvivalRecord, TimeRecord, VersusPlace, VersusTables, VsSelectQuad, VsSelectTables } from '../sim/data/scenes.ts';
 import { AssetError, expectArray, expectBoolean, expectInt, expectObject, expectString } from './validate.ts';
 
 const int = (value: unknown, where: string): number => expectInt(value, where, -0x80000000, 0xffffffff);
@@ -49,12 +49,76 @@ function parseVersus(json: unknown, where: string): VersusTables {
     names: expectArray(o.names, `${where}.names`, 2).map((v, i) => place(v, `${where}.names[${i}]`)),
     versus: expectString(o.versus, `${where}.versus`),
     stage: expectString(o.stage, `${where}.stage`),
+    fight: expectString(o.fight, `${where}.fight`),
     demoStage: expectString(o.demoStage, `${where}.demoStage`),
     bands: expectArray(o.bands, `${where}.bands`, 2).map((v, i) => {
       const band = expectObject(v, `${where}.bands[${i}]`);
       return { colour: expectInt(band.colour, `${where}.bands[${i}].colour`, 0, 0xffffff), width: expectInt(band.width, `${where}.bands[${i}].width`, 0, 0xffff) };
     }),
     backgrounds: expectArray(o.backgrounds, `${where}.backgrounds`, 2).map((v, i) => expectInt(v, `${where}.backgrounds[${i}]`, 0, 0xffff)),
+  };
+}
+
+function parseVsSelect(json: unknown, where: string): VsSelectTables {
+  const o = expectObject(json, where);
+  const half = (value: unknown, at: string): number => expectInt(value, at, -0x8000, 0x7fff);
+  const point = (value: unknown, at: string): { x: number; y: number } => {
+    const p = expectObject(value, at);
+    return { x: half(p.x, `${at}.x`), y: half(p.y, `${at}.y`) };
+  };
+  const bytes = (value: unknown, at: string, length: number): number[] => expectArray(value, at, length).map((v, i) => expectInt(v, `${at}[${i}]`, 0, 0xff));
+  const text = (value: unknown, at: string): string => expectString(value, at);
+  const quads = (value: unknown, at: string, count: number): VsSelectQuad[] =>
+    expectArray(value, at, count).map((v, q) => {
+      const quad = expectObject(v, `${at}[${q}]`);
+      return {
+        corners: expectArray(quad.corners, `${at}[${q}].corners`, 4).map((c, k) => point(c, `${at}[${q}].corners[${k}]`)),
+        colours: expectArray(quad.colours, `${at}[${q}].colours`, 4).map((c, k) => expectInt(c, `${at}[${q}].colours[${k}]`, 0, 0xffffffff)),
+      };
+    });
+  return {
+    grid: expectArray(o.grid, `${where}.grid`, 21).map((v, i) => {
+      const cell = expectObject(v, `${where}.grid[${i}]`);
+      return { x: half(cell.x, `${where}.grid[${i}].x`), y: half(cell.y, `${where}.grid[${i}].y`), code: expectInt(cell.code, `${where}.grid[${i}].code`, 0, 0x57) };
+    }),
+    kinds: expectArray(o.kinds, `${where}.kinds`, 16).map((v, i) => bytes(v, `${where}.kinds[${i}]`, 3) as [number, number, number]),
+    apart: expectArray(o.apart, `${where}.apart`, 16).map((v, i) => bytes(v, `${where}.apart[${i}]`, 2) as [number, number]),
+    sides: expectArray(o.sides, `${where}.sides`, 2).map((v, n) => {
+      const at = `${where}.sides[${n}]`;
+      const side = expectObject(v, at);
+      const gauge = expectObject(side.gauge, `${at}.gauge`);
+      const tags = expectArray(side.tags, `${at}.tags`, 2).map((t, k) => half(t, `${at}.tags[${k}]`));
+      const slots = expectArray(side.slots, `${at}.slots`, 3).map((s, k) => point(s, `${at}.slots[${k}]`));
+      return {
+        cursor: expectInt(side.cursor, `${at}.cursor`, 0, 0xff),
+        firstCode: expectInt(side.firstCode, `${at}.firstCode`, 0, 0x57),
+        tags: [tags[0]!, tags[1]!],
+        name: point(side.name, `${at}.name`),
+        slots: [slots[0]!, slots[1]!, slots[2]!],
+        gauge: {
+          mirrored: expectInt(gauge.mirrored, `${at}.gauge.mirrored`, 0, 1),
+          raised: half(gauge.raised, `${at}.gauge.raised`),
+          x: half(gauge.x, `${at}.gauge.x`),
+          y: half(gauge.y, `${at}.gauge.y`),
+          life: point(gauge.life, `${at}.gauge.life`),
+          percent: point(gauge.percent, `${at}.gauge.percent`),
+        },
+      };
+    }),
+    titles: expectArray(o.titles, `${where}.titles`, 9).map((v, i) => text(v, `${where}.titles[${i}]`)),
+    hint: text(o.hint, `${where}.hint`),
+    tournament: text(o.tournament, `${where}.tournament`),
+    modeColours: expectArray(o.modeColours, `${where}.modeColours`, 9).map((v, i) => {
+      const [a, b] = expectArray(v, `${where}.modeColours[${i}]`, 2).map((c, k) => expectInt(c, `${where}.modeColours[${i}][${k}]`, 0, 0xffffff));
+      return [a!, b!] as const;
+    }),
+    opaque: quads(o.opaque, `${where}.opaque`, 4),
+    added: quads(o.added, `${where}.added`, 2),
+    winColours: bytes(o.winColours, `${where}.winColours`, 4),
+    drawColours: bytes(o.drawColours, `${where}.drawColours`, 4),
+    segments: bytes(o.segments, `${where}.segments`, 8),
+    life: text(o.life, `${where}.life`),
+    percents: expectArray(o.percents, `${where}.percents`, 8).map((v, i) => text(v, `${where}.percents[${i}]`)),
   };
 }
 
@@ -205,6 +269,7 @@ export function parseSceneTables(json: unknown, where = 'tables/scenes.json'): S
     fixedKeys: words(o.fixedKeys, `${where}.fixedKeys`, 8),
     select: parseSelect(o.select, `${where}.select`),
     versus: parseVersus(o.versus, `${where}.versus`),
+    vsSelect: parseVsSelect(o.vsSelect, `${where}.vsSelect`),
     records: parseRecords(o.records, `${where}.records`),
     demoFighters: bytes(o.demoFighters, `${where}.demoFighters`, 14),
     intros: expectArray(o.intros, `${where}.intros`, 3).map((v, i) => parseIntro(v, `${where}.intros[${i}]`)),

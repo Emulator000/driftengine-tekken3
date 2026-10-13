@@ -20,6 +20,7 @@ export const Scene = {
   MODE: 7,
   FIGHT: 8,
   SELECT: 9,
+  VS_SELECT: 10,
   VERSUS: 0xb,
   RECORDS_LOADER: 0x10,
   RECORDS: 0x11,
@@ -99,6 +100,32 @@ export interface Sparkle {
   born: number;
   level: number;
   fade: number;
+}
+
+/**
+ * A side of the versus select: its state, its cursor's column and row, its cursor's, name's and
+ * slot's kinds, the characters it may still choose (roster bits), how many it chooses and has
+ * chosen, its choices (codes, 0x58 none), its handicap and its gauge's place and where that is
+ * going, its last choice, its choice as two are kept apart (with whether it counts as chosen and as
+ * a human's), and the bar under its name (its left, line and width, 0 none, and costume).
+ */
+export interface VsSelectSide {
+  state: number;
+  column: number;
+  row: number;
+  cursor: number;
+  nameKind: number;
+  slotKind: number;
+  pool: number;
+  teamSize: number;
+  count: number;
+  readonly chosen: number[];
+  handicap: number;
+  gaugeTarget: number;
+  gaugeX: number;
+  last: number;
+  readonly apart: { roster: number; costume: number; chosen: number; human: number };
+  readonly bar: { x: number; y: number; width: number; costume: number };
 }
 
 /** One of Arcade's opponents: its roster id and costume, and the round it comes in. */
@@ -314,7 +341,7 @@ export interface GameState {
   /**
    * What the game keeps between plays: the characters earned (a bit per roster id), those with a
    * third costume, whether Arcade draws one more; per character (an added one last) its Arcade
-   * plays, versus wins, versus losses and a fourth count; the endings seen (by costume); the newest
+   * plays, versus wins, versus losses and versus draws; the endings seen (by costume); the newest
    * character earned (0x16 none); the plays since the last unlock, the schedule's step and whether
    * it has started; whether they changed since last saved; Arcade's best time per character and
    * survival's ten best, with the row of each a run just set (-1 none); the ranking the records
@@ -367,6 +394,19 @@ export interface GameState {
   versusBackground: number;
   /** The versus screen: the frames its slide has to go, and what it draws. */
   readonly versus: { countdown: number; readonly records: VersusRecord[] };
+  /**
+   * The versus select: the mode it chooses for, the frames no pad has been touched, whether it is
+   * fading in and how far, the strip's and the tournament line's scroll, the two sides.
+   */
+  readonly vsSelect: {
+    mode: number;
+    idle: number;
+    fading: number;
+    fade: number;
+    strip: number;
+    line: number;
+    readonly sides: VsSelectSide[];
+  };
   /**
    * The records screen: what it draws (0 black, 1 the title's bar, 2 with the list, 3 the name
    * entry, 4 its name ended), the list's place down and where it is going, the frames a page has
@@ -454,7 +494,8 @@ export interface GameState {
     readonly stageTimes: StageTime[];
     readonly ending: { side: number; code: number };
     readonly versusStage: { code: number; first: number; second: number };
-    readonly teams: number[];
+    /** Versus mode's wins by side and its draws, since it was chosen. */
+    readonly versusRecord: { readonly wins: number[]; draws: number };
     /** The stage and song chosen for the match; Arcade's ten opponents. */
     stageChosen: number;
     songChosen: number;
@@ -599,6 +640,32 @@ export function blankGameState(): GameState {
     versusPortraits: [0, 0],
     versusBackground: 0,
     versus: { countdown: 0, records: [] },
+    vsSelect: {
+      mode: 0,
+      idle: 0,
+      fading: 0,
+      fade: 0,
+      strip: 0,
+      line: 0,
+      sides: Array.from({ length: 2 }, () => ({
+        state: 0,
+        column: 0,
+        row: 0,
+        cursor: 0,
+        nameKind: 0,
+        slotKind: 0,
+        pool: 0,
+        teamSize: 0,
+        count: 0,
+        chosen: new Array<number>(8).fill(0),
+        handicap: 0,
+        gaugeTarget: 0,
+        gaugeX: 0,
+        last: 0,
+        apart: { roster: 0, costume: 0, chosen: 0, human: 0 },
+        bar: { x: 0, y: 0, width: 0, costume: 0 },
+      })),
+    },
     recordsScreen: {
       draws: 0,
       place: 0,
@@ -660,7 +727,7 @@ export function blankGameState(): GameState {
       stageTimes: Array.from({ length: 10 }, () => ({ frames: 0, roster: 0, costume: 0, side: 0 })),
       ending: { side: 0, code: 0 },
       versusStage: { code: 0, first: 0, second: 0 },
-      teams: [0, 0],
+      versusRecord: { wins: [0, 0], draws: 0 },
       stageChosen: 0,
       songChosen: 0,
       opponents: Array.from({ length: 10 }, () => ({ roster: 0, costume: 0, round: 0 })),

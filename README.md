@@ -196,8 +196,9 @@ field. What is done and what is not yet:
 | **The game's flow** | | |
 | Power-on: the logo, the opening movie, the title | Done | |
 | The attract cycle: the in-engine intros, the demo fights, the other movie | Done | |
-| The mode menu | Done | Only Arcade starts a game yet |
+| The mode menu | Done | Arcade and Versus start a game; the other modes not yet |
 | The character select | Done | Both its layouts: one row, and two once more characters are earned (`?unlock` earns them all); Kazuya in a cell of his own when his files are built |
+| The versus select: both players at once, the handicaps, the record of wins and draws | Done | Also Arcade's, with start and both shoulders held as it is chosen; `?versus` starts Versus |
 | The versus screen | Done | |
 | Arcade: its ten opponents, Ogre's change into True Ogre, the continue, game over | Done | `?arcade=ROSTER` starts it at Ogre's stage |
 | The endings: each character's movie and captions, the credits | Done | |
@@ -205,7 +206,7 @@ field. What is done and what is not yet:
 | The progress kept between plays: characters and costumes earned, the unlocks, the plays, the records, the options | Done | Saved on your device where the console saves to its memory card |
 | A quick match without the menus (`?quick`) | Done | |
 | **The modes** | | |
-| Versus (two players) | Not yet | |
+| Versus (two players) | Done | |
 | Team Battle | Not yet | |
 | Time Attack | Not yet | |
 | Survival | Not yet | |

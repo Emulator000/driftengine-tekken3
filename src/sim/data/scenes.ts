@@ -45,7 +45,7 @@ export interface PowerOn {
   readonly versusBackground: number;
   /** Whether Arcade draws from one more character. */
   readonly extraDrawn: number;
-  /** Per character its Arcade plays, versus wins, versus losses and a fourth count; the endings seen (first costume, second); the newest character earned; the plays since the last unlock; the unlock schedule's step and whether it has started. */
+  /** Per character its Arcade plays, versus wins, versus losses and versus draws; the endings seen (first costume, second); the newest character earned; the plays since the last unlock; the unlock schedule's step and whether it has started. */
   readonly plays: readonly (readonly number[])[];
   readonly endings: readonly number[];
   readonly newest: number;
@@ -209,10 +209,65 @@ export interface VersusTables {
   readonly names: readonly VersusPlace[];
   readonly versus: string;
   readonly stage: string;
+  /** The line in the stage's place for a versus match (`%d` its number). */
+  readonly fight: string;
   readonly demoStage: string;
   readonly bands: readonly { readonly colour: number; readonly width: number }[];
   /** Each background's archive, as the versus screen notes the one it last loaded. */
   readonly backgrounds: readonly number[];
+}
+
+/** A place on the screen. */
+export interface Point {
+  readonly x: number;
+  readonly y: number;
+}
+
+/**
+ * One of the versus select's two sides: its cursor's colour set (its low two bits), the
+ * code its cursor starts on, its tag's offsets (as a choosing cursor, and a partner's), its name's
+ * place (its centre), its slots' places (for one player, versus, teams), and its handicap gauge:
+ * whether it runs right (mirrored), where it is while its side chooses a handicap, where it rests,
+ * and its labels' offsets (across from the gauge, a line down).
+ */
+export interface VsSelectSideLayout {
+  readonly cursor: number;
+  readonly firstCode: number;
+  readonly tags: readonly [number, number];
+  readonly name: Point;
+  readonly slots: readonly [Point, Point, Point];
+  readonly gauge: { readonly mirrored: number; readonly raised: number; readonly x: number; readonly y: number; readonly life: Point; readonly percent: Point };
+}
+
+/** A quad of the versus select's background: its corners (top left, top right, bottom left, bottom right) and their colours (0xbbggrr; all ones the mode's colour). */
+export interface VsSelectQuad {
+  readonly corners: readonly Point[];
+  readonly colours: readonly number[];
+}
+
+/** The versus select's tables. */
+export interface VsSelectTables {
+  /** The grid, seven cells a row and three rows: each cell's place and its character's code (a roster id times four). */
+  readonly grid: readonly { readonly x: number; readonly y: number; readonly code: number }[];
+  /** By a side's state: its cursor's, name's and slot's kinds; and whether it counts as chosen and as a human's when two choices are kept apart. */
+  readonly kinds: readonly (readonly [number, number, number])[];
+  readonly apart: readonly (readonly [number, number])[];
+  readonly sides: readonly VsSelectSideLayout[];
+  /** The title by mode, the hint it alternates with (its colours switched by `%c`), and the tournament's line. */
+  readonly titles: readonly string[];
+  readonly hint: string;
+  readonly tournament: string;
+  /** Each mode's two colours (0xbbggrr): the opaque quads', the added ones'. */
+  readonly modeColours: readonly (readonly [number, number])[];
+  readonly opaque: readonly VsSelectQuad[];
+  readonly added: readonly VsSelectQuad[];
+  /** The colours of the versus wins' and draws' counts, by their hundreds. */
+  readonly winColours: readonly number[];
+  readonly drawColours: readonly number[];
+  /** The handicap gauge's segments' widths (the first always lit), and its labels: its name and each handicap's health. */
+  readonly segments: readonly number[];
+  readonly life: string;
+  readonly percents: readonly string[];
 }
 
 export interface SceneTables {
@@ -228,6 +283,7 @@ export interface SceneTables {
   readonly fixedKeys: readonly number[];
   readonly select: SelectTables;
   readonly versus: VersusTables;
+  readonly vsSelect: VsSelectTables;
   readonly records: RecordsTables;
   /** The attract demo's characters, in the order it takes them (those earned). */
   readonly demoFighters: readonly number[];

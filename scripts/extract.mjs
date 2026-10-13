@@ -40,7 +40,6 @@ import { buildKazuyaMoveset } from './lib/t4/kazuya-moves.mjs';
 import { kazuyaName, withName } from './lib/t4/kazuya-name.mjs';
 import { kazuyaArt } from './lib/t4/kazuya-select.mjs';
 import { kazuyaVoice } from './lib/t4/kazuya-voice.mjs';
-import { chestDrawer } from './lib/t4/kazuya-art.mjs';
 import { parseBank } from './lib/t4/motion.mjs';
 import { readMoveset } from './lib/t4/moveset.mjs';
 import { exportFighter, partTable } from './lib/fighter.mjs';
@@ -58,7 +57,7 @@ const out = path.join(root, 'public/data');
 const exePath = path.join(root, '.cache/disc/SLUS_004.02');
 if (!existsSync(exePath)) throw new Error('no disc data: run npm run disc first');
 /** The format of what this writes, in its manifest: raised when the output changes, so `npm run dev` extracts again. */
-const DATA_FORMAT = 7;
+const DATA_FORMAT = 8;
 const extracted = (() => {
   try {
     return JSON.parse(readFileSync(path.join(out, 'manifest.json'), 'utf8')).format === DATA_FORMAT && existsSync(path.join(out, 'movies/streams.json'));
@@ -245,7 +244,6 @@ if (kazuya) {
     kazuyaArt({
       render: existsSync(renderPath) ? decodePng(readFileSync(renderPath)) : undefined,
       portraits: t4File('0118'),
-      drawChest: chestDrawer({ mesh: result.mesh, atlas: result.atlasPixels, skeleton: result.skeleton, tables, nodes: model.nodes, bank: ownBank }),
       name,
     }),
   );

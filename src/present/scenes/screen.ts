@@ -75,8 +75,9 @@ export class ScreenLayer {
   /** What placed pictures are multiplied by: a fade to black, and their opacity. */
   private shade = 1;
   private alpha = 1;
-  /** The lines pictures are cut to, top and bottom, or none. */
+  /** The lines pictures are cut to, top and bottom, or none; and the units across, left and right. */
   private clipping: readonly [number, number] | null = null;
+  private across: readonly [number, number] | null = null;
   /** The sprites this frame drew so far. */
   private sprites: DrawnSprite[] = [];
 
@@ -118,6 +119,7 @@ export class ScreenLayer {
     this.shade = 1;
     this.alpha = 1;
     this.clipping = null;
+    this.across = null;
     this.sprites = [];
     return emptied;
   }
@@ -138,6 +140,19 @@ export class ScreenLayer {
   }
 
   private submit(texture: number, x: number, y: number, w: number, h: number, uv: UvRect | null, tint: Float32Array | null): void {
+    if (this.across !== null) {
+      /* Cut to the units across, its picture's columns cut with it. */
+      const [from, to] = this.across;
+      const start = Math.max(x, from);
+      const end = Math.min(x + w, to);
+      if (end <= start) return;
+      if (uv !== null) {
+        const { u0, u1, v0, v1 } = uv;
+        const u = (at: number): number => u0 + ((at - x) / w) * (u1 - u0);
+        uv = { u0: u(start), v0, u1: u(end), v1 };
+      }
+      [x, w] = [start, end - start];
+    }
     drawSprite(this.pass.batch, texture, { x, y, w, h }, uv, tint);
     this.sprites.push({ texture, x, y, w, h, uv, tint: tint === null ? null : [tint[0]!, tint[1]!, tint[2]!, tint[3]!] });
   }
@@ -150,6 +165,11 @@ export class ScreenLayer {
   /** Pictures placed from now on cut to the lines from `top` to `bottom`, or not cut (null). */
   clip(top: number | null, bottom = 0): void {
     this.clipping = top === null ? null : [top, bottom];
+  }
+
+  /** Pictures placed from now on cut to the units across from `left` to `right`, or not cut (null). */
+  clipAcross(left: number | null, right = 0): void {
+    this.across = left === null ? null : [left, right];
   }
 
   /** What the pictures placed from now on are multiplied by (1 as painted, 0 black). */

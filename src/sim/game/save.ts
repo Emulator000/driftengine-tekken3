@@ -25,7 +25,7 @@ export interface Progress {
     readonly earnedRoster: number;
     readonly extraCostumes: number;
     readonly extraDrawn: number;
-    /** Per character (an added one last): its Arcade plays, versus wins, versus losses and a fourth count. */
+    /** Per character (an added one last): its Arcade plays, versus wins, versus losses and versus draws. */
     readonly plays: readonly (readonly number[])[];
     readonly endings: readonly number[];
     readonly times: readonly SavedTime[];
