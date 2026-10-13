@@ -17,7 +17,15 @@ import { printStyle } from '../hud/theme.ts';
 
 /** The original's screen: its width and height, and the units across a 4:3 display's height. */
 export const SCREEN = { width: 368, lines: 480, across: 276 } as const;
-const MIDDLE = SCREEN.width / 2;
+/** The fight's screen: 384 units across its 4:3 (288 to a 4:3 display's height), the same lines. */
+export const FIGHT_SCREEN = { width: 384, lines: 480, across: 288 } as const;
+
+/** A screen's units: its width, lines, and units across a 4:3 display's height. */
+export interface ScreenUnits {
+  readonly width: number;
+  readonly lines: number;
+  readonly across: number;
+}
 /** Per printer font: a glyph's cell (its width and height), its capitals' height and its baseline under the cell's top, in lines. */
 const GLYPHS = [
   { width: 10, height: 16, cap: 12.5, baseline: 14 },
@@ -80,6 +88,8 @@ export class ScreenLayer {
   private across: readonly [number, number] | null = null;
   /** The sprites this frame drew so far. */
   private sprites: DrawnSprite[] = [];
+  /** A printed line's words as the players read them (the buttons named for their controllers). */
+  words: (text: string) => string = (text) => text;
 
   /**
    * `screens`, when given, sizes the atlas for that many windows' worth of pictures each time the
@@ -87,8 +97,12 @@ export class ScreenLayer {
    * scenes' at once), never below `atlasSize` a side; without it the atlas holds `atlasSize` a
    * side. Either takes more when what a frame shows does not fit.
    */
-  constructor(renderer: RendererApi, label: string, capacity = 2048, atlasSize = 2048, private readonly screens = 0) {
+  /** The screen's middle across, in its units. */
+  private readonly middle: number;
+
+  constructor(renderer: RendererApi, label: string, capacity = 2048, atlasSize = 2048, private readonly screens = 0, private readonly units: ScreenUnits = SCREEN) {
     this.renderer = renderer;
+    this.middle = units.width / 2;
     this.pass = createSpritePass({ label, capacity, slots: TILES });
     this.handle = renderer.registerPass(this.pass);
     this.atlas = new PaintAtlas([this.pass], atlasSize);
@@ -107,13 +121,13 @@ export class ScreenLayer {
     let emptied = false;
     if (height !== this.lines) {
       this.lines = height;
-      this.kx = height / SCREEN.across;
-      this.ky = height / SCREEN.lines;
+      this.kx = height / this.units.across;
+      this.ky = height / this.units.lines;
       this.atlas.resize(this.screens === 0 ? this.least : sideFor(this.screens, width, height, this.least));
       emptied = true;
     }
-    const half = (SCREEN.across / 2) * (width / height);
-    this.transform.set([1 / half, 0, 0, -2 / SCREEN.lines, -MIDDLE / half, 1]);
+    const half = (this.units.across / 2) * (width / height);
+    this.transform.set([1 / half, 0, 0, -2 / this.units.lines, -this.middle / half, 1]);
     this.pass.setTransform(this.transform);
     this.pass.reset();
     this.shade = 1;
@@ -180,7 +194,7 @@ export class ScreenLayer {
   /** The window's left and right edges, in units. */
   get edges(): { left: number; right: number } {
     const half = this.width / 2 / this.kx;
-    return { left: MIDDLE - half, right: MIDDLE + half };
+    return { left: this.middle - half, right: this.middle + half };
   }
 
   /** Type set in a style at a cap height in lines, painted under `key` the first time. */
@@ -192,7 +206,7 @@ export class ScreenLayer {
 
   /** A picture with its top left at a point in units, on whole device pixels. */
   put(picture: AtlasPicture, x: number, y: number, w = picture.width / this.kx, h = picture.height / this.ky, uv: UvRect = picture.uv): void {
-    const px = Math.round(this.width / 2 + (x - MIDDLE) * this.kx);
+    const px = Math.round(this.width / 2 + (x - this.middle) * this.kx);
     const py = Math.round(y * this.ky);
     let [top, height, cut] = [py / this.ky, h, uv];
     if (this.clipping !== null) {
@@ -205,14 +219,14 @@ export class ScreenLayer {
       [top, height] = [start, end - start];
     }
     screenTint(this.tint, [this.shade, this.shade, this.shade, this.alpha]);
-    this.submit(picture.slot, MIDDLE + (px - this.width / 2) / this.kx, top, w, height, cut, this.shade < 1 || this.alpha < 1 ? this.tint : null);
+    this.submit(picture.slot, this.middle + (px - this.width / 2) / this.kx, top, w, height, cut, this.shade < 1 || this.alpha < 1 ? this.tint : null);
   }
 
   /** A picture at a point in units, at a size, its colours multiplied by `tint` (red, green, blue, alpha, 0 to 1). */
   putTinted(picture: AtlasPicture, x: number, y: number, w: number, h: number, tint: readonly [number, number, number, number]): void {
-    const px = Math.round(this.width / 2 + (x - MIDDLE) * this.kx);
+    const px = Math.round(this.width / 2 + (x - this.middle) * this.kx);
     screenTint(this.tint, tint);
-    this.submit(picture.slot, MIDDLE + (px - this.width / 2) / this.kx, Math.round(y * this.ky) / this.ky, w, h, picture.uv, this.tint);
+    this.submit(picture.slot, this.middle + (px - this.width / 2) / this.kx, Math.round(y * this.ky) / this.ky, w, h, picture.uv, this.tint);
   }
 
   /**
@@ -266,7 +280,7 @@ export class ScreenLayer {
   /** The whole window in a colour. */
   fillWindow(colour: readonly [number, number, number, number]): void {
     const { left, right } = this.edges;
-    this.fill(left, 0, right - left, SCREEN.lines, colour);
+    this.fill(left, 0, right - left, this.units.lines, colour);
   }
 
   /** Text with its baseline at `y`, from `x`, in a style; returns where its ink ends. */
@@ -281,8 +295,9 @@ export class ScreenLayer {
   print(run: PrintRun): void {
     const glyph = GLYPHS[run.font] ?? GLYPHS[0];
     const block = (run.text.length - 1) * FONTS[run.font]!.advance + glyph.width;
-    /* The fonts draw `@` as the copyright sign. */
-    const text = run.text.replaceAll('@', '©');
+    /* The fonts draw `@` as the copyright sign, and the small font's `abc` as the three cells of the infinity sign. */
+    const said = this.words(run.text);
+    const text = run.font === 0 ? said.replaceAll('@', '©').replaceAll('abc', '∞') : said.replaceAll('@', '©');
     const set = this.type(`print ${run.font} ${run.colour} ${block}`, text, printStyle(run.font, run.colour), glyph.cap, block * this.kx * SLACK, (block - INSET * 2) * this.kx);
     if (set === null) return;
     this.put(set.picture, run.x + block / 2 - set.picture.width / 2 / this.kx, run.y + glyph.baseline - set.baseline / this.ky);

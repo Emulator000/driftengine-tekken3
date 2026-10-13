@@ -1,23 +1,26 @@
 /**
  * The fight's pause menu, each paused frame, for the side that paused: CANCEL (back to the fight),
- * COMMAND (each human's command list) and RESET. Up and down move the cursor (wrapping), a button
- * chooses; opening it keys the voices off but four. In the command lists, up and down move a move,
- * left and right five (unless up or down is held), the scroll easing a third of the way a frame,
- * until a button goes back to the menu. The presentation draws the menu and the lists from this;
- * `drawn` says which this field shows, as the original draws them (not on its waiting frames).
+ * COMMAND (each human's command list), RESET, and in Tekken Ball RULES (the rules' page). Up and
+ * down move the cursor (wrapping), a button chooses; opening it keys the voices off but four. In
+ * the command lists, up and down move a move, left and right five (unless up or down is held), the
+ * scroll easing a third of the way a frame, until a button goes back to the menu, as on the rules'
+ * page. The presentation draws the menu, the lists and the page from this; `drawn` says which this
+ * field shows, as the original draws them (not on its waiting frames).
  */
 import { Mode, type FightData, type FightState } from './state.ts';
 import { keyOffVoices, voiceLine } from './voices.ts';
 
-/** The cursor that opens the menu, and the choices: back to the fight, the command lists, a reset, team battle's rules. */
+/** The cursor that opens the menu, and the choices: back to the fight, the command lists, a reset, Tekken Ball's rules. */
 const OPENING = 0xff;
 const Choice = { NONE: 0, CANCEL: 1, COMMANDS: 2, RESET: 3, RULES: 4 } as const;
-/** What a paused frame shows: nothing, the menu, the command lists. */
-export const PauseDrawn = { NOTHING: 0, MENU: 1, LISTS: 2 } as const;
+/** What a paused frame shows: nothing, the menu, the command lists, Tekken Ball's rules. */
+export const PauseDrawn = { NOTHING: 0, MENU: 1, LISTS: 2, RULES: 3 } as const;
 const CURSOR_SOUND = 0x546c;
 const CHOICE_SOUND = 0x50f4;
 /** Frames the menu's input waits after opening or choosing. */
 const WAIT = 2;
+/** The wait after the rules' page is left. */
+const RULES_WAIT = 3;
 const UP = 0x1000;
 const RIGHT = 0x2000;
 const DOWN = 0x4000;
@@ -61,13 +64,17 @@ function scrollCommands(state: FightState, data: FightData, side: number, padSid
   scroll.offset = eased;
 }
 
-/** The command lists: each human's on its half, until a button goes back to the menu. */
+/** The command lists: each human's on its half (in Tekken Force the player's alone, on the human's pad), until a button goes back to the menu. */
 function commandLists(state: FightState, data: FightData, side: number): void {
   const menu = state.pauseMenu;
+  menu.sides = state.match.humanSides;
   const humans = (n: number): boolean => ((state.match.humanSides >> n) & 1) !== 0;
-  if (state.mode === Mode.TEKKEN_BALL || state.mode === Mode.TEKKEN_FORCE) throw new Error(`mode ${state.mode}'s command list is not remade`);
+  const scroll = (): void => {
+    if (state.mode === Mode.TEKKEN_FORCE) scrollCommands(state, data, 0, state.force.pad);
+    else for (let n = 0; n < 2; n += 1) if (humans(n)) scrollCommands(state, data, n, n);
+  };
   if (state.nothingDrawn !== 0) {
-    for (let n = 0; n < 2; n += 1) if (humans(n)) scrollCommands(state, data, n, n);
+    scroll();
     return;
   }
   if (menu.wait !== 0) {
@@ -82,7 +89,41 @@ function commandLists(state: FightState, data: FightData, side: number): void {
     voiceLine(state, data, 0, CHOICE_SOUND, 0);
   }
   menu.drawn = PauseDrawn.LISTS;
-  for (let n = 0; n < 2; n += 1) if (humans(n)) scrollCommands(state, data, n, n);
+  scroll();
+}
+
+/**
+ * Practice's COMMAND LIST: the lists of the sides in `sides` (bits), each scrolled by its own pad,
+ * drawn once the menu's wait has run; practice's menu closes them.
+ */
+export function commandListsFor(state: FightState, data: FightData, sides: number): void {
+  const menu = state.pauseMenu;
+  menu.sides = sides;
+  if (state.nothingDrawn === 0) {
+    if (menu.wait !== 0) {
+      menu.wait -= 1;
+      return;
+    }
+    menu.drawn = PauseDrawn.LISTS;
+  }
+  for (let n = 0; n < 2; n += 1) if (((sides >> n) & 1) !== 0) scrollCommands(state, data, n, n);
+}
+
+/** Tekken Ball's rules: the page, until a button goes back to the menu. */
+function rules(state: FightState, data: FightData, side: number): void {
+  const menu = state.pauseMenu;
+  if (menu.wait !== 0) {
+    menu.wait -= 1;
+    return;
+  }
+  const pad = state.input.fresh[side === 1 ? 0 : 1]!;
+  if ((pad & BUTTONS) !== 0) {
+    menu.cursor = 0;
+    menu.choice = Choice.NONE;
+    menu.wait = RULES_WAIT;
+    voiceLine(state, data, 0, CHOICE_SOUND, 0);
+  }
+  menu.drawn = PauseDrawn.RULES;
 }
 
 /** The menu: the cursor moved, an item chosen. */
@@ -124,6 +165,6 @@ export function pauseMenu(state: FightState, data: FightData, side: number): voi
     voiceLine(state, data, 0, CHOICE_SOUND, 0);
   }
   if (menu.choice === Choice.COMMANDS) commandLists(state, data, side);
-  else if (menu.choice === Choice.RULES) throw new Error("team battle's rules are not remade");
+  else if (menu.choice === Choice.RULES) rules(state, data, side);
   else chooseItem(state, data, side);
 }

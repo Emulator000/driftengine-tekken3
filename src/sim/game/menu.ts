@@ -11,8 +11,9 @@ import { voiceLine } from '../fight/voices.ts';
 import type { SceneTables } from '../data/scenes.ts';
 import { goToLogo, goToScene, holdPicture, queueFile } from './logo.ts';
 import { print } from './printer.ts';
-import { Scene, type GameState } from './state.ts';
+import { blankPractice, Scene, type GameState } from './state.ts';
 import { drawTitle, TitleShows } from './title.ts';
+import { motorsOff, stopMotors } from './rumble.ts';
 
 /** The list: its middle across, the first row's line, a row's height, the rows shown, a glyph's advance. */
 const LIST = { centre: 0xb8, top: 0x116, row: 0x1c, rows: 7, advance: 0xd } as const;
@@ -34,6 +35,8 @@ export const MenuMode = { ARCADE: 0, VERSUS: 1, TEAM_BATTLE: 2, TIME_ATTACK: 3, 
 const SHOWN = 3;
 /** No character chosen yet: the roster id the select reads as none; and a last choice naming no one (the game's own 0x58 is the first added character's code). */
 const NO_ONE = 0x16;
+/** A team's size as Team Battle starts. */
+const TEAM_SIZE = 4;
 export const NO_CHOICE = 0xfc;
 /** The replay's record marked unused. */
 const NO_REPLAY = 0x17;
@@ -41,7 +44,7 @@ const NO_REPLAY = 0x17;
 const TIMED = 4;
 
 /** Each pad's buttons mapped as its key configuration says (the last eight fixed). */
-function mapPads(game: GameState, scenes: SceneTables): void {
+export function mapPads(game: GameState, scenes: SceneTables): void {
   for (let side = 0; side < 2; side += 1) {
     const map = game.pads.maps[side]!;
     for (let i = 0; i < 8; i += 1) map[i] = scenes.keyBits[game.options.keys[side]![i]!]!;
@@ -49,11 +52,6 @@ function mapPads(game: GameState, scenes: SceneTables): void {
   }
 }
 
-/** Both pads' motors stopped. */
-export function stopMotors(game: GameState): void {
-  game.motors[0] = 0;
-  game.motors[1] = 0;
-}
 
 /** The list drawn: easing to its place, seven rows from three above the picked one, the bar lit once it rests, over the title's picture. */
 function drawMenu(game: GameState, scenes: SceneTables): void {
@@ -142,7 +140,15 @@ export function menuScene(game: GameState, data: Pick<FightData, 'sound'>, scene
     case 2: {
       const mode = menu.items[menu.picked]!.mode;
       if (mode === MenuMode.OPTIONS) goToLogo(game, Scene.OPTIONS);
-      else if (mode === MenuMode.THEATER) throw new Error('the Theater is not remade');
+      else if (mode === MenuMode.THEATER) {
+        if (game.earned.theater < SHOWN) game.earned.theater += 1;
+        world.humans = 0;
+        holdPicture(game, 1);
+        game.last = game.scene;
+        game.scene = Scene.OVERLAY_LOADER;
+        game.next = Scene.MOVIE;
+        game.step = 0;
+      }
       else {
         if (mode === MenuMode.TEKKEN_BALL && game.earned.ball < SHOWN) game.earned.ball += 1;
         startMode(game, mode, menu.choosers);
@@ -156,9 +162,12 @@ export function menuScene(game: GameState, data: Pick<FightData, 'sound'>, scene
   drawMenu(game, scenes);
 }
 
+/** Practice's mode overlay. */
+const PRACTICE_OVERLAY = 1;
+
 /** The mode overlay each mode loads: the arcade's for most, practice's, Tekken Ball's, Tekken Force's. */
 function modeOverlay(mode: number): number {
-  if (mode === MenuMode.PRACTICE) return 1;
+  if (mode === MenuMode.PRACTICE) return PRACTICE_OVERLAY;
   if (mode === MenuMode.TEKKEN_BALL) return 3;
   if (mode === MenuMode.TEKKEN_FORCE) return 2;
   if (mode <= MenuMode.TEKKEN_FORCE) return 0;
@@ -170,8 +179,12 @@ const SWITCHES: Readonly<Record<number, readonly number[]>> = {
   [MenuMode.ARCADE]: [1, 1, 0, 1, 0, 0, 0, 1, 0],
   [MenuMode.VERSUS]: [1, 0, 0, 1, 1, 0, 1, 1, 1],
   [MenuMode.TIME_ATTACK]: [0, 0, 0, 0, 0, 0, 0, 1, 0],
+  [MenuMode.SURVIVAL]: [0, 0, 0, 1, 0, 1, 1, 1, 0],
+  [MenuMode.TEAM_BATTLE]: [1, 1, 1, 0, 1, 1, 1, 1, 1],
   [MenuMode.PRACTICE]: [1, 0, 0, 0, 0, 0, 0, 1, 0],
   [MenuMode.DEMO]: [0, 0, 0, 0, 0, 0, 1, 1, 0],
+  [MenuMode.TEKKEN_BALL]: [1, 1, 0, 0, 1, 0, 0, 0, 1],
+  [MenuMode.TEKKEN_FORCE]: [1, 0, 0, 0, 0, 0, 0, 0, 0],
 };
 
 /**
@@ -257,6 +270,25 @@ export function startMode(game: GameState, mode: number, choosers: number, choos
       world.alwaysChip = 0;
       clearFirstTime();
       break;
+    case MenuMode.TEAM_BATTLE:
+      world.options.rounds = 0;
+      for (const team of world.match.teams) team.size = TEAM_SIZE;
+      run.team.uses.fill(0);
+      break;
+    case MenuMode.SURVIVAL: {
+      world.computer.difficulty = 1;
+      world.options.rounds = 0;
+      world.options.roundTime = 2;
+      world.alwaysChip = 0;
+      world.match.survivalRank = 0;
+      world.match.survivalWins = 0;
+      const survival = run.survival;
+      survival.opponent = 0;
+      survival.recentAt = 0;
+      survival.recent.fill(NO_ONE);
+      survival.beaten.fill(0);
+      break;
+    }
     case MenuMode.PRACTICE:
       world.options.rounds = 0;
       world.options.roundTime = 5;
@@ -264,8 +296,27 @@ export function startMode(game: GameState, mode: number, choosers: number, choos
       world.alwaysChip = 0;
       rest = false;
       break;
+    case MenuMode.TEKKEN_BALL: {
+      world.options.roundTime = 5;
+      world.alwaysChip = 0;
+      world.options.handicaps[0] = 3;
+      world.options.handicaps[1] = 3;
+      const ball = world.match.ball;
+      ball.server = 0;
+      ball.kind = 0;
+      ball.replaysShown = 0;
+      ball.replaysWanted = 0;
+      Object.assign(run.versusStage, { code: -1, first: -1, second: -1 });
+      run.ball.met.fill(0xffff, 0, 6);
+      break;
+    }
+    case MenuMode.TEKKEN_FORCE:
+      world.options.roundTime = 4;
+      world.options.rounds = 0;
+      world.alwaysChip = 0;
+      break;
     case MenuMode.DEMO:
-      stopMotors(game);
+      motorsOff(game);
       world.options.roundTime = 2;
       world.attract = 1;
       if (chooseDemo === undefined) throw new Error("the attract demo's fighters are not remade");
@@ -296,6 +347,8 @@ export function modeScene(game: GameState): void {
     case 2:
       if (game.modeOverlay !== game.run.overlay) {
         game.modeOverlay = game.run.overlay;
+        /* Practice's overlay comes with its state blank. */
+        if (game.modeOverlay === PRACTICE_OVERLAY) game.practice = blankPractice();
         queueFile(game);
         goToScene(game, Scene.MODE, 2);
         return;
