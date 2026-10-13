@@ -2,7 +2,7 @@
  * The scenes' tables (`tables/scenes.json`), validated: the values the game's state starts with,
  * the title's lines and the mode menu's entries.
  */
-import type { CreditsTables, IntroTables, MovieRecord, MovieStream, MovieTables, NameTables, OgreChangeTables, RecordsTables, SceneTables, SelectTables, StartLine, SurvivalRecord, TimeRecord, VersusPlace, VersusTables, VsSelectQuad, VsSelectTables } from '../sim/data/scenes.ts';
+import type { CreditsTables, IntroTables, PracticeLines, PracticeTables, TheaterTables, OptionsItem, OptionsLines, OptionsTables, OptionValue, Point, MovieRecord, MovieStream, MovieTables, NameTables, OgreChangeTables, RecordsTables, SceneTables, SelectTables, StartLine, SurvivalRecord, TimeRecord, ResultsTables, VersusPlace, VersusTables, VsSelectQuad, VsSelectTables } from '../sim/data/scenes.ts';
 import { AssetError, expectArray, expectBoolean, expectInt, expectObject, expectString } from './validate.ts';
 
 const int = (value: unknown, where: string): number => expectInt(value, where, -0x80000000, 0xffffffff);
@@ -51,7 +51,14 @@ function parseVersus(json: unknown, where: string): VersusTables {
     stage: expectString(o.stage, `${where}.stage`),
     fight: expectString(o.fight, `${where}.fight`),
     demoStage: expectString(o.demoStage, `${where}.demoStage`),
-    bands: expectArray(o.bands, `${where}.bands`, 2).map((v, i) => {
+    teamPortraits: expectArray(o.teamPortraits, `${where}.teamPortraits`, 2).map((v, i) => place(v, `${where}.teamPortraits[${i}]`)),
+    teamNames: expectArray(o.teamNames, `${where}.teamNames`, 2).map((v, i) => place(v, `${where}.teamNames[${i}]`)),
+    teamIcons: expectArray(o.teamIcons, `${where}.teamIcons`, 2).map((v, i) => {
+      const r = expectObject(v, `${where}.teamIcons[${i}]`);
+      const word = (key: string): number => expectInt(r[key], `${where}.teamIcons[${i}].${key}`, -0x8000, 0x7fff);
+      return { x: word('x'), y: word('y'), step: word('step'), xOfEight: word('xOfEight') };
+    }),
+    bands: expectArray(o.bands, `${where}.bands`, 7).map((v, i) => {
       const band = expectObject(v, `${where}.bands[${i}]`);
       return { colour: expectInt(band.colour, `${where}.bands[${i}].colour`, 0, 0xffffff), width: expectInt(band.width, `${where}.bands[${i}].width`, 0, 0xffff) };
     }),
@@ -119,6 +126,21 @@ function parseVsSelect(json: unknown, where: string): VsSelectTables {
     segments: bytes(o.segments, `${where}.segments`, 8),
     life: text(o.life, `${where}.life`),
     percents: expectArray(o.percents, `${where}.percents`, 8).map((v, i) => text(v, `${where}.percents[${i}]`)),
+  };
+}
+
+function parseResults(json: unknown, where: string): ResultsTables {
+  const o = expectObject(json, where);
+  const places = (value: unknown, at: string, count: number): { x: number; y: number }[] =>
+    expectArray(value, at, count).map((v, i) => {
+      const p = expectObject(v, `${at}[${i}]`);
+      return { x: expectInt(p.x, `${at}[${i}].x`, -0x8000, 0x7fff), y: expectInt(p.y, `${at}[${i}].y`, -0x8000, 0x7fff) };
+    });
+  return {
+    stages: places(o.stages, `${where}.stages`, 10),
+    beaten: places(o.beaten, `${where}.beaten`, 21),
+    countColours: expectArray(o.countColours, `${where}.countColours`, 4).map((v, i) => expectInt(v, `${where}.countColours[${i}]`, 0, 0xff)),
+    ordinals: expectArray(o.ordinals, `${where}.ordinals`, 4).map((v, i) => expectString(v, `${where}.ordinals[${i}]`)),
   };
 }
 
@@ -225,6 +247,11 @@ export function parseSceneTables(json: unknown, where = 'tables/scenes.json'): S
         lastChoices: bytes(o2.lastChoices, `${where}.powerOn.options.lastChoices`, 2),
         keepChoices: option('keepChoices'),
         modeSetting: option('modeSetting'),
+        autoSave: option('autoSave'),
+        display: (() => {
+          const d = expectObject(o2.display, `${where}.powerOn.options.display`);
+          return { x: expectInt(d.x, `${where}.powerOn.options.display.x`, -0x80, 0x7f), y: expectInt(d.y, `${where}.powerOn.options.display.y`, -0x80, 0x7f) };
+        })(),
       },
       keys: expectArray(p.keys, `${where}.powerOn.keys`, 2).map((pad, i) => bytes(pad, `${where}.powerOn.keys[${i}]`, 8)),
       ball: byte('ball'),
@@ -270,10 +297,14 @@ export function parseSceneTables(json: unknown, where = 'tables/scenes.json'): S
     select: parseSelect(o.select, `${where}.select`),
     versus: parseVersus(o.versus, `${where}.versus`),
     vsSelect: parseVsSelect(o.vsSelect, `${where}.vsSelect`),
+    results: parseResults(o.results, `${where}.results`),
     records: parseRecords(o.records, `${where}.records`),
     demoFighters: bytes(o.demoFighters, `${where}.demoFighters`, 14),
     intros: expectArray(o.intros, `${where}.intros`, 3).map((v, i) => parseIntro(v, `${where}.intros[${i}]`)),
     ogreChange: parseOgreChange(o.ogreChange, `${where}.ogreChange`),
+    options: parseOptions(o.options, `${where}.options`),
+    theater: parseTheater(o.theater, `${where}.theater`),
+    practice: parsePractice(o.practice, `${where}.practice`),
     schedule: expectArray(o.schedule, `${where}.schedule`, 14).map((step, i) => {
       const [kind, value] = bytes(step, `${where}.schedule[${i}]`, 2);
       return [kind!, value!] as const;
@@ -281,6 +312,152 @@ export function parseSceneTables(json: unknown, where = 'tables/scenes.json'): S
     endingSteps: expectInt(o.endingSteps, `${where}.endingSteps`, 0, 0xffffffff),
     movies: parseMovies(o.movies, `${where}.movies`),
     credits: parseCredits(o.credits, `${where}.credits`),
+  };
+}
+
+const OPTION_VALUES: readonly OptionValue[] = ['none', 'page', 'stereo', 'musicSet', 'difficulty', 'rounds', 'roundTime', 'alwaysChip', 'continueChooses', 'modeSetting', 'autoSave', 'keepChoices'];
+const OPTION_LINES = ['saved', 'saveError', 'loaded', 'loadError', 'noCard', 'full', 'noFile', 'other', 'format', 'display', 'keyConfig', 'setting', 'vibration', 'keyDefault', 'keyExit', 'records', 'page', 'win', 'wins', 'none', 'all'] as const;
+const OPTION_PARTS = ['save', 'load', 'cancel', 'yes', 'no', 'displayDefault', 'displayExit', 'next', 'exit'] as const;
+
+function parseOptions(json: unknown, where: string): OptionsTables {
+  const o = expectObject(json, where);
+  const byte = (value: unknown, at: string): number => expectInt(value, at, 0, 0xff);
+  const point = (value: unknown, at: string): Point => {
+    const p = expectObject(value, at);
+    return { x: expectInt(p.x, `${at}.x`, -0x8000, 0xffff), y: expectInt(p.y, `${at}.y`, -0x8000, 0xffff) };
+  };
+  const strings = (value: unknown, at: string, length?: number): string[] => expectArray(value, at, length).map((v, i) => expectString(v, `${at}[${i}]`));
+  const item = (value: unknown, at: string): OptionsItem => {
+    const i = expectObject(value, at);
+    const option = expectString(i.value, `${at}.value`) as OptionValue;
+    if (!OPTION_VALUES.includes(option)) throw new AssetError(`${at}.value`, `is ${option}, not an option the Options change`);
+    return {
+      value: option,
+      label: expectString(i.label, `${at}.label`),
+      names: strings(i.names, `${at}.names`),
+      sideways: expectInt(i.sideways, `${at}.sideways`, 0, 2),
+      count: byte(i.count, `${at}.count`),
+      button: expectInt(i.button, `${at}.button`, 0, 3),
+      set: byte(i.set, `${at}.set`),
+      draw: expectInt(i.draw, `${at}.draw`, 0, 4),
+      modes: expectInt(i.modes, `${at}.modes`, 0, 0xffff),
+    };
+  };
+  const l = expectObject(o.lines, `${where}.lines`);
+  const lines = {
+    ...Object.fromEntries(OPTION_LINES.map((key) => [key, expectString(l[key], `${where}.lines.${key}`)])),
+    ...Object.fromEntries(OPTION_PARTS.map((key) => [key, strings(l[key], `${where}.lines.${key}`, 2)])),
+    headers: strings(l.headers, `${where}.lines.headers`, 4),
+    titles: strings(l.titles, `${where}.lines.titles`, 4),
+    suffixes: strings(l.suffixes, `${where}.lines.suffixes`, 4),
+  } as unknown as OptionsLines;
+  return {
+    pages: expectArray(o.pages, `${where}.pages`, 6).map((value, p) => {
+      const page = expectObject(value, `${where}.pages[${p}]`);
+      const at = `${where}.pages[${p}]`;
+      const n = (key: string): number => expectInt(page[key], `${at}.${key}`, -0x8000, 0x7fff);
+      return {
+        title: expectString(page.title, `${at}.title`),
+        titleX: n('titleX'),
+        titleY: n('titleY'),
+        listX: n('listX'),
+        listY: n('listY'),
+        step: n('step'),
+        width: n('width'),
+        cancel: expectInt(page.cancel, `${at}.cancel`, -1, 6),
+        items: expectArray(page.items, `${at}.items`).map((v, i) => item(v, `${at}.items[${i}]`)),
+      };
+    }),
+    labels: expectArray(o.labels, `${where}.labels`, 8).map((value, i) => {
+      const label = expectObject(value, `${where}.labels[${i}]`);
+      return { mode: expectInt(label.mode, `${where}.labels[${i}].mode`, 0, 10), colour: expectInt(label.colour, `${where}.labels[${i}].colour`, 0, 15) };
+    }),
+    keyNames: strings(o.keyNames, `${where}.keyNames`, 13),
+    vibrationNames: strings(o.vibrationNames, `${where}.vibrationNames`, 2),
+    keys: expectArray(o.keys, `${where}.keys`, 8).map((value, k) => {
+      const key = expectObject(value, `${where}.keys[${k}]`);
+      const at = `${where}.keys[${k}]`;
+      return {
+        bit: expectInt(key.bit, `${at}.bit`, 0, 0xffff),
+        key: expectInt(key.key, `${at}.key`, 0, 7),
+        layer: expectInt(key.layer, `${at}.layer`, 0, 8),
+        closed: point(key.closed, `${at}.closed`),
+        open: point(key.open, `${at}.open`),
+        lineClosed: point(key.lineClosed, `${at}.lineClosed`),
+        lineOpen: point(key.lineOpen, `${at}.lineOpen`),
+        colour: expectInt(key.colour, `${at}.colour`, 0, 0xffffff),
+      };
+    }),
+    padPoints: expectArray(o.padPoints, `${where}.padPoints`, 2).map((row, t) => expectArray(row, `${where}.padPoints[${t}]`, 8).map((v, k) => point(v, `${where}.padPoints[${t}][${k}]`))),
+    defaultKeys: expectArray(o.defaultKeys, `${where}.defaultKeys`, 8).map((v, k) => expectInt(v, `${where}.defaultKeys[${k}]`, 0, 12)),
+    lines,
+  };
+}
+
+const PRACTICE_LINES = ['modeSelect', 'commandList', 'trainingDummy', 'counterAttacks', 'attackData', 'hitAnalysis', 'comboReplay', 'returnToModeSelect', 'vsCpu', 'cpuDifficulty', 'cpuLevel', 'comboPlayer', 'comboType', 'none', 'playSelect', 'playMark', 'startRecord', 'recording', 'playing', 'replaySelect', 'totalDamage', 'damage', 'counter', 'cleanHit', 'comboHits', 'comboDamage', 'title'] as const;
+const PRACTICE_VALUES = { onOff: 2, okCancel: 2, dummies: 9, replays: 5, difficulties: 3, stages: 10, numbers: 20 } as const;
+
+function parsePractice(json: unknown, where: string): PracticeTables {
+  const o = expectObject(json, where);
+  const strings = (value: unknown, at: string, length?: number): string[] => expectArray(value, at, length).map((v, i) => expectString(v, `${at}[${i}]`));
+  const v = expectObject(o.values, `${where}.values`);
+  const l = expectObject(o.lines, `${where}.lines`);
+  return {
+    items: expectArray(o.items, `${where}.items`, 3).map((items, m) => expectArray(items, `${where}.items[${m}]`, 8).map((id, i) => expectInt(id, `${where}.items[${m}][${i}]`, 0, 0x10))),
+    values: Object.fromEntries(Object.entries(PRACTICE_VALUES).map(([key, length]) => [key, strings(v[key], `${where}.values.${key}`, length)])) as unknown as PracticeTables['values'],
+    arrows: strings(o.arrows, `${where}.arrows`, 3),
+    lines: { ...Object.fromEntries(PRACTICE_LINES.map((key) => [key, expectString(l[key], `${where}.lines.${key}`)])), modes: strings(l.modes, `${where}.lines.modes`, 5) } as unknown as PracticeLines,
+    combos: expectArray(o.combos, `${where}.combos`, 20).map((combos, c) => expectArray(combos, `${where}.combos[${c}]`).map((inputs, k) => expectArray(inputs, `${where}.combos[${c}][${k}]`).map((word, i) => expectInt(word, `${where}.combos[${c}][${k}][${i}]`, 0, 0xffffffff)))),
+  };
+}
+
+function parseTheater(json: unknown, where: string): TheaterTables {
+  const o = expectObject(json, where);
+  const strings = (value: unknown, at: string, length?: number): string[] => expectArray(value, at, length).map((v, i) => expectString(v, `${at}[${i}]`));
+  const word = (value: unknown, at: string): number => expectInt(value, at, 0, 0xffffffff);
+  const b = expectObject(o.buttons, `${where}.buttons`);
+  return {
+    movies: expectArray(o.movies, `${where}.movies`, 0x1a).map((value, i) => {
+      const m = expectObject(value, `${where}.movies[${i}]`);
+      const at = `${where}.movies[${i}]`;
+      return {
+        movie: expectInt(m.movie, `${at}.movie`, -2, 0xff),
+        alt: expectInt(m.alt, `${at}.alt`, -2, 0xff),
+        picture: expectInt(m.picture, `${at}.picture`, 0, 60),
+        bits: word(m.bits, `${at}.bits`),
+        kind: expectInt(m.kind, `${at}.kind`, 0, 3),
+        name: expectString(m.name, `${at}.name`),
+        lines: strings(m.lines, `${at}.lines`),
+      };
+    }),
+    songs: expectArray(o.songs, `${where}.songs`).map((value, i) => {
+      const song = expectObject(value, `${where}.songs[${i}]`);
+      return { code: expectInt(song.code, `${where}.songs[${i}].code`, 0, 0xff), name: expectString(song.name, `${where}.songs[${i}].name`) };
+    }),
+    help: strings(o.help, `${where}.help`, 8),
+    titles: strings(o.titles, `${where}.titles`, 3),
+    play: expectString(o.play, `${where}.play`),
+    buttons: { disc: expectString(b.disc, `${where}.buttons.disc`), music: expectString(b.music, `${where}.buttons.music`), exit: expectString(b.exit, `${where}.buttons.exit`), theater: expectString(b.theater, `${where}.buttons.theater`), bgm: expectString(b.bgm, `${where}.buttons.bgm`) },
+    sets: strings(o.sets, `${where}.sets`, 2),
+    unknown: expectString(o.unknown, `${where}.unknown`),
+    cancel: strings(o.cancel, `${where}.cancel`, 2),
+    endingNames: expectArray(o.endingNames, `${where}.endingNames`, 4).map((names, i) => strings(names, `${where}.endingNames[${i}]`, 3)),
+    boxes: expectArray(o.boxes, `${where}.boxes`, 3).map((value, i) => {
+      const box = expectObject(value, `${where}.boxes[${i}]`);
+      const at = `${where}.boxes[${i}]`;
+      const n = (key: string): number => expectInt(box[key], `${at}.${key}`, -0x8000, 0x7fff);
+      return {
+        x: n('x'),
+        y: n('y'),
+        w: n('w'),
+        h: n('h'),
+        flags: n('flags'),
+        across: n('across'),
+        down: n('down'),
+        corners: expectArray(box.corners, `${at}.corners`, 4).map((v, k) => expectInt(v, `${at}.corners[${k}]`, 0, 0xffffff)),
+        border: expectInt(box.border, `${at}.border`, 0, 0xffffff),
+      };
+    }),
   };
 }
 

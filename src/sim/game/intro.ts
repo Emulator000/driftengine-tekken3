@@ -25,7 +25,8 @@ import { clearDust, clearSparks, drawSparks, stepDust, stopEvents } from '../eff
 import { sine } from '../math/angles.ts';
 import { chooseDemoFighters } from './attract.ts';
 import { goToLogo, startPressed } from './logo.ts';
-import { MenuMode, startMode, stopMotors } from './menu.ts';
+import { MenuMode, startMode } from './menu.ts';
+import { motorsOff, stopMotors } from './rumble.ts';
 import { drawTitle, fade, nextAttractStep, TitleShows } from './title.ts';
 import { Scene, type GameState } from './state.ts';
 
@@ -309,7 +310,7 @@ export function attractScene(game: GameState, data: AttractData): void {
       world.mode = MenuMode.DEMO;
       world.match.trueOgres = 0;
       world.attract = 1;
-      stopMotors(game);
+      motorsOff(game);
       game.step = 1;
       screen.draw = TitleShows.FADED;
       game.count = 0;

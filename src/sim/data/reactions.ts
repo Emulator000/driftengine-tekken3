@@ -42,8 +42,9 @@ export const Reaction = {
   GUARD_KNOCKBACK: 20,
 } as const;
 
-/** A reaction's halfword `field` (its place among the 21). */
-export function reactionField(tables: ReactionTables, ref: ReactionRef, field: number): number {
+/** A reaction's halfword `field` (its place among the 21); 0 for a fighter no hit has given one yet. */
+export function reactionField(tables: ReactionTables, ref: ReactionRef | null, field: number): number {
+  if (ref === null) return 0;
   if (ref.source === ReactionSource.ROWS) {
     const row = tables.rows.get(ref.index);
     if (row === undefined) throw new Error(`reaction row ${ref.index} was not imported`);

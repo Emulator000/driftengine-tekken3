@@ -12,23 +12,16 @@ import { MenuMode } from '../../sim/game/menu.ts';
 import { printRuns } from '../../sim/game/printer.ts';
 import type { GameState, VsSelectSide } from '../../sim/game/state.ts';
 import { codeUnder, NO_CHOICE, slotOf, TAKEN, VsSideState } from '../../sim/game/vs-select.ts';
-import type { LightLayer, Rgb, Texels } from '../2d/light.ts';
+import { lightAcross, type LightLayer, type Rgb } from '../2d/light.ts';
 import type { TypeStyle } from '../2d/type.ts';
 import { DISPLAY } from '../2d/typefaces.ts';
+import { drawFrame, drawIcon, FRAME, SETS } from './icons.ts';
 import { SCREEN, type ScreenLayer } from './screen.ts';
 
-/** A grid cell's frame and the icon set in it (the small icons' sheet: a column a roster id, the empty one last). */
-const FRAME = { w: 36, h: 64, left: 2, top: 3 } as const;
-const ICON = { w: 0x20, h: 0x3a, empty: 23 } as const;
+/** Team Battle's panel behind a side's slots, and the mark under its size: the numbers' step, the mark's line and width. */
+const TEAM_PANEL = { w: 0x90, h: 0x80, step: 0x10, under: 0x34, mark: 0x11 } as const;
 /** A slot's step to the next (four to a row). */
 const SLOT_STEP = { x: 0x24, y: 0x40 } as const;
-/** The frame's colour sets: its outer line, its stripe, its inner line (the first the grid's and the slots', the others the cursors'). */
-const SETS: readonly (readonly [string, string, string])[] = [
-  ['#000000', '#f888c0', '#e0e0e0'],
-  ['#808000', '#c0c000', '#ffff00'],
-  ['#800000', '#c00000', '#ff0000'],
-  ['#008000', '#00c000', '#00ff00'],
-];
 /** The colour sets of a cursor over a character not to be chosen, and of practice's partner. */
 const UNAVAILABLE_SET = 0;
 const PARTNER_SET = 3;
@@ -86,26 +79,29 @@ function drawOpaque(art: ScreenLayer, quad: VsSelectQuad, mode: number): void {
   else art.ramp([[0, css(c0!)], [1, css(c2!)]], from, y0, to - from, y1 - y0);
 }
 
-/** A ramp across, black at its left and white at its right, for light shaded across. */
-function rampAcross(light: LightLayer, reversed: boolean): Texels | null {
-  const picture = light.atlas.picture(`ramp across ${reversed}`, 64, 4, (g, left, top) => {
-    const gradient = g.createLinearGradient(left, 0, left + 64, 0);
-    gradient.addColorStop(0, reversed ? '#ffffff' : '#000000');
-    gradient.addColorStop(1, reversed ? '#000000' : '#ffffff');
-    g.fillStyle = gradient;
-    g.fillRect(left, top, 64, 4);
-  });
-  if (picture === null) return null;
-  const { u0, u1, v0, v1 } = picture.uv;
-  return { slot: picture.slot, uv: { u0: u0 + (u1 - u0) / 128, u1: u1 - (u1 - u0) / 128, v0: (v0 + v1) / 2, v1: (v0 + v1) / 2 } };
+/** The tournament's line and the game's name, each scrolled to its place and repeated across the window; the name `shade` as bright. */
+export function drawScrolls(art: ScreenLayer, tournament: string, line: number, strip: number, shade = 1): void {
+  const { left, right } = art.edges;
+  for (let x = firstRound(line - LINE.period, LINE.period, left); x < right; x += LINE.period) {
+    for (const run of printRuns(LINE.font, LINE.colour, x, LINE.y, tournament, 0).runs) art.print(run);
+  }
+  art.setShade(shade);
+  for (let start = firstRound(strip - STRIP.period, STRIP.period, left); start < right; start += STRIP.period) {
+    [...STRIP.letters].forEach((letter, k) => {
+      const x = start + k * STRIP.cell;
+      if (x + STRIP.cell < left || right < x) return;
+      const set = art.type('vs strip', letter, GOLD, STRIP.cap);
+      if (set !== null) art.put(set.picture, x + STRIP.cell / 2 - set.picture.width / 2 / art.kx, STRIP.y + STRIP.h / 2 - set.picture.height / 2 / art.ky);
+    });
+  }
+  art.setShade(1);
 }
 
-/** Light added or taken away over a rectangle, shaded across from none on one side to `level` on the other. */
-function lightAcross(light: LightLayer, blend: 'add' | 'subtract', x: number, y: number, w: number, h: number, colour: Rgb, fullAtRight: boolean): void {
-  const texels = rampAcross(light, !fullAtRight);
-  if (texels === null) return;
-  const half: Rgb = [colour[0] / 2, colour[1] / 2, colour[2] / 2];
-  light.quad(blend, x, y, w, h, half, half, texels);
+/** The opaque quads of the select's background in `colour` (0xbbggrr) over black across the window. */
+export function drawOpaqueQuads(art: ScreenLayer, quads: readonly VsSelectQuad[], colour: number): void {
+  const { left, right } = art.edges;
+  art.fill(left, 0, right - left, SCREEN.lines, [0, 0, 0, 1]);
+  for (const quad of quads) drawOpaque(art, quad, colour);
 }
 
 /** Where a thing repeated every `period` from `at` starts its first round wholly left of `left`. */
@@ -119,9 +115,7 @@ function drawBackdrop(game: GameState, scenes: SceneTables, art: ScreenLayer, li
   const t = scenes.vsSelect;
   const vs = game.vsSelect;
   const [first, second] = t.modeColours[vs.mode] ?? t.modeColours[0]!;
-  const { left, right } = art.edges;
-  art.fill(left, 0, right - left, SCREEN.lines, [0, 0, 0, 1]);
-  for (const quad of t.opaque) drawOpaque(art, quad, first);
+  drawOpaqueQuads(art, t.opaque, first);
   if (vs.mode === MenuMode.VERSUS) {
     const level: Rgb = [PANEL.level, PANEL.level, PANEL.level];
     light.quad('subtract', PANEL.x, PANEL.y, PANEL.w, PANEL.h, level, level);
@@ -136,19 +130,7 @@ function drawBackdrop(game: GameState, scenes: SceneTables, art: ScreenLayer, li
       light.quad('subtract', from, y + line, to - from, 2, level, level);
     }
   }
-  /* The tournament's line, across the window. */
-  for (let x = firstRound(vs.line - LINE.period, LINE.period, left); x < right; x += LINE.period) {
-    for (const run of printRuns(LINE.font, LINE.colour, x, LINE.y, t.tournament, 0).runs) art.print(run);
-  }
-  /* The game's name, a letter a cell, round its period, across the window. */
-  for (let start = firstRound(vs.strip - STRIP.period, STRIP.period, left); start < right; start += STRIP.period) {
-    [...STRIP.letters].forEach((letter, k) => {
-      const x = start + k * STRIP.cell;
-      if (x + STRIP.cell < left || right < x) return;
-      const set = art.type('vs strip', letter, GOLD, STRIP.cap);
-      if (set !== null) art.put(set.picture, x + STRIP.cell / 2 - set.picture.width / 2 / art.kx, STRIP.y + STRIP.h / 2 - set.picture.height / 2 / art.ky);
-    });
-  }
+  drawScrolls(art, t.tournament, vs.line, vs.strip);
   /* The columns of light beside the grid, in the mode's second colour. */
   const added = rgb(second);
   t.added.forEach((quad) => {
@@ -157,37 +139,6 @@ function drawBackdrop(game: GameState, scenes: SceneTables, art: ScreenLayer, li
     const fullAtRight = quad.colours[1] === 0xffffffff;
     lightAcross(light, 'add', x0, y0, x1 - x0, y1 - y0, added, fullAtRight);
   });
-}
-
-/** A frame of lines in a colour set at a level (of 255), as a cell's or a cursor's. */
-function drawFrame(layer: ScreenLayer, x: number, y: number, set: number, level: number): void {
-  const [outer, stripe, inner] = SETS[set & 3]!;
-  const shade = level / 0x80;
-  const colour = (hex: string): [number, number, number, number] => {
-    const v = parseInt(hex.slice(1), 16);
-    return [Math.min(1, (((v >> 16) & 0xff) / 0xff) * shade), Math.min(1, (((v >> 8) & 0xff) / 0xff) * shade), Math.min(1, ((v & 0xff) / 0xff) * shade), 1];
-  };
-  layer.fill(x, y, FRAME.w, 1, colour(outer));
-  layer.fill(x, y + FRAME.h - 1, FRAME.w, 1, colour(outer));
-  layer.fill(x, y, 1, FRAME.h, colour(outer));
-  layer.fill(x + FRAME.w - 1, y, 1, FRAME.h, colour(outer));
-  layer.fill(x + 1, y + 1, FRAME.w - 2, 1, colour(stripe));
-  layer.fill(x + 1, y + FRAME.h - 2, FRAME.w - 2, 1, colour(stripe));
-  layer.fill(x + 1, y + 2, FRAME.w - 2, 1, colour(inner));
-  layer.fill(x + 1, y + FRAME.h - 3, FRAME.w - 2, 1, colour(inner));
-  layer.fill(x + 1, y + 3, 1, FRAME.h - 6, colour(inner));
-  layer.fill(x + FRAME.w - 2, y + 3, 1, FRAME.h - 6, colour(inner));
-}
-
-/** A character's small icon by code in a frame (the empty one past the characters), darker when `dim`. */
-function drawIcon(art: ScreenLayer, smallIcons: ImageBitmap, x: number, y: number, code: number, dim = false, frame = true): void {
-  if (frame) drawFrame(art, x, y, 0, 0x80);
-  const column = code < NO_CHOICE ? code >> 2 : ICON.empty;
-  const icon = art.original(`icon small ${column}`, smallIcons, column * ICON.w, 0, ICON.w, ICON.h, ICON.w, ICON.h);
-  if (icon === null) return;
-  if (dim) art.setShade(0.5);
-  art.put(icon, x + FRAME.left, y + FRAME.top, ICON.w, ICON.h);
-  art.setShade(1);
 }
 
 /** The grid: each cell's character, or the empty icon where not earned; a cell whose character a choosing cursor's side has chosen already, darker. */
@@ -207,6 +158,10 @@ function drawSlots(game: GameState, scenes: SceneTables, art: ScreenLayer, small
   const vs = game.vsSelect;
   vs.sides.forEach((side, n) => {
     const slot = scenes.vsSelect.sides[n]!.slots[slotOf(vs.mode)]!;
+    if (vs.mode === MenuMode.TEAM_BATTLE) {
+      art.fill(slot.x, slot.y, TEAM_PANEL.w, TEAM_PANEL.h, [0, 0, 0, 0.5]);
+      if (side.nameKind === 1) art.fill(slot.x + 8 + (side.teamSize - 1) * TEAM_PANEL.step - 2, slot.y + TEAM_PANEL.under, TEAM_PANEL.mark, 4, [1, 0, 0, 1]);
+    }
     for (let k = 0; k < side.teamSize; k += 1) {
       const x = slot.x + (k & 3) * SLOT_STEP.x;
       const y = slot.y + (k >> 2) * SLOT_STEP.y;

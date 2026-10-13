@@ -14,9 +14,9 @@
  * - The portrait, as Tekken 3's (the select's and the versus screen's own files): 126 by 252, 8
  *   bits, its 256 colours four palettes of 64, one for each 64 lines (the select moves the palette
  *   as it draws them); colour 0 is clear, the light behind showing through, every other one opaque.
- *   His head is as high as Heihachi's and a little larger, the hair the art cuts off where the
+ *   His head is as large as the others' (Jin's, Heihachi's), the hair the art cuts off where the
  *   select fades a portrait in (the look's bands 0: the first 30 lines), his shoulders fading out
- *   above where it fades a portrait out (the last 60).
+ *   where it fades a portrait out (the last 60), as theirs do.
  * - The icons, as Tekken 3's: the single row's 32 by 68 and the double rows' 32 by 58, 8 bits with a
  *   palette each, his head over a gradient (his, Tekken 4's icon's red): from the top of his hair to
  *   below his chin in the first, brow to chin in the second. Their palettes have 64 colours, so each
@@ -108,9 +108,9 @@ const PORTRAIT_WIDTH = 126;
 const PORTRAIT_HEIGHT = 252;
 const SHOWN_WIDTH = Math.round(PORTRAIT_WIDTH * PIXEL_ASPECT);
 const FINE = 2;
-/** His head in it: the top of his hair's line and how many lines down his chin is (Heihachi's: 33 and 130). */
-const CROWN_LINE = 28;
-const HEAD_LINES = 134;
+/** His head in it: the top of his hair's line and how many lines down his chin is (about Jin's). */
+const CROWN_LINE = 18;
+const HEAD_LINES = 175;
 /** How far up the art's last rows (and its sides) fade out, and how far down its cut hair fades in, in lines. */
 const EDGE_FADE = 14;
 const HAIR_FADE = 3;

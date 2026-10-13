@@ -49,7 +49,10 @@ export function moveEvents(state: FightState, data: FightData, f: Fighter): void
     if (code >= 1 && code <= 3) {
       startShake(state, code - 1);
       shakeVibration(state, code - 1);
-    } else if (code === Code.DUST) landingDust(state, data, f);
+    } else if (code === Code.DUST) {
+      landingDust(state, data, f);
+      sparkVibration(state, f.movesetSlot, 2);
+    }
     else if (code >= Code.HEALTH && code < Code.HEALTH_END) {
       f.eventHealth = code - (Code.HEALTH - 1);
       f.eventAmount = arg;

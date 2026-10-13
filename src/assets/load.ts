@@ -14,6 +14,8 @@ import { parseCancelTables } from './cancels.ts';
 import { parseCommandTables, type CommandTables } from './commands.ts';
 import { parseComputerTables } from './computer.ts';
 import { parseEffectTables } from './effects.ts';
+import { parseBallTables } from './ball.ts';
+import { parseForceTables } from './force.ts';
 import { parseHitTables, parseSharedHits } from './hits.ts';
 import { parseInputTables } from './input.ts';
 import { parseManifest } from './manifest.ts';
@@ -37,8 +39,8 @@ const ROWS = 22;
 export async function loadFightTables(json: FetchJson): Promise<{ tables: FightTables; arena: ArenaTables; commands: CommandTables; scenes: SceneTables }> {
   parseManifest(await json('manifest.json'));
   const table = (name: string): Promise<unknown> => json(`tables/${name}.json`);
-  const [[math, motion, input, skeleton, roster, hits, reactions, cancels, camera, computer, sound, effects, banks, fighters, arena, commands, scenes], music] = await Promise.all([
-    Promise.all(['math', 'motion', 'input', 'skeleton', 'roster', 'hits', 'reactions', 'cancels', 'camera', 'computer', 'sound', 'effects', 'banks', 'fighters', 'arena', 'commands', 'scenes'].map(table)),
+  const [[math, motion, input, skeleton, roster, hits, reactions, cancels, camera, computer, sound, effects, banks, fighters, arena, commands, scenes, ball, force], music] = await Promise.all([
+    Promise.all(['math', 'motion', 'input', 'skeleton', 'roster', 'hits', 'reactions', 'cancels', 'camera', 'computer', 'sound', 'effects', 'banks', 'fighters', 'arena', 'commands', 'scenes', 'ball', 'force'].map(table)),
     json('sound/music.json'),
   ]);
   const rosterTables = parseRosterTables(roster);
@@ -60,6 +62,8 @@ export async function loadFightTables(json: FetchJson): Promise<{ tables: FightT
       sound: parseSoundTables(sound),
       music: parseMusicTables(music),
       effects: parseEffectTables(effects),
+      ball: parseBallTables(ball),
+      force: parseForceTables(force),
       banks: parseSoundBanks(banks),
       models: parseFighterModels(fighters),
       lines: { coin: sceneTables.select.coinLines, credit: sceneTables.select.creditLines },

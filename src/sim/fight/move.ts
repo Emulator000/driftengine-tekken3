@@ -640,7 +640,7 @@ function transition(state: FightState, data: FightData, f: Fighter, opponent: Fi
       stun(data, f);
       f.turnMode = 0xb;
       if ((flagsOf(data, f.move!) & 0x10) === 0) f.facing = f.faceTarget;
-      else f.facing = s16(f.faceTarget + reactionField(data.reactions, f.reaction!, Reaction.AWAY));
+      else f.facing = s16(f.faceTarget + reactionField(data.reactions, f.reaction, Reaction.AWAY));
       f.turnFrames = 0;
       f.turnStep = 0;
       return true;
@@ -655,8 +655,8 @@ function transition(state: FightState, data: FightData, f: Fighter, opponent: Fi
     case 0x25:
     case 0x26: {
       if (type !== 0x23) stun(data, f);
-      knockback(data, f, reactionField(data.reactions, f.reaction!, type === 0x23 ? Reaction.GUARD_KNOCKBACK : type === 0x25 ? Reaction.CROUCHING_KNOCKBACK : Reaction.COUNTER_KNOCKBACK));
-      const away = reactionField(data.reactions, f.reaction!, type === 0x25 ? Reaction.CROUCHING_AWAY : Reaction.AWAY);
+      knockback(data, f, reactionField(data.reactions, f.reaction, type === 0x23 ? Reaction.GUARD_KNOCKBACK : type === 0x25 ? Reaction.CROUCHING_KNOCKBACK : Reaction.COUNTER_KNOCKBACK));
+      const away = reactionField(data.reactions, f.reaction, type === 0x25 ? Reaction.CROUCHING_AWAY : Reaction.AWAY);
       fromFirstFrame(f);
       if (type === 0x25) f.mash = 0;
       f.throwHold = 0;
@@ -679,9 +679,9 @@ function transition(state: FightState, data: FightData, f: Fighter, opponent: Fi
     case 0x2a:
     case 0x2b: {
       stun(data, f);
-      knockback(data, f, reactionField(data.reactions, f.reaction!, Reaction.KNOCKBACK));
+      knockback(data, f, reactionField(data.reactions, f.reaction, Reaction.KNOCKBACK));
       const from = type === 0x2a ? f.faceTarget : f.towardTarget;
-      f.pushAngle = s16(from + reactionField(data.reactions, f.reaction!, Reaction.AWAY) - 0x8000);
+      f.pushAngle = s16(from + reactionField(data.reactions, f.reaction, Reaction.AWAY) - 0x8000);
       countRepeatedHits(data, f);
       fromFirstFrame(f);
       f.throwHold = 0;
@@ -827,6 +827,12 @@ function force(data: FightData, f: Fighter, id: number, type: number, setPlaying
   f.next.type = transitionType(data, f, type);
   f.next.turnAround = 0;
   f.next.noBlend = 0;
+}
+
+/** A move by its id started at once and stepped against the fighter itself (Tekken Force's enemies as they enter). */
+export function forceMove(state: FightState, data: FightData, f: Fighter, id: number): void {
+  force(data, f, id, 0, true);
+  stepMove(state, data, f, f);
 }
 
 /**

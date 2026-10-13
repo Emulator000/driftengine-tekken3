@@ -9,6 +9,7 @@ import type { SceneTables } from '../data/scenes.ts';
 import { goToLogo, START_SOUND, startPressed } from './logo.ts';
 import { startMovie, stepMovie } from './movie.ts';
 import { print } from './printer.ts';
+import { stopMotors } from './rumble.ts';
 import { Scene, type GameState } from './state.ts';
 
 /** What the title shows. */
@@ -166,5 +167,6 @@ export function titleScene(game: GameState, data: Pick<FightData, 'sound' | 'mus
   }
   nextAttractStep(game);
   voiceLine(game.world, data, 0, START_SOUND, 0);
+  stopMotors(game);
   goToLogo(game, Scene.MENU);
 }

@@ -11,6 +11,8 @@ import type { SoundBanks } from '../data/banks.ts';
 import type { SoundCommand } from './voices.ts';
 import type { VibrationCommand } from './vibration.ts';
 import type { HudPrint } from './hud.ts';
+import type { BallTables } from '../data/ball.ts';
+import type { ForceTables } from '../data/force.ts';
 import type { StartLine } from '../data/scenes.ts';
 import type { InputTables } from '../data/input.ts';
 import type { CancelTables } from '../data/cancels.ts';
@@ -45,6 +47,20 @@ export interface LoadedMoveset {
 }
 
 /** What the fight reads and never changes: the tables and the movesets in their slots (the second empty when both fighters share one). */
+/**
+ * A side's team in Team Battle: its members (codes), the member last sent in (0xff none yet) and
+ * the next, how many its player chose (the rest drawn), whether a kick chose its size (the second
+ * costume for the members drawn), and its size.
+ */
+export interface Team {
+  readonly members: number[];
+  current: number;
+  next: number;
+  chosen: number;
+  kick: number;
+  size: number;
+}
+
 export interface FightData {
   readonly math: MathTables;
   readonly curves: CurveTables;
@@ -62,14 +78,98 @@ export interface FightData {
   /** The music driver's tables (the songs' picks, the XA songs' and the audio tracks' extents, the options). */
   readonly music: MusicTables;
   readonly effects: EffectTables;
+  /** Tekken Ball's balls, the ball's mesh and the select's names. */
+  readonly ball: BallTables;
+  /** Tekken Force's waves, enemies, bosses, stages' scripts and backdrops, and its versus screen's places. */
+  readonly force: ForceTables;
   readonly banks: SoundBanks;
   /** What the fight reads from each model pack's model. */
   readonly models: FighterModels;
   /** The lines under a side not in, as the select shows them: who should press start, and the credits. */
   readonly lines: { readonly coin: readonly StartLine[]; readonly credit: readonly StartLine[] };
-  readonly sets: readonly [LoadedMoveset | null, LoadedMoveset | null, LoadedMoveset];
+  sets: readonly [LoadedMoveset | null, LoadedMoveset | null, LoadedMoveset];
   /** Per moveset slot, the move ids as bound for the fight: an id the character lacks takes the opponent's move, else the default. */
-  readonly moveIds: readonly [readonly (MoveRef | null)[], readonly (MoveRef | null)[]];
+  moveIds: readonly [readonly (MoveRef | null)[], readonly (MoveRef | null)[]];
+  /** In Tekken Force: the enemies' moveset (the second slot's as the stage begins) and the boss's, which takes the second slot when he arrives. */
+  readonly forceSets?: { readonly enemies: LoadedMoveset; readonly boss: LoadedMoveset | null };
+  /** With Mokujin in the match: the characters he draws from (roster bits), their movesets loaded (by id), and each side's own as the match began. */
+  readonly mokujin?: { readonly draws: number; readonly movesets: ReadonlyMap<number, LoadedMoveset>; readonly own: readonly [LoadedMoveset, LoadedMoveset] };
+}
+
+/** Tekken Ball's ball as a replay keeps a frame of it: its position (and the word after it), its first two turns, its look and count, its stretch's angles (and the word after them) and its stretch. */
+export interface BallFrame {
+  readonly position: number[];
+  readonly spin: number[];
+  look: number;
+  timer: number;
+  readonly stretchAngles: number[];
+  stretch: number;
+}
+
+/**
+ * Tekken Ball's ball (`ball.ts`): its state (0 the round's opening wait, 1 the wait at the centre,
+ * 2 in play, 3 set up, 4 rising to a spike, 5 rebounding off a fighter it struck, 6 the reset's
+ * countdown, 7 the point's, 8 the serve's wait, 9 hovering to be served; drawn unless 0), its
+ * position (y down, the floor at -0x180; and the word after it), velocity (256ths), its
+ * acceleration (y its gravity), its turns and their rates, its speed along its heading, whether it
+ * homes on its target, its sphere (centre, radius and its square), the frames no touch is tested,
+ * whether its stretch is held, its four tracks, the fighters (slots) that last touched it, that it
+ * heads for and that a spike will, each side's charge, the charge it carries, a spike's speed,
+ * charged touches in a row, whether a touch chained this frame, its look (0 to 9; 0xa on the
+ * select), its count, its stretch's angles (and the word after them) and amount. Then what the
+ * game keeps for it: the ball's lift, unit, gravity, strip and damage in percent, the frames it
+ * has lain on the floor, the frames before its harmless touch's sound may play again, each moveset
+ * slot's shove from its move, the fighter (slot + 1) a point goes against this frame, whether it
+ * struck a fighter this frame, its glows (a bit each), its eight popups (their ring's next and
+ * their list, newest first), its two charge gauges and the side whose gauge pulses, its glare's
+ * four beams, and the beach backdrop's scroll.
+ */
+export interface BallState {
+  state: number;
+  timer: number;
+  readonly position: number[];
+  w: number;
+  readonly velocity: number[];
+  readonly accel: number[];
+  readonly spin: number[];
+  readonly spinRate: number[];
+  speed: number;
+  heading: number;
+  homing: number;
+  readonly sphere: { readonly centre: number[]; radius: number; square: number };
+  cooldown: number;
+  stretchHeld: number;
+  readonly segments: readonly { readonly from: number[]; readonly to: number[] }[];
+  lastHitter: number;
+  target: number;
+  spikeTarget: number;
+  readonly charge: number[];
+  power: number;
+  spikeSpeed: number;
+  combo: number;
+  chained: number;
+  look: number;
+  readonly stretchAngles: number[];
+  stretchPad: number;
+  stretch: number;
+  lift: number;
+  unit: number;
+  gravity: number;
+  strip: number;
+  percent: number;
+  stall: number;
+  touchSoundWait: number;
+  readonly shoves: { angle: number; speed: number; first: number; last: number; cancelFrame: number }[];
+  pointAgainst: number;
+  struck: number;
+  glows: number;
+  readonly popups: { text: string; x: number; y: number; colour: number; font: number; life: number; inUse: number }[];
+  popupNext: number;
+  readonly popupList: number[];
+  readonly gauges: { last: number; target: number; shown: number; trail: number }[];
+  gaugeLit: number;
+  readonly beams: { x1: number; x2: number }[];
+  readonly backdrop: { lastPhase: number; refYaw: number };
 }
 
 /** A joint: its world matrix, its matrix in the camera's space, and its parent joint (-1 the root). */
@@ -606,6 +706,31 @@ export interface FightCamera {
   attractStarted: number;
   /** The attract intro's camera: its script set, the next script's index, and the frames its script has left. */
   readonly intro: { set: number; next: number; left: number };
+  /** Tekken Force's camera (`ForceCamera`). */
+  readonly force: ForceCamera;
+}
+
+/**
+ * Tekken Force's camera: its eye (x moves, y and z stay), its pitch (shot units) and yaw, its
+ * screen distance; the pitch it eases toward and the x it moves to; how it follows (0 only to the
+ * right, 1 still, 2 both ways within a window), the player's place across the picture past which
+ * it moves, the window's ends; and its x as the stage began, the stage's progress counted from it.
+ */
+export interface ForceCamera {
+  x: number;
+  y: number;
+  z: number;
+  pitch: number;
+  yaw: number;
+  screen: number;
+  pitchTarget: number;
+  xTarget: number;
+  mode: number;
+  rightEdge: number;
+  leftEdge: number;
+  min: number;
+  max: number;
+  origin: number;
 }
 
 /** A cancel-list entry as one is held: in a moveset slot's lists (`set`), or in the shared lists (`set` -1). */
@@ -635,6 +760,8 @@ export interface Candidate {
 export interface ComputerRecord {
   /** Its index (which record), frames its move moved on (its parity alternates some choices), the pad this frame and last, and the script playing on. */
   index: number;
+  /** Tekken Force's pacing for it: frames it waits after the other enemy's attack, frames it holds still, the odds (of 4096) it hangs back. */
+  pacing: readonly [number, number, number] | null;
   steps: number;
   pad: number;
   lastPad: number;
@@ -799,7 +926,7 @@ export interface EffectEvent {
   code: number;
 }
 
-/** How an effect object is drawn: a plain or a charged burst spark, or a breath puff. */
+/** How an effect object is drawn: a burst spark, a breath puff, a glow, a fire, Tekken Ball's ball's glow or fire. */
 export type EffectLook =
   | 'plain'
   | 'charged'
@@ -816,7 +943,9 @@ export type EffectLook =
   | 'burning'
   | 'gon burning'
   | 'column'
-  | 'column mirrored';
+  | 'column mirrored'
+  | 'ball glow'
+  | 'ball fire';
 
 /** The fight's state: three fighter records (the third only in the modes with a third body) and the fight's own. */
 export interface FightState {
@@ -859,6 +988,8 @@ export interface FightState {
   shake: { kind: number; at: number } | null;
   /** A second random generator, stepped every frame and by the knockout cameras. */
   frameSeed: number;
+  /** The game's own random generator, stepped every field and by the scenes' draws (and Mokujin's). */
+  noise: number;
   /**
    * The effect pool: eighty objects, the free ones and the running ones in their order; how many
    * ran this frame; whether it was cleared for the replay and for the knockout; per fighter the
@@ -926,7 +1057,24 @@ export interface FightState {
     halfRate: number;
     difficulty: number;
     arcadeStage: number;
+    /** The fighters the computer last played: itself and its opponent (slots). */
+    lastSelf: number;
+    lastOpponent: number;
+    /** Tekken Force's: per enemy, frames it waits before attacking and frames it holds still (-1 none). */
+    readonly forceWait: number[];
+    readonly forceHold: number[];
   };
+  /** Tekken Ball's ball. */
+  readonly ball: BallState;
+  /** Tekken Force's stage (`ForceState`). */
+  readonly force: ForceState;
+  /**
+   * Practice's own, as the fight reads it: whether it is starting (its menu opening by itself),
+   * whether a clean hit on each player slot counts as a counter hit, each moveset slot's colour
+   * (on, red, green, blue) in place of its light, and each moveset slot's held pad as its input
+   * read it this frame.
+   */
+  readonly practice: { starting: number; readonly counters: number[]; readonly colours: number[][]; readonly heldPad: number[] };
   stage: number;
   /** The camera's view, and the skeletons' (the view, or levelled and lifted looking straight down). */
   readonly view: Matrix;
@@ -991,6 +1139,8 @@ export interface FightState {
     soundShift: number;
     readonly fighters: readonly { readonly frames: ReplayFrame[] }[];
     readonly held: readonly ReplayFrame[];
+    /** Tekken Ball's ball as each of the last 30 frames recorded it. */
+    readonly ball: readonly BallFrame[];
   };
   /** How many fighters are mid-throw; whether a held throw carries its partner, and last frame's count. */
   throwsUnderway: number;
@@ -1077,13 +1227,28 @@ export interface FightState {
     /** The wins in a row the streak counts, and which sides play True Ogre (bits). */
     streak: number;
     trueOgres: number;
+    /** Survival's place among its records the wins so far would take (0 none), and the wins. */
+    survivalRank: number;
+    survivalWins: number;
+    /** Team Battle's two teams. */
+    readonly teams: Team[];
+    /** Tekken Ball's: the knockout's replays shown so far and how many to show, the side the ball is served from, the ball chosen (0 beach, 1 gum, 2 iron). */
+    readonly ball: { replaysShown: number; replaysWanted: number; server: number; kind: number };
+    /**
+     * Tekken Force's run: its score (once cleared), the soldiers the player beat, the human's own
+     * pad, whether the score passed the best, its flags (1, 2, 4 the keys held after this run's,
+     * 8 the final stage cleared, 0x10 Dr. B earned before it began) and each stage's boss (roster
+     * code; 0x58 none).
+     */
+    readonly force: { score: number; kills: number; side: number; newRecord: number; flags: number; readonly bosses: number[] };
   };
   /**
    * The pause menu: its cursor (0xff opening it), its choice (1 cancel, 2 the command list, 3 reset,
    * 4 rules), the frames its input waits, and per side the command list's place and its scroll's
    * offset easing to it.
    */
-  readonly pauseMenu: { cursor: number; choice: number; wait: number; readonly scrolls: readonly { place: number; offset: number }[]; drawn: number };
+  /** The pause menu: its cursor, its choice, its wait, each side's command list's scroll, what it drew, and the sides whose lists it shows (bits). */
+  readonly pauseMenu: { cursor: number; choice: number; wait: number; readonly scrolls: readonly { place: number; offset: number }[]; drawn: number; sides: number };
   /** The round's timer in frames, and whether it is stopped (practice, or the mode's own). */
   timer: number;
   timerStopped: number;
@@ -1098,7 +1263,7 @@ export interface FightState {
    * damage just taken, draining a sixteenth a frame. Then what it shows this field, as its step
    * decides: the calls as the printer prints them, whether the back (the names, the round marks,
    * the timer and the bars) is drawn, the timer's seconds there (-1 the infinity sign), and each
-   * side's round marks, 1 a lit one.
+   * side's round marks, 1 a lit one (in Team Battle its members' marks instead).
    */
   readonly hud: {
     shown: number;
@@ -1110,6 +1275,11 @@ export interface FightState {
     back: number;
     timerShown: number;
     readonly marksLit: number[][];
+    /** In Team Battle, each side's members' marks: 1 crossed out, 2 beaten (its colour dimmed). */
+    readonly teamMarks: number[][];
+    /** Tekken Force's three gauges (the player's and each enemy's, as the bars), and the roster code each name row shows. */
+    readonly forceBars: readonly { seen: number; target: number; shown: number; trail: number }[];
+    readonly forceNames: number[];
   };
   input: {
     /** Per player slot, where its input comes from (`InputSource`). */
@@ -1126,5 +1296,94 @@ export interface FightState {
     rawPads: number[];
     /** Per pad, the raw buttons newly pressed (start pauses and skips). */
     fresh: number[];
+    /** The held and pressed buttons the last pad read this frame recorded (a computer at no health records them again). */
+    lastRecorded: number[];
   };
+}
+
+/**
+ * A Tekken Force enemy slot: its state (0 clearing, 1 free, 2 to change soldier, 3 changing, 4
+ * appearing, 5 fighting, 6 down, 7 fading), the frame it waits for, its kind (4 the boss), the
+ * soldier type its fighter is and the one wanted, and the place (y in sixteenths) and last frame
+ * of its +n SEC text.
+ */
+export interface ForceSlot {
+  state: number;
+  wait: number;
+  kind: number;
+  loadedType: number;
+  wantedType: number;
+  textX: number;
+  textY: number;
+  textUntil: number;
+}
+
+/** A Tekken Force +LIFE item: its state (0 none, 1 lying, 2 taken), its place, and its popup's place (y in sixteenths) and last frame. */
+export interface ForceItem {
+  state: number;
+  x: number;
+  y: number;
+  z: number;
+  popupX: number;
+  popupY: number;
+  end: number;
+}
+
+/**
+ * Tekken Force's stage, as the fight runs it (`force-stage.ts`): the stage machine's state (0 the
+ * script, 1 a wait, 3 and 4 the boss on its way, 5 and 6 the boss, 7 the tally, 8 to 10 the final
+ * stage) and its count, the script's camera mode, the two enemy slots, the next script record,
+ * the enemies gone since the last wait and how many it waits for (-1 both slots free), the wave
+ * orders seen, the progress a wave stops at and its next entry; the timer as the boss came, the
+ * boss fight's frames, the bonus time and the clear bonus; frames drawn and run; the keys shown;
+ * the human's pad; whether start may end the stage clear; the camera's x as the stage began; the
+ * boss phase; the score and the run's best; the final stage, its challenge earned, a key won (and
+ * one the game has yet to save), Dr. B earned; the stage; the backdrop's scroll (the eye across
+ * the view); the target choice (the target and the other on the picture, the manual switch, its
+ * button, its toggle, the frames the choice stays); the two +LIFE items; and the progress bar's
+ * phase, its latch and its cursor; and the roster codes the stage's match brings (the first
+ * enemy's, the second's, the boss's; -1 none).
+ */
+export interface ForceState {
+  state: number;
+  count: number;
+  cameraMode: number;
+  readonly slots: readonly ForceSlot[];
+  script: number;
+  downSinceWait: number;
+  waitFor: number;
+  waves: number;
+  waveUntil: number;
+  waveAt: number;
+  bossTimer: number;
+  bossFrames: number;
+  bonusFrames: number;
+  clearBonus: number;
+  drawnFrames: number;
+  frames: number;
+  keysShown: number;
+  pad: number;
+  skippable: number;
+  startX: number;
+  bossPhase: number;
+  score: number;
+  best: number;
+  finalStage: number;
+  challenge: number;
+  keyWon: number;
+  keyToSave: number;
+  drEarned: number;
+  stage: number;
+  scroll: number;
+  targetOnScreen: number;
+  otherOnScreen: number;
+  manualTarget: number;
+  switchButton: number;
+  switched: number;
+  targetLock: number;
+  readonly items: readonly ForceItem[];
+  barPhase: number;
+  barLatched: number;
+  barPos: number;
+  readonly codes: number[];
 }

@@ -495,8 +495,8 @@ function stepSparkles(game: GameState, scenes: SceneTables): void {
 
 /** The second random generator stepped; its new value. */
 export function stepNoise(game: GameState): number {
-  game.noise = (Math.imul(game.noise, 5) + 1) >>> 0;
-  return game.noise;
+  game.world.noise = (Math.imul(game.world.noise, 5) + 1) >>> 0;
+  return game.world.noise;
 }
 
 /** Under each portrait the mode's title, for a side that plays no part; for one not yet in, the lines that call a player in. */

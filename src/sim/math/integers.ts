@@ -10,5 +10,8 @@ export const u32 = (v: number): number => v >>> 0;
 /** Signed division, truncating toward zero. */
 export const div = (a: number, b: number): number => (a / b) | 0;
 
+/** Signed division as the console's processor does it, by zero too: -1 for a dividend of 0 or more, 1 for a negative one. */
+export const cpuDiv = (a: number, b: number): number => (b === 0 ? (a >= 0 ? -1 : 1) : (a / b) | 0);
+
 /** Unsigned 32-bit division. */
 export const divu = (a: number, b: number): number => Math.trunc((a >>> 0) / (b >>> 0)) >>> 0;

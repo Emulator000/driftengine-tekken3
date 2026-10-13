@@ -1,11 +1,15 @@
 /**
  * The ground as the fight lays it: a patch of tiles (the game's 100, more
  * for a view wider than 4:3), each one of the stage's map cells with the corner UVs the extractor resolved (`GND1`), at the corners the game
- * places it and shaded as the game shades it, texel times shade over 128. Made again when the patch
- * moves or its cells change; its shades, which change with the camera nearly every frame, are
- * rewritten in place.
+ * places it and shaded as the game shades it, texel times shade over 128 (times a tint the scene's
+ * light is undone by, so the lit floor keeps the game's colours where nothing shades it). Made again
+ * when the patch moves or its cells change; its shades, which change with the camera nearly every
+ * frame, are rewritten in place.
  */
 import type { MeshHandle, RendererApi, SurfaceMaterial, SurfaceTextureHandle } from '@driftengine/core';
+
+/** The display's gamma, which the game's colour arithmetic works in. */
+const DISPLAY_GAMMA = 2.2;
 
 const GND_MAGIC = 0x31444e47;
 const CELLS = 100;
@@ -27,9 +31,11 @@ export class Ground {
   private last = { count: 0, x: new Int32Array(0), z: new Int32Array(0), shade: new Uint8Array(0), cell: new Int16Array(0) };
   /** The patch's colours, rewritten when its shades change. */
   private colors = new Float32Array(0);
+  private readonly tint: readonly [number, number, number];
 
-  constructor(renderer: RendererApi, buffer: ArrayBuffer, atlasWidth: number, atlasHeight: number, texture: SurfaceTextureHandle) {
+  constructor(renderer: RendererApi, buffer: ArrayBuffer, atlasWidth: number, atlasHeight: number, texture: SurfaceTextureHandle, tint: readonly [number, number, number] = [1, 1, 1]) {
     this.renderer = renderer;
+    this.tint = tint;
     const view = new DataView(buffer);
     if (view.getUint32(0, true) !== GND_MAGIC) throw new Error('not a ground file');
     this.uvs = new Float32Array(CELLS * 8);
@@ -91,10 +97,17 @@ export class Ground {
     this.mesh = this.renderer.createMesh({ positions, normals, colors: this.colors, emissive: new Float32Array(n * 4), uvs, indices }, { dynamicColors: true });
   }
 
-  /** Each corner's colour, its shade over 128, for the first `n` tiles. */
+  /**
+   * Each corner's colour, its shade over 128 times the tint, for the first `n` tiles: the game
+   * scales the texel's displayed colour by the shade, so the scale is taken into linear light.
+   */
   private shade(n: number): void {
     const shades = this.last.shade;
-    for (let v = 0; v < n * 4; v += 1) this.colors.fill(shades[v]! / 128, v * 3, v * 3 + 3);
+    const [r, g, b] = this.tint;
+    for (let v = 0; v < n * 4; v += 1) {
+      const k = (shades[v]! / 128) ** DISPLAY_GAMMA;
+      this.colors.set([k * r, k * g, k * b], v * 3);
+    }
   }
 
   private drop(): void {

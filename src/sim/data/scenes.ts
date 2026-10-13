@@ -28,6 +28,9 @@ export interface PowerOn {
     readonly lastChoices: readonly number[];
     readonly keepChoices: number;
     readonly modeSetting: number;
+    /** Whether the progress is saved on its own as records change, and the display's place (its steps across and down). */
+    readonly autoSave: number;
+    readonly display: { readonly x: number; readonly y: number };
   };
   /** Each pad's eight buttons' configuration (which of the key bits each takes). */
   readonly keys: readonly (readonly number[])[];
@@ -213,6 +216,10 @@ export interface VersusTables {
   readonly fight: string;
   readonly demoStage: string;
   readonly bands: readonly { readonly colour: number; readonly width: number }[];
+  /** Team Battle's portrait and name places, and each side's row of its team's icons: its start, the step between icons, and its start for a team of eight. */
+  readonly teamPortraits: readonly VersusPlace[];
+  readonly teamNames: readonly VersusPlace[];
+  readonly teamIcons: readonly { readonly x: number; readonly y: number; readonly step: number; readonly xOfEight: number }[];
   /** Each background's archive, as the versus screen notes the one it last loaded. */
   readonly backgrounds: readonly number[];
 }
@@ -270,6 +277,14 @@ export interface VsSelectTables {
   readonly percents: readonly string[];
 }
 
+/** The results after a run: Time Attack's stages' places, Survival's places for the characters beaten and its counts' colours by hundreds, and the ranking's endings (first, second, third, the rest). */
+export interface ResultsTables {
+  readonly stages: readonly Point[];
+  readonly beaten: readonly Point[];
+  readonly countColours: readonly number[];
+  readonly ordinals: readonly string[];
+}
+
 export interface SceneTables {
   readonly powerOn: PowerOn;
   /** The title's two copyright lines. */
@@ -284,17 +299,227 @@ export interface SceneTables {
   readonly select: SelectTables;
   readonly versus: VersusTables;
   readonly vsSelect: VsSelectTables;
+  readonly results: ResultsTables;
   readonly records: RecordsTables;
   /** The attract demo's characters, in the order it takes them (those earned). */
   readonly demoFighters: readonly number[];
   /** The attract overlay's intros. */
   readonly intros: readonly IntroTables[];
   readonly ogreChange: OgreChangeTables;
+  readonly options: OptionsTables;
+  readonly theater: TheaterTables;
+  readonly practice: PracticeTables;
   /** The unlock schedule: fourteen steps of a kind (0 nothing, 1 a character, 2 a costume, 3 and 4 the hidden modes, 5 everything) and a value; and the endings (bits by roster id) that each move it a step. */
   readonly schedule: readonly (readonly [number, number])[];
   readonly endingSteps: number;
   readonly movies: MovieTables;
   readonly credits: CreditsTables;
+}
+
+/**
+ * Practice: each mode's menu's eight items (by id), the values' names, the lines with an arrow
+ * (`d` and `u` where the arrows go), the menus' and the HUD's lines (`%d` where a number goes),
+ * and each character's combos (by moveset), each its inputs (a word each: the buttons in its low
+ * nibble, the direction in the next, its frames from bit 16, whether it is mirrored in bit 31).
+ */
+export interface PracticeTables {
+  readonly items: readonly (readonly number[])[];
+  readonly values: {
+    readonly onOff: readonly string[];
+    readonly okCancel: readonly string[];
+    readonly dummies: readonly string[];
+    readonly replays: readonly string[];
+    readonly difficulties: readonly string[];
+    readonly stages: readonly string[];
+    readonly numbers: readonly string[];
+  };
+  readonly arrows: readonly string[];
+  readonly lines: PracticeLines;
+  readonly combos: readonly (readonly (readonly number[])[])[];
+}
+
+/** Practice's lines. */
+export interface PracticeLines {
+  readonly modeSelect: string;
+  readonly modes: readonly string[];
+  readonly commandList: string;
+  readonly trainingDummy: string;
+  readonly counterAttacks: string;
+  readonly attackData: string;
+  readonly hitAnalysis: string;
+  readonly comboReplay: string;
+  readonly returnToModeSelect: string;
+  readonly vsCpu: string;
+  readonly cpuDifficulty: string;
+  readonly cpuLevel: string;
+  readonly comboPlayer: string;
+  readonly comboType: string;
+  readonly none: string;
+  readonly playSelect: string;
+  readonly playMark: string;
+  readonly startRecord: string;
+  readonly recording: string;
+  readonly playing: string;
+  readonly replaySelect: string;
+  readonly totalDamage: string;
+  readonly damage: string;
+  readonly counter: string;
+  readonly cleanHit: string;
+  readonly comboHits: string;
+  readonly comboDamage: string;
+  readonly title: string;
+}
+
+/**
+ * A Theater entry: its movie, the movie a second ending plays instead, its thumbnail, the endings
+ * (bits) that open it and how (0 any of them; 1 and 2 any, the second's movie once the second
+ * ending is seen; 3 the second endings' Tiger), its name (a digit for the four the endings name)
+ * and its one or two lines. A movie of -2 is an empty cell.
+ */
+export interface TheaterMovie {
+  readonly movie: number;
+  readonly alt: number;
+  readonly picture: number;
+  readonly bits: number;
+  readonly kind: number;
+  readonly name: string;
+  readonly lines: readonly string[];
+}
+
+/** A box the Theater draws: its place and size, its flags (1 shaded from its corners, 2 a bit of blue in its first), its border's bars' width and height (0 none), its corners' colours and its border's. */
+export interface TheaterBox {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+  readonly flags: number;
+  readonly across: number;
+  readonly down: number;
+  readonly corners: readonly number[];
+  readonly border: number;
+}
+
+/**
+ * The Theater's menu: the movies' grid, the songs (each its code: twice its song), the help
+ * lines, the titles by page (the movies, the remixed music, the arcade music), the line to play,
+ * the buttons' and the music sets' names, the name of an entry not yet open, the CANCEL line, the
+ * names the four shared entries show (the first ending's, the second's, both), the boxes (the
+ * background, the info panel, the grid's cursor).
+ */
+export interface TheaterTables {
+  readonly movies: readonly TheaterMovie[];
+  readonly songs: readonly { readonly code: number; readonly name: string }[];
+  readonly help: readonly string[];
+  readonly titles: readonly string[];
+  readonly play: string;
+  readonly buttons: { readonly disc: string; readonly music: string; readonly exit: string; readonly theater: string; readonly bgm: string };
+  readonly sets: readonly string[];
+  readonly unknown: string;
+  readonly cancel: readonly string[];
+  readonly endingNames: readonly (readonly string[])[];
+  readonly boxes: readonly TheaterBox[];
+}
+
+/** What an Options list's item changes: the page shown, one of the options, or nothing. */
+export type OptionValue = 'none' | 'page' | 'stereo' | 'musicSet' | 'difficulty' | 'rounds' | 'roundTime' | 'alwaysChip' | 'continueChooses' | 'modeSetting' | 'autoSave' | 'keepChoices';
+
+/**
+ * An item of an Options list: what it changes, its label and its values' names, how left and
+ * right change it (0 not at all, 1 through its values, 2 a switch whose turning on asks the
+ * memory card), how many values it has, what a button does (0 nothing, 1 and 2 set its value, 3
+ * opens a memory card screen), the value a button sets (or for left and right, the default), how
+ * its row is drawn (0 not, 1 the label, 2 with its value at the row's right), and the modes it
+ * applies to (a bit per mode).
+ */
+export interface OptionsItem {
+  readonly value: OptionValue;
+  readonly label: string;
+  readonly names: readonly string[];
+  readonly sideways: number;
+  readonly count: number;
+  readonly button: number;
+  readonly set: number;
+  readonly draw: number;
+  readonly modes: number;
+}
+
+/** A page of the Options: its title (empty none) and place, its list's place, its rows' step and width, the page select goes back to (-1 none), its items. */
+export interface OptionsPage {
+  readonly title: string;
+  readonly titleX: number;
+  readonly titleY: number;
+  readonly listX: number;
+  readonly listY: number;
+  readonly step: number;
+  readonly width: number;
+  readonly cancel: number;
+  readonly items: readonly OptionsItem[];
+}
+
+/** A button's box on the key configuration: its bit, its key (of a pad's eight), its table entry closed, its places closed and open, where its line starts closed and open (from the box), and its colour (blue, green, red). */
+export interface OptionsKey {
+  readonly bit: number;
+  readonly key: number;
+  readonly layer: number;
+  readonly closed: Point;
+  readonly open: Point;
+  readonly lineClosed: Point;
+  readonly lineOpen: Point;
+  readonly colour: number;
+}
+
+/**
+ * The Options: its pages; the modes' labels in the box of the modes an option applies to (each
+ * its mode and its colour); the key configuration's value names, vibration's, each button's box,
+ * the points on the pad's two pictures (the DualShock's, the standard pad's) its lines reach, the
+ * keys by default; and the pages' lines (those that change colour split where they do).
+ */
+export interface OptionsTables {
+  readonly pages: readonly OptionsPage[];
+  readonly labels: readonly { readonly mode: number; readonly colour: number }[];
+  readonly keyNames: readonly string[];
+  readonly vibrationNames: readonly string[];
+  readonly keys: readonly OptionsKey[];
+  readonly padPoints: readonly (readonly Point[])[];
+  readonly defaultKeys: readonly number[];
+  readonly lines: OptionsLines;
+}
+
+/** The Options' lines. */
+export interface OptionsLines {
+  readonly save: readonly string[];
+  readonly load: readonly string[];
+  readonly cancel: readonly string[];
+  readonly yes: readonly string[];
+  readonly no: readonly string[];
+  readonly saved: string;
+  readonly saveError: string;
+  readonly loaded: string;
+  readonly loadError: string;
+  readonly noCard: string;
+  readonly full: string;
+  readonly noFile: string;
+  readonly other: string;
+  readonly format: string;
+  readonly display: string;
+  readonly displayDefault: readonly string[];
+  readonly displayExit: readonly string[];
+  readonly keyConfig: string;
+  readonly setting: string;
+  readonly vibration: string;
+  readonly keyDefault: string;
+  readonly keyExit: string;
+  readonly records: string;
+  readonly page: string;
+  readonly next: readonly string[];
+  readonly exit: readonly string[];
+  readonly headers: readonly string[];
+  readonly titles: readonly string[];
+  readonly suffixes: readonly string[];
+  readonly win: string;
+  readonly wins: string;
+  readonly none: string;
+  readonly all: string;
 }
 
 /** A movie: its file, its frames' width and height, the frames it plays (from 1), its volume (of 127) and its flags. */

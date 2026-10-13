@@ -15,6 +15,10 @@ export const Shape = {
   GLOW: 6,
   FLAME: 7,
   BAR: 8,
+  FIRE_RING_THICK: 9,
+  FIRE_RING_THIN: 10,
+  FIRE_CURL: 11,
+  FIRE_SPIKES: 12,
 } as const;
 
 export const SHAPE_CELLS = [4, 4] as const;
@@ -58,6 +62,91 @@ function spike(g: Context, cx: number, cy: number, angle: number, length: number
   g.lineTo(cx + dy * width, cy - dx * width);
   g.closePath();
   g.fill();
+}
+
+/** A tongue of flame at a point, pointing along `angle`: a teardrop `length` long, `width` wide at its root, bright there. */
+function tongue(g: Context, x: number, y: number, angle: number, length: number, width: number, strength: number): void {
+  const dx = Math.cos(angle);
+  const dy = Math.sin(angle);
+  const gradient = g.createLinearGradient(x, y, x + dx * length, y + dy * length);
+  gradient.addColorStop(0, `rgba(255,255,255,${strength})`);
+  gradient.addColorStop(0.55, `rgba(255,255,255,${strength * 0.6})`);
+  gradient.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gradient;
+  g.beginPath();
+  g.moveTo(x + dx * length, y + dy * length);
+  g.quadraticCurveTo(x + dx * length * 0.4 - dy * width, y + dy * length * 0.4 + dx * width, x - dx * width * 0.6, y - dy * width * 0.6);
+  g.quadraticCurveTo(x + dx * length * 0.4 + dy * width, y + dy * length * 0.4 - dx * width, x + dx * length, y + dy * length);
+  g.fill();
+}
+
+/**
+ * A ring of fire, `inner` its hole's radius against the cell's: a band brightest along its middle,
+ * mottled as flame is, its rim ragged with small tongues licking outward, a clear hole inside.
+ */
+function fireRing(inner: number, seed: number): (g: Context, cx: number, cy: number, r: number) => void {
+  return (g, cx, cy, r) => {
+    const random = generator(seed);
+    const outer = 0.8;
+    const band = g.createRadialGradient(cx, cy, r * inner * 0.9, cx, cy, r * outer);
+    band.addColorStop(0, 'rgba(255,255,255,0)');
+    band.addColorStop(0.25, 'rgba(255,255,255,0.8)');
+    band.addColorStop(0.5, 'rgba(255,255,255,1)');
+    band.addColorStop(0.8, 'rgba(255,255,255,0.6)');
+    band.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = band;
+    g.beginPath();
+    g.arc(cx, cy, r * outer, 0, Math.PI * 2);
+    g.arc(cx, cy, r * inner * 0.9, 0, Math.PI * 2, true);
+    g.fill();
+    for (let i = 0; i < 46; i += 1) {
+      const a = random() * Math.PI * 2;
+      const d = r * (outer - 0.1 + random() * 0.08);
+      const length = r * (0.07 + random() * 0.15);
+      tongue(g, cx + Math.cos(a) * d, cy + Math.sin(a) * d, a + (random() - 0.5) * 0.9, length, length * 0.3, 0.45 + random() * 0.5);
+    }
+    /* The flame's mottle: soft holes taken out along the band. */
+    g.globalCompositeOperation = 'destination-out';
+    for (let i = 0; i < 70; i += 1) {
+      const a = random() * Math.PI * 2;
+      const d = r * (inner + (outer - inner) * (0.15 + random() * 0.7));
+      const gradient = g.createRadialGradient(cx + Math.cos(a) * d, cy + Math.sin(a) * d, 0, cx + Math.cos(a) * d, cy + Math.sin(a) * d, r * (0.025 + random() * 0.05));
+      gradient.addColorStop(0, `rgba(0,0,0,${0.25 + random() * 0.35})`);
+      gradient.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = gradient;
+      g.fillRect(cx - r, cy - r, r * 2, r * 2);
+    }
+    g.globalCompositeOperation = 'source-over';
+  };
+}
+
+/** A curling tendril of flame: from near the centre outward round a turn and a half, thinning to its tip. */
+function fireCurl(g: Context, cx: number, cy: number, r: number): void {
+  const steps = 90;
+  for (let i = 0; i < steps; i += 1) {
+    const s = i / steps;
+    const turn = s * Math.PI * 1.5;
+    const reach = r * (0.08 + 0.78 * s);
+    const x = cx + Math.cos(turn) * reach;
+    const y = cy + Math.sin(turn) * reach * 0.8;
+    softDot(g, x, y, r * (0.14 * (1 - s) ** 0.8 + 0.025), 0.55 * (1 - s * 0.6));
+  }
+}
+
+/** A burst of flame spikes off a small ring about a clear centre. */
+function fireSpikes(g: Context, cx: number, cy: number, r: number): void {
+  const random = generator(0x5b1e);
+  g.strokeStyle = 'rgba(255,255,255,0.9)';
+  g.lineWidth = r * 0.12;
+  g.beginPath();
+  g.arc(cx, cy, r * 0.24, 0, Math.PI * 2);
+  g.stroke();
+  for (let i = 0; i < 16; i += 1) {
+    const a = (i / 16) * Math.PI * 2 + (random() - 0.5) * 0.3;
+    const from = r * 0.24;
+    const length = r * (0.3 + random() * 0.45);
+    tongue(g, cx + Math.cos(a) * from, cy + Math.sin(a) * from, a + (random() - 0.5) * 0.5, length, r * (0.05 + random() * 0.05), 0.7 + random() * 0.3);
+  }
 }
 
 const painters: readonly ((g: Context, cx: number, cy: number, r: number) => void)[] = [
@@ -158,6 +247,11 @@ const painters: readonly ((g: Context, cx: number, cy: number, r: number) => voi
     g.fillRect(cx - r, cy - r, r * 2, r * 2);
     g.globalCompositeOperation = 'source-over';
   },
+  /* A ring of fire about a small hole, and one about a wide hole. */
+  fireRing(0.32, 0xf12e),
+  fireRing(0.6, 0xf13e),
+  fireCurl,
+  fireSpikes,
 ];
 
 /** The shapes' sheet, `cell` pixels a cell. */

@@ -7,6 +7,7 @@
  */
 import { blankFightState } from '../fight/blank.ts';
 import type { FightState } from '../fight/state.ts';
+import type { Progress } from './save.ts';
 
 /** The game's scenes, as it numbers them. */
 export const Scene = {
@@ -22,6 +23,10 @@ export const Scene = {
   SELECT: 9,
   VS_SELECT: 10,
   VERSUS: 0xb,
+  TEAM_RESULTS: 0xc,
+  TIME_RESULTS: 0xd,
+  SURVIVAL_RESULTS: 0xe,
+  FORCE_RESULTS: 0xf,
   RECORDS_LOADER: 0x10,
   RECORDS: 0x11,
   OVERLAY_LOADER: 0x12,
@@ -103,7 +108,7 @@ export interface Sparkle {
 }
 
 /**
- * A side of the versus select: its state, its cursor's column and row, its cursor's, name's and
+ * A side of the versus select: its state, whether a kick chose its team's size, its cursor's column and row, its cursor's, name's and
  * slot's kinds, the characters it may still choose (roster bits), how many it chooses and has
  * chosen, its choices (codes, 0x58 none), its handicap and its gauge's place and where that is
  * going, its last choice, its choice as two are kept apart (with whether it counts as chosen and as
@@ -111,6 +116,7 @@ export interface Sparkle {
  */
 export interface VsSelectSide {
   state: number;
+  kick: number;
   column: number;
   row: number;
   cursor: number;
@@ -141,7 +147,200 @@ export type VersusRecord =
   | { readonly kind: 'band'; readonly colour: number; readonly width: number; readonly y: number }
   | { readonly kind: 'portrait'; readonly side: number; readonly code: number; readonly colour: number; readonly flipped: number; readonly x: number; readonly y: number; readonly slideX: number; readonly slideY: number }
   | { readonly kind: 'text'; readonly text: string; readonly colour: number; readonly font: number; readonly x: number; readonly y: number }
-  | { readonly kind: 'name'; readonly text: string; readonly colour: number; readonly font: number; readonly x: number; readonly y: number; readonly slideX: number; readonly slideY: number };
+  | { readonly kind: 'name'; readonly text: string; readonly colour: number; readonly font: number; readonly x: number; readonly y: number; readonly slideX: number; readonly slideY: number }
+  /** A team member's icon (dimmed once beaten), sliding in; the box behind a team's icons; the light behind the teams' rows. */
+  | { readonly kind: 'teamIcon'; readonly code: number; readonly beaten: boolean; readonly x: number; readonly y: number; readonly slideX: number; readonly slideY: number }
+  | { readonly kind: 'teamBox'; readonly x: number; readonly y: number; readonly w: number; readonly h: number }
+  | { readonly kind: 'teamLight' };
+
+/**
+ * What a scene drew besides the printer's runs (the Options and the Theater's menu), each in its
+ * table entry (`layer`, 0 drawn first) and after the runs printed before it (`at`, their count
+ * then): within an entry what was drawn later lies under what was drawn before. A rectangle of
+ * colour (0xBBGGRR); a rectangle shaded from its corners' colours (top left, top right, bottom
+ * left, bottom right); a pad's button (by its bit: the four buttons the game shows as pictures);
+ * the Options' mode label (in its colour or greyed), pad picture, STEP arrow (in a printer
+ * colour) and a button box's pointer (a line from its start to a point on the pad, with a sliver
+ * of a triangle along it); the Theater's thumbnail (by its picture), its film frame, and its other
+ * pictures; Practice's hit markers and input icons.
+ */
+export type SceneDraw =
+  | { readonly kind: 'tile'; readonly x: number; readonly y: number; readonly w: number; readonly h: number; readonly colour: number; readonly layer: number; readonly at: number }
+  | { readonly kind: 'shade'; readonly x: number; readonly y: number; readonly w: number; readonly h: number; readonly colours: readonly [number, number, number, number]; readonly layer: number; readonly at: number }
+  | { readonly kind: 'button'; readonly bit: number; readonly x: number; readonly y: number; readonly layer: number; readonly at: number }
+  | { readonly kind: 'label'; readonly label: number; readonly grey: boolean; readonly x: number; readonly y: number; readonly layer: number; readonly at: number }
+  | { readonly kind: 'pad'; readonly x: number; readonly y: number; readonly dualShock: boolean; readonly layer: number; readonly at: number }
+  | { readonly kind: 'arrow'; readonly x: number; readonly y: number; readonly down: boolean; readonly colour: number; readonly layer: number; readonly at: number }
+  | { readonly kind: 'pointer'; readonly x: number; readonly y: number; readonly toX: number; readonly toY: number; readonly colour: number; readonly layer: number; readonly at: number }
+  | { readonly kind: 'thumb'; readonly picture: number; readonly x: number; readonly y: number; readonly layer: number; readonly at: number }
+  | { readonly kind: 'film'; readonly x: number; readonly y: number; readonly layer: number; readonly at: number }
+  | { readonly kind: 'picture'; readonly picture: 'cover' | 'caption' | 'disc'; readonly x: number; readonly y: number; readonly layer: number; readonly at: number }
+  /** Practice's hit marker (0 HIGH, 1 MID, 2 LOW, 3 the ! of an unblockable) about where a hit landed; an input display's icon (a direction, or a set of buttons), lit (0) or dim (3; a set's base 1 light, 0 dark). */
+  | { readonly kind: 'marker'; readonly marker: number; readonly x: number; readonly y: number; readonly layer: number; readonly at: number }
+  | { readonly kind: 'input'; readonly pad: number; readonly lit: number; readonly x: number; readonly y: number; readonly layer: number; readonly at: number };
+
+/**
+ * A side of the key configuration, its pad's: the item its cursor is on (0 the setting, 1
+ * vibration, 2 the default, 3 the way out), whether a button was newly pressed on its pad since
+ * the page opened, whether it is busy this frame (a box open or moving, a button held, a press
+ * taken), its pad's type (9 a DualShock), the buttons held and repeating that the setting reads,
+ * the values its keys use (bits), and each button's box: its state (0 closed, 1 opening, 2 open,
+ * 3 closing) and how far open (of 8).
+ */
+export interface KeySide {
+  cursor: number;
+  active: number;
+  busy: number;
+  type: number;
+  held: number;
+  repeats: number;
+  used: number;
+  readonly boxes: { state: number; grow: number }[];
+}
+
+/**
+ * Practice's record of the damage a fighter took: its total, the combo's damage (and as shown),
+ * the last hit's damage before and after scaling, how long the combo's count shows, the frames
+ * since a hit, the combo's hits (new this frame, ended this frame, last frame's; for the combo
+ * replay, last frame's and ended), whether the last hit was a counter hit or clean, the throw
+ * hold seen, the hits shown, and whether the attacker's move and the one before keep a combo going.
+ */
+export interface DamageRecord {
+  total: number;
+  combo: number;
+  comboShown: number;
+  raw: number;
+  dealt: number;
+  timer: number;
+  frames: number;
+  hits: number;
+  newHits: number;
+  endedHits: number;
+  lastHits: number;
+  hitsSeen: number;
+  hitsEnded: number;
+  counter: number;
+  clean: number;
+  hold: number;
+  shownHits: number;
+  flag: number;
+  lastFlag: number;
+}
+
+/**
+ * Practice (`practice.ts`): the human's pad as read this frame (held, newly pressed, repeating,
+ * and through its mapping held and pressed), the guide's presses, the frames since the last combo
+ * replay and the combo's length, each moveset slot's damage record, the hit markers (level,
+ * frames left, screen place) and the newest, whether MODE SELECT shows, the frames the start
+ * ignores the pad, the mode (0 1P FREESTYLE, 1 VS CPU, 2 COMBO TRAINING) and each one's cursor,
+ * the combo player and type, the training dummy, the computer's difficulty and stage, how the
+ * partner is played (0 a pad, 1 the dummy, 2 the computer), the combo replay, the session's
+ * step, the options (hit analysis, attack data, counter attacks), the sides, whether the session
+ * runs, whether each moveset slot can act, the pause now and last frame, the command lists shown,
+ * the input display and its guide and look and wait, whether line 0 reads CANCEL, a playback
+ * asked again, the frames the menu waits, whether each moveset slot is attacking, whether the
+ * pause keys the voices off; and the input recorder: its 50 entries, the entry played and its
+ * copy running down, and per side the newest entry and its idle count.
+ */
+export interface PracticeState {
+  readonly pad: { raw: number; fresh: number; repeats: number; held: number; pressed: number };
+  guidePressed: number;
+  guideLast: number;
+  sinceReplay: number;
+  sinceCombo: number;
+  readonly records: DamageRecord[];
+  readonly markers: { level: number; timer: number; x: number; y: number }[];
+  markerAt: number;
+  modeSelect: number;
+  startWait: number;
+  mode: number;
+  readonly cursor: number[];
+  player: number;
+  comboType: number;
+  dummy: number;
+  cpuDifficulty: number;
+  cpuLevel: number;
+  partnerKind: number;
+  comboReplay: number;
+  step: number;
+  hitAnalysis: number;
+  humanSide: number;
+  partnerSide: number;
+  session: number;
+  readonly canAct: number[];
+  paused: number;
+  wasPaused: number;
+  attackData: number;
+  counterAttacks: number;
+  commandList: number;
+  inputShown: number;
+  guide: number;
+  look: number;
+  lookWait: number;
+  cancelLabel: number;
+  playAgain: number;
+  menuWait: number;
+  readonly attacking: number[];
+  keyOffOnPause: number;
+  readonly recorder: { readonly entries: number[]; playIndex: number; cursor: number; readonly last: number[]; readonly idle: number[] };
+}
+
+const blankDamage = (): DamageRecord => ({ total: 0, combo: 0, comboShown: 0, raw: 0, dealt: 0, timer: 0, frames: 0, hits: 0, newHits: 0, endedHits: 0, lastHits: 0, hitsSeen: 0, hitsEnded: 0, counter: 0, clean: 0, hold: 0, shownHits: 0, flag: 0, lastFlag: 0 });
+
+/** Practice as its overlay loads. */
+export function blankPractice(): PracticeState {
+  return {
+    pad: { raw: 0, fresh: 0, repeats: 0, held: 0, pressed: 0 },
+    guidePressed: 0,
+    guideLast: 0,
+    sinceReplay: 0,
+    sinceCombo: 0,
+    records: [blankDamage(), blankDamage()],
+    markers: Array.from({ length: 4 }, () => ({ level: 0, timer: 0, x: 0, y: 0 })),
+    markerAt: 0,
+    modeSelect: 0,
+    startWait: 0,
+    mode: 0,
+    cursor: [0, 0, 0],
+    player: 0,
+    comboType: 0,
+    dummy: 0,
+    cpuDifficulty: 0,
+    cpuLevel: 0,
+    partnerKind: 0,
+    comboReplay: 0,
+    step: 0,
+    hitAnalysis: 0,
+    humanSide: 0,
+    partnerSide: 0,
+    session: 0,
+    canAct: [0, 0],
+    paused: 0,
+    wasPaused: 0,
+    attackData: 0,
+    counterAttacks: 0,
+    commandList: 0,
+    inputShown: 0,
+    guide: 0,
+    look: 0,
+    lookWait: 0,
+    cancelLabel: 0,
+    playAgain: 0,
+    menuWait: 0,
+    attacking: [0, 0],
+    keyOffOnPause: 0,
+    recorder: { entries: new Array<number>(50).fill(0), playIndex: 0, cursor: 0, last: [0, 0], idle: [0, 0] },
+  };
+}
+
+/** A motor's channel of a pad's vibration: the pattern it plays, its step (-1 none) and the fields into it, whether it played this field and what. */
+export interface MotorTrack {
+  pattern: number;
+  step: number;
+  count: number;
+  active: number;
+  value: number;
+}
 
 /** A fade over the picture from a table entry on: below 0x100 toward black (0 black), above toward white (0x1ff white). */
 export interface Fade {
@@ -277,15 +476,21 @@ export interface GameState {
   count: number;
   /** Whether the picture is held as last drawn. */
   held: number;
-  /** The second random generator, stepped every field. */
-  noise: number;
   /** The mode overlay in memory (none 0xff). */
   modeOverlay: number;
   readonly pads: GamePads;
-  /** Whether each pad's motor runs (the option, or off), for the presentation's vibration. */
+  /** Whether each pad's motor runs (the option, or off). */
   readonly motors: number[];
-  /** What the printer drew this field, in order. */
+  /**
+   * The pads' vibration (`rumble.ts`): each pad's small and large motor on each of four channels,
+   * whether every channel is to be emptied at the next field, the fields counted (the small
+   * motor's turning), and what each pad feels this field (its small motor on or off, its large
+   * motor's strength of 255).
+   */
+  readonly rumble: { readonly tracks: MotorTrack[]; empty: number; clock: number; readonly out: number[][] };
+  /** What the printer drew this field, in order, and what else the scene drew among it. */
   readonly printed: PrintRun[];
+  readonly drawn: SceneDraw[];
   /** The fades drawn this field. */
   readonly fades: Fade[];
   /** The logo scene's picture: what it shows (0 fading in, 1 shown, 2 black, 3 nothing) and the fade's level. */
@@ -306,7 +511,18 @@ export interface GameState {
    * reading the pads, `theater.ts`).
    */
   readonly credits: CreditsState;
-  readonly theater: { mode: number; movie: number; playing: number };
+  readonly theater: {
+    mode: number;
+    movie: number;
+    playing: number;
+    /** The menu's: the song chosen (its code: twice the song, one more for the arcade's), the cursor in the page's list, its first row (or entry) shown, what has the focus (0 the list, 1 EXIT, 2 MUSIC or THEATER, 4 BGM SELECT), whether every entry is open, the frames no button is held. */
+    song: number;
+    cursor: number;
+    scroll: number;
+    focus: number;
+    allSeen: number;
+    idle: number;
+  };
   /** The options as set (`PowerOn`'s), each pad's key configuration, and how far Tekken Ball and the Theater are earned. */
   readonly options: {
     difficulty: number;
@@ -319,8 +535,33 @@ export interface GameState {
     keepChoices: number;
     modeSetting: number;
     readonly keys: number[][];
+    /** The music's set (0 the arrangement's, 1 the arcade's, 2 silent in the matches' scenes) and whether it plays in stereo. */
+    musicSet: number;
+    stereo: number;
+    /** The hidden switch the key configuration's L2, R2 and select turn (the Options' titles in another colour). */
+    otherTitle: number;
+    /** Whether the progress is saved on its own as records change, and the display's place (its steps across and down). */
+    autoSave: number;
+    readonly display: { x: number; y: number };
   };
   readonly earned: { ball: number; theater: number };
+  /** The progress as last saved, which a load brings back (null: none saved), as the memory card holds it. */
+  kept: Progress | null;
+  practice: PracticeState;
+  /**
+   * The Options (scene 5): the page shown, each page's cursor and screen (a memory card screen, or
+   * the records' first frame), the modes' labels the box lists, the memory card's answer, the key
+   * configuration's two sides, and the records' lists (the one shown, all plays, each list's first
+   * row shown, its rows and their order).
+   */
+  readonly optionsScreen: {
+    page: number;
+    readonly pages: { cursor: number; sub: number }[];
+    readonly labels: number[];
+    card: number;
+    readonly sides: KeySide[];
+    readonly records: { list: number; total: number; readonly lists: { first: number; count: number; readonly order: number[] }[] };
+  };
   /**
    * The mode menu: its entries this visit and their count, the one picked (kept between visits),
    * whether to open on the options, the list's scroll easing to its place, the bar's brightness,
@@ -347,7 +588,7 @@ export interface GameState {
    * survival's ten best, with the row of each a run just set (-1 none); the ranking the records
    * screen shows next, the stage it circles next, whether a new record waits for its name (bit 0
    * a time, bit 1 survival's) and the side that set it and its character; which of the demo's
-   * characters fought it last.
+   * characters fought it last; Tekken Force's best score and the keys held.
    */
   readonly records: {
     earnedRoster: number;
@@ -369,6 +610,8 @@ export interface GameState {
     scheduleStep: number;
     scheduleStarted: number;
     changed: number;
+    forceBest: number;
+    forceKeys: number;
   };
   /**
    * The character select: the mode it chooses for, whether a second row shows, its frame count,
@@ -395,8 +638,43 @@ export interface GameState {
   /** The versus screen: the frames its slide has to go, and what it draws. */
   readonly versus: { countdown: number; readonly records: VersusRecord[] };
   /**
+   * The results after a run: its frames, its fade, how many rows show and how far the next has
+   * counted up (of 16), a wait, whether the total shows, the total, whether it is a new record, the
+   * side and character that ran, and the line said after the runner's own (its step and wait);
+   * for Survival, the characters beaten (the most beaten first), how many, the run's rank, and its
+   * backdrop's scrolls (the game's name's and the tournament line's); for Team Battle, each bout's
+   * member of each side, each side's members left and beaten so far as shown; for Tekken Force,
+   * the fields shown, the bosses' row's own count, the FORCE count's state (0 waiting, 1 counting,
+   * 2 done) and its count, and the portrait's light colour and whether it is flipped.
+   */
+  readonly results: {
+    readonly boutMembers: number[][];
+    readonly left: number[];
+    readonly beatenSoFar: number[];
+    readonly beaten: number[];
+    beatenCount: number;
+    rank: number;
+    strip: number;
+    scroll: number;
+    frames: number;
+    fade: number;
+    shown: number;
+    counting: number;
+    wait: number;
+    showTotal: number;
+    total: number;
+    newRecord: number;
+    side: number;
+    code: number;
+    line: number;
+    lineWait: number;
+    readonly force: { shown: number; bosses: number; countState: number; count: number; colour: number; flipped: number };
+  };
+  /**
    * The versus select: the mode it chooses for, the frames no pad has been touched, whether it is
-   * fading in and how far, the strip's and the tournament line's scroll, the two sides.
+   * fading in and how far, the strip's and the tournament line's scroll, the two sides; and Tekken
+   * Ball's ball being chosen: where it is across and where it slides to, which way it last went
+   * (-1 left, 1 right), its turns, and whether the arrows beside it show this field.
    */
   readonly vsSelect: {
     mode: number;
@@ -406,6 +684,7 @@ export interface GameState {
     strip: number;
     line: number;
     readonly sides: VsSelectSide[];
+    readonly ball: { x: number; target: number; direction: number; yaw: number; pitch: number; roll: number; arrows: number };
   };
   /**
    * The records screen: what it draws (0 black, 1 the title's bar, 2 with the list, 3 the name
@@ -496,6 +775,12 @@ export interface GameState {
     readonly versusStage: { code: number; first: number; second: number };
     /** Versus mode's wins by side and its draws, since it was chosen. */
     readonly versusRecord: { readonly wins: number[]; draws: number };
+    /** Team Battle: each bout's winner (1 or 2, 3 a draw), the bout under way, and how often each character was drawn into a team (the teams are the match's). */
+    readonly team: { readonly bouts: number[]; bout: number; readonly uses: number[] };
+    /** Survival's next opponent (its code), its last four opponents (0x16 none) and where the next goes among them, and how often each character was beaten. */
+    readonly survival: { opponent: number; recentAt: number; readonly recent: number[]; readonly beaten: number[] };
+    /** Tekken Ball: who chooses the ball (0 nobody yet, 1 << side as that side starts, 3 once the choice runs), and how often each character was drawn as the computer's opponent. */
+    readonly ball: { choosing: number; readonly met: number[] };
     /** The stage and song chosen for the match; Arcade's ten opponents. */
     stageChosen: number;
     songChosen: number;
@@ -522,11 +807,12 @@ export function blankGameState(): GameState {
     attract: { step: 0, intro: 0, intros: 0 },
     count: 0,
     held: 0,
-    noise: 0,
     modeOverlay: 0,
     pads: { maps: [identity(), identity()], repeats: [0, 0], counts: [new Array<number>(PAD_BITS).fill(0), new Array<number>(PAD_BITS).fill(0)] },
     motors: [0, 0],
+    rumble: { tracks: Array.from({ length: 16 }, () => ({ pattern: 0, step: -1, count: 0, active: 0, value: 0 })), empty: 0, clock: 0, out: [[0, 0], [0, 0]] },
     printed: [],
+    drawn: [],
     fades: [],
     logo: { shows: 3, level: 0 },
     title: { shows: 0, movie: 0, movieKind: 0 },
@@ -582,9 +868,35 @@ export function blankGameState(): GameState {
       kind: 0,
       drawn: [],
     },
-    theater: { mode: 0, movie: 0, playing: 0 },
-    options: { difficulty: 0, rounds: 0, roundTime: 0, alwaysChip: 0, continueChooses: 0, vibration: [0, 0], lastChoices: [0, 0], keepChoices: 0, modeSetting: 0, keys: [new Array<number>(8).fill(0), new Array<number>(8).fill(0)] },
+    theater: { mode: 0, movie: 0, playing: 0, song: 0, cursor: 0, scroll: 0, focus: 0, allSeen: 0, idle: 0 },
+    options: {
+      difficulty: 0,
+      rounds: 0,
+      roundTime: 0,
+      alwaysChip: 0,
+      continueChooses: 0,
+      vibration: [0, 0],
+      lastChoices: [0, 0],
+      keepChoices: 0,
+      modeSetting: 0,
+      keys: [new Array<number>(8).fill(0), new Array<number>(8).fill(0)],
+      musicSet: 0,
+      stereo: 0,
+      otherTitle: 0,
+      autoSave: 0,
+      display: { x: 0, y: 0 },
+    },
     earned: { ball: 0, theater: 0 },
+    kept: null,
+    practice: blankPractice(),
+    optionsScreen: {
+      page: 0,
+      pages: Array.from({ length: 6 }, () => ({ cursor: 0, sub: 0 })),
+      labels: [],
+      card: 0,
+      sides: [0, 1].map(() => ({ cursor: 0, active: 0, busy: 0, type: 0, held: 0, repeats: 0, used: 0, boxes: Array.from({ length: 8 }, () => ({ state: 0, grow: 0 })) })),
+      records: { list: 0, total: 0, lists: Array.from({ length: 4 }, () => ({ first: 0, count: 0, order: new Array<number>(22).fill(0) })) },
+    },
     menu: { items: [], count: 0, picked: 0, toOptions: 0, scroll: 0, bar: 0, chosen: 0, choosers: 0 },
     entrants: { roster: [0, 0], costume: [0, 0], computer: [0, 0], chosen: [0, 0] },
     records: {
@@ -607,6 +919,8 @@ export function blankGameState(): GameState {
       scheduleStep: 0,
       scheduleStarted: 0,
       changed: 0,
+      forceBest: 0,
+      forceKeys: 0,
     },
     select: {
       mode: 0,
@@ -640,6 +954,11 @@ export function blankGameState(): GameState {
     versusPortraits: [0, 0],
     versusBackground: 0,
     versus: { countdown: 0, records: [] },
+    results: {
+      boutMembers: [new Array<number>(16).fill(0), new Array<number>(16).fill(0)],
+      left: [0, 0],
+      beatenSoFar: [0, 0],
+      beaten: new Array<number>(22).fill(0), beatenCount: 0, rank: 0, strip: 0, scroll: 0, frames: 0, fade: 0, shown: 0, counting: 0, wait: 0, showTotal: 0, total: 0, newRecord: 0, side: 0, code: 0, line: 0, lineWait: 0, force: { shown: 0, bosses: 0, countState: 0, count: 0, colour: 0, flipped: 0 } },
     vsSelect: {
       mode: 0,
       idle: 0,
@@ -649,6 +968,7 @@ export function blankGameState(): GameState {
       line: 0,
       sides: Array.from({ length: 2 }, () => ({
         state: 0,
+        kick: 0,
         column: 0,
         row: 0,
         cursor: 0,
@@ -665,6 +985,7 @@ export function blankGameState(): GameState {
         apart: { roster: 0, costume: 0, chosen: 0, human: 0 },
         bar: { x: 0, y: 0, width: 0, costume: 0 },
       })),
+      ball: { x: 0, target: 0, direction: 0, yaw: 0, pitch: 0, roll: 0, arrows: 0 },
     },
     recordsScreen: {
       draws: 0,
@@ -728,6 +1049,9 @@ export function blankGameState(): GameState {
       ending: { side: 0, code: 0 },
       versusStage: { code: 0, first: 0, second: 0 },
       versusRecord: { wins: [0, 0], draws: 0 },
+      team: { bouts: new Array<number>(16).fill(0), bout: 0, uses: new Array<number>(22).fill(0) },
+      survival: { opponent: 0, recentAt: 0, recent: [0, 0, 0, 0], beaten: new Array<number>(22).fill(0) },
+      ball: { choosing: 0, met: new Array<number>(22).fill(0) },
       stageChosen: 0,
       songChosen: 0,
       opponents: Array.from({ length: 10 }, () => ({ roster: 0, costume: 0, round: 0 })),

@@ -7,6 +7,7 @@ import { createRenderer, describeGpu, ResolutionGovernor, startLoop, type Render
 import { entryLevelGpu, fightQuality, isQuality, type Quality } from '../present/3d/quality.ts';
 import { FrameStats } from './frame-stats.ts';
 import { PadInput } from './input.ts';
+import { CONSOLE_PADS, type Controllers } from '../present/2d/controls.ts';
 import { evenFrames } from './pacing.ts';
 import { tellWith } from './remote-log.ts';
 import { onPhone, TouchPad, wantsTouch } from './touch.ts';
@@ -142,9 +143,19 @@ const SLOW_SHARE = 0.5;
  * drew the same picture again (every other frame at 120 Hz, the whole 3D frame and the 2D over it).
  */
 const MOST_FIELDS = 2;
+/** The pads read while the game plays. */
+let pads: PadInput | null = null;
+
+/** Each player's controller as it last played (a PlayStation pad's until the game plays). */
+export function controllers(): Controllers {
+  return pads?.controllers() ?? CONSOLE_PADS;
+}
+
 export function play(player: Player, renderer: RendererApi, backend: string): void {
   const input = new PadInput(window);
+  pads = input;
   const touch = wantsTouch(params) ? new TouchPad() : null;
+  if (touch !== null) input.uses(0, 'touch');
   const veryLow = quality === 'verylow';
   const budget = Number(params.get('budget') ?? (veryLow ? 2 * BUDGET_MS : BUDGET_MS));
   const governor = budget > 0 ? new ResolutionGovernor(1, { budgetMs: budget, minScale: LEAST_SCALE }) : null;
@@ -184,7 +195,9 @@ export function play(player: Player, renderer: RendererApi, backend: string): vo
         if (failure !== null || stopAt <= fields) return;
         try {
           const start = performance.now();
-          if (player.field([input.word(0) | (touch?.word() ?? 0), input.word(1)]) !== false) {
+          const touched = touch?.word() ?? 0;
+          if (touched !== 0) input.uses(0, 'touch');
+          if (player.field([input.word(0) | touched, input.word(1)]) !== false) {
             fields += 1;
             stats.field(start);
           }

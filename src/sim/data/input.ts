@@ -11,4 +11,18 @@ export interface InputTables {
   readonly sequencesB: readonly (readonly number[])[];
   readonly dashForward: readonly number[];
   readonly dashBack: readonly number[];
+  readonly vibration: VibrationTables;
+}
+
+/**
+ * The pads' vibration patterns: each one's channel (of four; past them it never starts), its
+ * small motor's and its large motor's steps (each its level in bits 8 to 11, its fields in the low
+ * byte, a 1 in the top nibble where another follows; a first step with nothing there leaves that
+ * motor as it was), and the small motor's turning by level (a bit for each field of eight).
+ */
+export interface VibrationTables {
+  readonly channels: readonly number[];
+  readonly small: readonly (readonly number[])[];
+  readonly large: readonly (readonly number[])[];
+  readonly duty: readonly number[];
 }

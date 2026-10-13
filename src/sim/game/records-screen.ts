@@ -22,7 +22,8 @@ import { groundFadeOf, type FightTables } from '../fight/match.ts';
 import { fadeMusic, playSong, stopSounds, voiceLine } from '../fight/voices.ts';
 import { cosine, sine } from '../math/angles.ts';
 import { goToLogo, goToScene, holdPicture, queueFile, startPressed } from './logo.ts';
-import { MenuMode, stopMotors } from './menu.ts';
+import { MenuMode } from './menu.ts';
+import { stopMotors } from './rumble.ts';
 import { NameResult, NameStep, startNameEntry, stepNameEntry } from './name-entry.ts';
 import { print } from './printer.ts';
 import { earn, HIDDEN, Naming, playCount, recordsChanged, saveRecords, sortPairs } from './records.ts';
@@ -139,7 +140,7 @@ function circleStage(game: GameState, tables: FightTables): void {
 }
 
 /** A part of a whole in tenths of a percent (1000 when the part is larger), both halved past 22 bits. */
-function share(part: number, whole: number): number {
+export function share(part: number, whole: number): number {
   part >>>= 0;
   whole >>>= 0;
   if (whole < part) return 1000;

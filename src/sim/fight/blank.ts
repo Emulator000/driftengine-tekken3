@@ -4,7 +4,7 @@
  * starts from it (`fight.ts`).
  */
 import { newMusic } from '../sound/music.ts';
-import type { FightState, Fighter } from './state.ts';
+import type { BallState, FightState, Fighter, ForceState } from './state.ts';
 
 /** A fighter's record, blank. */
 export function blankFighter(): Fighter {
@@ -348,6 +348,7 @@ export function blankFightState(): FightState {
         origin: new Array<number>(3).fill(0),
       },
       replay: {
+        ball: Array.from({ length: 30 }, () => ({ position: [0, 0, 0, 0], spin: [0, 0], look: 0, timer: 0, stretchAngles: [0, 0, 0, 0], stretch: 0 })),
         knockoutStart: 0,
         sounds: Array.from({ length: 300 }, () => ({
           code: 0,
@@ -413,6 +414,7 @@ export function blankFightState(): FightState {
       sceneryAtOrigin: 0,
       shake: null,
       frameSeed: 0,
+      noise: 0,
       sound: {
         commands: [],
         fighterBanks: new Array<number>(2).fill(0),
@@ -441,6 +443,9 @@ export function blankFightState(): FightState {
         back: 0,
         timerShown: 0,
         marksLit: Array.from({ length: 2 }, () => ([])),
+        teamMarks: Array.from({ length: 2 }, () => ([])),
+        forceBars: Array.from({ length: 3 }, () => ({ seen: 0, target: 0, shown: 0, trail: 0 })),
+        forceNames: new Array<number>(3).fill(0),
         shown: 0,
         marksShown: new Array<number>(2).fill(0),
         streakSide: 0,
@@ -461,6 +466,7 @@ export function blankFightState(): FightState {
           place: 0,
           offset: 0,
         })),
+        sides: 0,
       },
       attractIntro: 0,
       lastHandSteps: new Array<number>(2).fill(0),
@@ -502,6 +508,7 @@ export function blankFightState(): FightState {
       computer: {
         records: Array.from({ length: 2 }, () => ({
           index: 0,
+          pacing: null,
           steps: 0,
           pad: 0,
           lastPad: 0,
@@ -609,7 +616,14 @@ export function blankFightState(): FightState {
         halfRate: 0,
         difficulty: 0,
         arcadeStage: 0,
+        lastSelf: 1,
+        lastOpponent: 0,
+        forceWait: new Array<number>(2).fill(0),
+        forceHold: new Array<number>(2).fill(0),
       },
+      practice: { starting: 0, counters: [0, 0, 0], colours: [[0, 0, 0, 0], [0, 0, 0, 0]], heldPad: [0, 0] },
+      ball: blankBall(),
+      force: blankForce(),
       camera: {
         drawn: {
           pitch: 0,
@@ -647,6 +661,7 @@ export function blankFightState(): FightState {
         state: 0,
         attractStarted: 0,
         intro: { set: 0, next: 0, left: 0 },
+        force: { x: 0, y: 0, z: 0, pitch: 0, yaw: 0, screen: 0, pitchTarget: 0, xTarget: 0, mode: 0, rightEdge: 0, leftEdge: 0, min: 0, max: 0, origin: 0 },
         following: 0,
         opening: {
           left: 0,
@@ -907,6 +922,11 @@ export function blankFightState(): FightState {
         roundsToWin: 0,
         streak: 0,
         trueOgres: 0,
+        survivalRank: 0,
+        survivalWins: 0,
+        teams: Array.from({ length: 2 }, () => ({ members: new Array<number>(8).fill(0), current: 0, next: 0, chosen: 0, kick: 0, size: 0 })),
+        ball: { replaysShown: 0, replaysWanted: 0, server: 0, kind: 0 },
+        force: { score: 0, kills: 0, side: 0, newRecord: 0, flags: 0, bosses: new Array<number>(4).fill(0x58) },
       },
       input: {
         fresh: new Array<number>(2).fill(0),
@@ -922,6 +942,7 @@ export function blankFightState(): FightState {
           pressed: new Array<number>(2).fill(0),
         },
         rawPads: new Array<number>(2).fill(0),
+        lastRecorded: new Array<number>(2).fill(0),
       },
       humans: 0,
       joined: new Array<number>(2).fill(0),
@@ -939,5 +960,104 @@ export function blankFightState(): FightState {
         })),
       },
     }),
+  };
+}
+
+/** Tekken Ball's ball as its overlay loads (the backdrop's last phase starts at 1). */
+export function blankBall(): BallState {
+  const three = (): number[] => [0, 0, 0];
+  return {
+    state: 0,
+    timer: 0,
+    position: three(),
+    w: 0,
+    velocity: three(),
+    accel: three(),
+    spin: three(),
+    spinRate: three(),
+    speed: 0,
+    heading: 0,
+    homing: 0,
+    sphere: { centre: three(), radius: 0, square: 0 },
+    cooldown: 0,
+    stretchHeld: 0,
+    segments: Array.from({ length: 4 }, () => ({ from: three(), to: three() })),
+    lastHitter: 0,
+    target: 1,
+    spikeTarget: 1,
+    charge: [0, 0],
+    power: 0,
+    spikeSpeed: 0,
+    combo: 0,
+    chained: 0,
+    look: 0,
+    stretchAngles: three(),
+    stretchPad: 0,
+    stretch: 0,
+    lift: 0,
+    unit: 0,
+    gravity: 0,
+    strip: 0,
+    percent: 0,
+    stall: 0,
+    touchSoundWait: 0,
+    shoves: [0, 1].map(() => ({ angle: 0, speed: 0, first: 0, last: 0, cancelFrame: 0 })),
+    pointAgainst: 0,
+    struck: 0,
+    glows: 0,
+    popups: Array.from({ length: 8 }, () => ({ text: '', x: 0, y: 0, colour: 0, font: 0, life: 0, inUse: 0 })),
+    popupNext: 0,
+    popupList: [],
+    gauges: [0, 1].map(() => ({ last: 0, target: 0, shown: 0, trail: 0 })),
+    gaugeLit: 0,
+    beams: Array.from({ length: 4 }, () => ({ x1: 0, x2: 0 })),
+    backdrop: { lastPhase: 1, refYaw: 0 },
+  };
+}
+
+/** Tekken Force's stage before the mode first sets it up. */
+export function blankForce(): ForceState {
+  return {
+    state: 0,
+    count: 0,
+    cameraMode: 0,
+    slots: Array.from({ length: 2 }, () => ({ state: 0, wait: 0, kind: 0, loadedType: 0, wantedType: 0, textX: 0, textY: 0, textUntil: 0 })),
+    script: 0,
+    downSinceWait: 0,
+    waitFor: 0,
+    waves: 0,
+    waveUntil: 0,
+    waveAt: 0,
+    bossTimer: 0,
+    bossFrames: 0,
+    bonusFrames: 0,
+    clearBonus: 0,
+    drawnFrames: 0,
+    frames: 0,
+    keysShown: 0,
+    pad: 0,
+    skippable: 0,
+    startX: 0,
+    bossPhase: 0,
+    score: 0,
+    best: 0,
+    finalStage: 0,
+    challenge: 0,
+    keyWon: 0,
+    keyToSave: 0,
+    drEarned: 0,
+    stage: 0,
+    scroll: 0,
+    targetOnScreen: 0,
+    otherOnScreen: 0,
+    manualTarget: 0,
+    switchButton: 0,
+    switched: 0,
+    targetLock: 0,
+    items: Array.from({ length: 2 }, () => ({ state: 0, x: 0, y: 0, z: 0, popupX: 0, popupY: 0, end: 0 })),
+    barPhase: 0,
+    barLatched: 0,
+    barPos: 0,
+    codes: [0x54, 0x54, -1],
   };
 }
