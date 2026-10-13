@@ -33,12 +33,9 @@ const LOWEST = -32000;
 export const sparkRow = (state: FightState, data: FightData, kind: number): number =>
   state.attractIntro !== 0 ? data.effects.introSparks[kind]! : data.roster.rowOf(state.fighters[kind]!.roster);
 
-/** A spark kind's and code's look: the fighters' own (kind 2 the third's), or the generic ones (code 2 plays guard 1's). */
+/** A spark kind's and code's look: the fighters' own (kind 2, the third's, the second fighter's sheet), or the generic ones (code 2 plays guard 1's). */
 function lookOf(state: FightState, data: FightData, kind: number, code: number): SparkLook {
-  if (kind < 3) {
-    if (kind === 2) throw new Error("a third fighter's spark is Tekken Force's, not remade");
-    return data.effects.characterSparks[sparkRow(state, data, kind)]!;
-  }
+  if (kind < 3) return data.effects.characterSparks[sparkRow(state, data, kind === 2 ? 1 : kind)]!;
   return data.effects.genericSparks[code === 2 ? 1 : code]!;
 }
 
@@ -194,7 +191,7 @@ export function startEvents(state: FightState): void {
 }
 
 /** An event recorded: a spark's point, direction, kind and code, or dust's point. */
-function recordEvent(state: FightState, kind: number, code: number, at: SparkAt, isDust: number): void {
+export function recordEvent(state: FightState, kind: number, code: number, at: SparkAt, isDust: number): void {
   const effects = state.replayEffects;
   if (effects.recording === 0) return;
   effects.frameEvents = (effects.frameEvents + 1) | 0;

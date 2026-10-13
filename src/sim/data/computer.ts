@@ -51,4 +51,6 @@ export interface ComputerTables {
   readonly walkStopKinds: readonly number[];
   /** Per moveset, its own answer and the answer to it (the first entry for a moveset counts). */
   readonly answers: readonly { readonly moveset: number; readonly against: CharacterAnswer; readonly own: CharacterAnswer }[];
+  /** Tekken Force's pacing, per difficulty and entry: how long an enemy waits after the other's attack, how long it holds still, the odds (of 4096) it hangs back. */
+  readonly forcePacing: readonly (readonly (readonly [wait: number, hold: number, hangBack: number])[])[];
 }

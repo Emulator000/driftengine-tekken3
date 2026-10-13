@@ -13,6 +13,8 @@
  *   tables/reactions.json the reactions, knockback and launches
  *   tables/cancels.json the shared cancel lists and the motion kinds
  *   tables/camera.json the camera's shots, scenes, opening sweeps and knockout placings
+ *   tables/ball.json   Tekken Ball's balls, the ball's mesh and colours, its select's names
+ *   tables/force.json  Tekken Force's waves, enemies, bosses, stages' scripts and backdrops
  *   tables/computer.json the computer player's tuning, scripts, pads and choices
  *   tables/sound.json  the effects' codes, the characters' voices, the hit sounds and sound scripts
  *   tables/effects.json the breath, glow, dust, sparks, camera shakes, fire, and the Mishimas'
@@ -40,6 +42,8 @@ import { inputTables } from './import/input.mjs';
 import { mathTables } from './import/math.mjs';
 import { hitTables } from './import/hits.mjs';
 import { cameraTables } from './import/camera.mjs';
+import { ballTables } from './import/ball.mjs';
+import { forceTables } from './import/force.mjs';
 import { cancelTables } from './import/cancels.mjs';
 import { computerTables } from './import/computer.mjs';
 import { soundTables } from './import/sound.mjs';
@@ -85,6 +89,8 @@ output.json('tables/roster.json', roster);
 output.json('tables/commands.json', commandTables(exe, root, [...new Set(roster.codes.map((code) => code.pack).filter((pack) => pack >= 0))]));
 output.json('tables/hits.json', hitTables(exe));
 output.json('tables/camera.json', cameraTables(exe));
+output.json('tables/ball.json', ballTables(exe, root));
+output.json('tables/force.json', forceTables(root));
 output.json('tables/computer.json', computerTables(exe));
 output.json('tables/sound.json', soundTables(exe, root));
 /* The Mishimas' lightning sheet, which Jin, Heihachi, Gon, Doctor B. and the soldiers share: Jin's (roster 9) stands for them all. */

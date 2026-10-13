@@ -12,7 +12,35 @@ import { Mode, type FightData, type FightState, type Fighter } from './state.ts'
 
 /** How far the arena reaches each way, and how far apart two fighters may drift before the pull. */
 const ARENA = 300000;
+/**
+ * Tekken Force's street: its far and near edges (MISHIMA FORTRESS's near edge a line slanting
+ * across the view, its slope per thousand and where it crosses the middle), the picture's two sides
+ * for the player (each a slope per thousand in depth and an offset; the fortress's own), how far an
+ * enemy may stand from the view's middle; the fortress's stage.
+ */
+const STREET = {
+  far: 0x8fc,
+  near: 0x898,
+  slant: -0x103,
+  slantAt: -0x8ed,
+  sides: [
+    [-323, -2553],
+    [329, 1971],
+  ],
+  fortressSides: [
+    [-375, -2445],
+    [333, 2175],
+  ],
+  enemies: 0x1068,
+  fortress: 0x12,
+} as const;
+/** An enemy slot free (no enemy in it). */
+const FORCE_FREE = 1;
+/** A throw's victim flung this far from its thrower this many frames into the throw. */
+const FLING = { frames: 0x12, distance: 0x578 } as const;
 const DRIFT = 0x1e00;
+/** Tekken Ball's court: how far in depth a fighter may stray off the court's line, how far out the ends are, how far past the middle a fighter is knocked back (into this stance), and the ceiling. */
+const COURT = { depth: 0x100, end: 0x1400, over: 0x3e8, stance: 0x5000, ceiling: 0x1200 } as const;
 const PULL_MAX = 2000;
 /** Kuma and Panda, and True Ogre: large bodies stand 40 mm nearer. */
 const KUMA = 0xb;
@@ -49,8 +77,7 @@ function nearDistance(f: Fighter, other: Fighter, distance: number): number {
  * the screen's edge, faces its side instead and measures by how far from the screen's middle it is.
  */
 export function measurePairs(state: FightState, data: FightData, count: number): void {
-  const offScreen = state.fighters.map((f, i) => (i < count && !((f.screenX & 0xffff) < 0x191) ? 1 : 0));
-  if (state.mode === Mode.TEKKEN_FORCE) throw new Error("Tekken Force's screen bounds are not remade");
+  const offScreen = state.fighters.map((f, i) => (i < count && (!((f.screenX & 0xffff) < 0x191) || (state.mode === Mode.TEKKEN_FORCE && f.computer !== 0 && idleEnemy(state, (f.slot - 1) & 1))) ? 1 : 0));
   for (let i = count - 1; i > 0; i -= 1) {
     for (let j = i - 1; j >= 0; j -= 1) {
       const a = state.fighters[i]!.skeleton.base.translation;
@@ -104,21 +131,93 @@ const sinWide = (data: FightData, turn: number): number => s16(Math.max(-0xfff, 
 const cosWide = (data: FightData, turn: number): number => s16(Math.max(-0xfff, Math.min(0xfff, data.math.sine[((turn >> 4) & 0xfff) + 0x400]!)) << 3);
 export { sinWide, cosWide };
 
+/** How far past `limit` either way `v` is, as the pull back: 0 within it. */
+const pullBack = (v: number, limit: number): number => (Math.abs(v) - limit > 0 ? (v > 0 ? -(Math.abs(v) - limit) : Math.abs(v) - limit) : 0);
+
 /**
- * The arena's bounds, and the pull back when two fighters drift apart, eased in by each slot's own
- * speed; a held throw carries its partner the same way.
+ * Tekken Ball's court: each fighter kept on its own half (well over the middle it is knocked back
+ * into a stance and drops its hits), near the line across the middle, inside the ends and under the
+ * ceiling; one held in a throw stays put.
  */
-export function keepInBounds(state: FightState, data: FightData, f: Fighter, partner: Fighter): void {
-  if (state.mode === 7 || state.mode === Mode.TEKKEN_FORCE) throw new Error("Tekken Ball's and Tekken Force's bounds are not remade");
-  let pullX = 0;
-  let pullZ = 0;
-  const pullY = 0;
+function courtPulls(state: FightState, f: Fighter): [number, number, number] {
   const root = f.skeleton.base.translation;
   const x = root[0]!;
-  if (Math.abs(x) - ARENA > 0) pullX = x > 0 ? -(Math.abs(x) - ARENA) : Math.abs(x) - ARENA;
+  const pullZ = pullBack(root[2]!, COURT.depth);
+  let pullX = pullBack(x, COURT.end);
+  let pullY = 0;
+  if ((f.slot === 0 && x >= 0) || (f.slot === 1 && x <= 0)) {
+    pullX = -x;
+    if (Math.abs(x) > COURT.over) {
+      f.stance = COURT.stance;
+      f.hitSlots[0] = 0;
+      f.hitSlots[1] = 0;
+      f.unpushable = 1;
+    }
+  }
+  if (-COURT.ceiling - root[1]! > 0) pullY = -COURT.ceiling - root[1]!;
+  if (f.throwHold < 0) {
+    state.pulls[f.slot] = 0;
+    state.pullSpeeds[f.slot] = 0;
+  }
+  return [pullX, pullY, pullZ];
+}
+
+/** Whether a Tekken Force enemy slot is free while no boss is on: its fighter counts as off the picture. */
+function idleEnemy(state: FightState, slot: number): boolean {
+  return state.force.slots[slot & 1]!.state === FORCE_FREE && state.force.bossPhase === 0;
+}
+
+/**
+ * Tekken Force's street: the near and far edges (MISHIMA FORTRESS's near edge slanting across),
+ * the player within the picture's sides (each a line in depth), an enemy within 4200 mm of the
+ * view's middle.
+ */
+function streetPulls(state: FightState, f: Fighter): [number, number] {
+  const root = f.skeleton.base.translation;
+  const x = root[0]!;
   const z = root[2]!;
-  if (Math.abs(z) - ARENA > 0) pullZ = z > 0 ? -(Math.abs(z) - ARENA) : Math.abs(z) - ARENA;
-  if (f.targetDistance >>> 0 > 0x1cff) {
+  const scroll = state.force.scroll;
+  const fortress = state.stage === STREET.fortress;
+  let pullX = 0;
+  let pullZ = 0;
+  if (z - STREET.far > 0) pullZ = -(z - STREET.far);
+  let d = fortress ? z - (div(STREET.slant * (x - scroll), 1000) + STREET.slantAt) : z + STREET.near;
+  if (d < 0) pullZ = -d;
+  if (f.computer === 0) {
+    const [left, right] = fortress ? STREET.fortressSides : STREET.sides;
+    const rel = x - scroll;
+    const e0 = div(left[0] * z, 1000) + left[1];
+    const e1 = div(right[0] * z, 1000) + right[1];
+    if (rel - e0 < 0) pullX = -(rel - e0);
+    d = rel - e1;
+  } else {
+    if (x + STREET.enemies - scroll < 0) pullX = -(x + STREET.enemies - scroll);
+    d = x - STREET.enemies - scroll;
+  }
+  if (d > 0) pullX = -d;
+  return [pullX, pullZ];
+}
+
+/**
+ * The arena's bounds, and the pull back when two fighters drift apart, eased in by each slot's own
+ * speed; a held throw carries its partner the same way. Tekken Ball keeps to its court instead,
+ * Tekken Force (once the round is on) to its street.
+ */
+export function keepInBounds(state: FightState, data: FightData, f: Fighter, partner: Fighter): void {
+  let pullX = 0;
+  let pullZ = 0;
+  let pullY = 0;
+  const root = f.skeleton.base.translation;
+  const x = root[0]!;
+  const z = root[2]!;
+  const street = state.mode === Mode.TEKKEN_FORCE && state.round.flow !== 0;
+  if (state.mode === Mode.TEKKEN_BALL) [pullX, pullY, pullZ] = courtPulls(state, f);
+  else if (street) [pullX, pullZ] = streetPulls(state, f);
+  else {
+    pullX = pullBack(x, ARENA);
+    pullZ = pullBack(z, ARENA);
+  }
+  if (state.mode !== Mode.TEKKEN_BALL && !street && f.targetDistance >>> 0 > 0x1cff) {
     const dx = partner.measuredRoot[0]! - x;
     const dz = partner.measuredRoot[1]! - z;
     const apart = tableRoot(dx * dx + dz * dz, data.math);
@@ -157,9 +256,21 @@ export function updateThrowCarry(state: FightState): void {
   state.throwCarryLast = state.throwsUnderway;
 }
 
-/** In the modes with a third body, a thrown partner follows its thrower: not remade, as those modes are not. */
+/**
+ * In the modes with a third body, one held in a carried throw stands where its thrower does. In
+ * Tekken Force one flung far from its thrower a while into the throw stops every throw's carry.
+ */
 export function followThrower(state: FightState): void {
-  if (state.mode === 7 || state.mode === Mode.TEKKEN_FORCE) throw new Error("the three-body modes' throw follow is not remade");
+  const force = state.mode === Mode.TEKKEN_FORCE;
+  if (state.mode !== Mode.TEKKEN_BALL && !force) return;
+  for (const f of force ? state.fighters : [state.fighters[0]!, state.fighters[1]!]) {
+    const t = targetOf(state, f);
+    if (f.throwing === 0 || t.throwing === 0 || !(f.throwHold < 0)) continue;
+    if (force && FLING.frames < f.framesShown && FLING.distance < pairOf(state, f.slot, t.slot).distance) state.throwCarry = 0;
+    if (state.throwCarry === 0) continue;
+    f.position[0] = t.position[0]!;
+    f.position[2] = t.position[2]!;
+  }
 }
 
 /** Each slot's pull eases up toward 2000 mm a frame. */
@@ -375,7 +486,10 @@ export function pushApart(state: FightState, data: FightData, a: Fighter, b: Fig
     if (f.push[0] === 0 && f.push[1] === 0 && f.push[2] === 0) continue;
     f.pushed = 1;
     f.pushedBy[other.slot] = 1;
-    if (state.mode === Mode.TEKKEN_FORCE) throw new Error("Tekken Force's push is not remade");
+    /* Tekken Force: while a throw is under way, a body pushed is pushed twice as far, one held in the throw not at all. */
+    if (state.mode === Mode.TEKKEN_FORCE && 1 < state.throwsUnderway) {
+      for (let i = 0; i < 3; i += 1) f.push[i] = f.unpushable === 0 ? f.push[i]! << 1 : 0;
+    }
     const r = f.skeleton.base.translation;
     for (let i = 0; i < 3; i += 1) {
       f.position[i] = (f.position[i]! + f.push[i]!) | 0;

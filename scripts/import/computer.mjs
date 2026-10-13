@@ -26,6 +26,10 @@
  * draw from (0x80022e80, every other byte), per distance band the guard kinds a follow-up may be
  * (0x80098230) and that stop a walk (0x80098248), and per moveset its own answer and the answer to
  * it (0x80023134, twelve bytes: the moveset, then two routines, named here by what they answer).
+ *
+ * Tekken Force's pacing: per difficulty (three), five entries of three halfwords (0x80022fa4, 0x1e a
+ * difficulty): how long an enemy waits after the other's attack, how long it holds still, and the
+ * odds (of 4096) it hangs back.
  */
 const TUNING = 0x800231ac;
 const CHARACTER_TUNING = 0x80098260;
@@ -115,5 +119,6 @@ export function computerTables(exe) {
       const at = ANSWERS + i * 0xc;
       return { moveset: exe.u16(at), against: routine(exe.u32(at + 4)), own: routine(exe.u32(at + 8)) };
     }),
+    forcePacing: Array.from({ length: 3 }, (_, level) => Array.from({ length: 5 }, (_, i) => [0, 2, 4].map((k) => exe.s16(0x80022fa4 + level * 0x1e + i * 6 + k)))),
   };
 }

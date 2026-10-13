@@ -11,13 +11,17 @@
  * roots aside and framing the replay camera, plays the ring half a frame at a time (the recorded
  * sounds with it) until its end or a human's start button, then ends and puts the live frame back.
  *
+ * In Tekken Ball the knockout replays the ball's last thirty frames, again and again at full speed
+ * and the last time at half, the finishing shot on the loser, then the closing.
+ *
  * The pause: a human's start button while fighting pauses the fight (the music down), and the
  * frame freezes until it is pressed again.
  */
+import { clearPool } from '../effects/pool.ts';
 import { clearDust, clearSparks, rewindEvents, stopEvents } from '../effects/sparks.ts';
 import { startFinish, startReplayCamera } from './camera.ts';
 import { restHands } from './hands.ts';
-import { callReplay } from './hud.ts';
+import { callReplay, printCall } from './hud.ts';
 import { clearInput } from './input.ts';
 import { endPose, endSoundScript, winPose } from './move.ts';
 import { replayEffect, replayEffectLine, replayLine } from './move-sounds.ts';
@@ -25,10 +29,10 @@ import { moveAt, moveById } from './moves.ts';
 import { poseFighter } from './pose.ts';
 import { ReplayState } from './replay.ts';
 import { InputSource, Mode, type FightData, type FightState, type Fighter } from './state.ts';
-import { fadeMusic, keyOff, keyOffVoices } from './voices.ts';
+import { fadeMusic, keyOff, keyOffVoices, musicAfterWin } from './voices.ts';
 
 /** The flow's steps. */
-export const Flow = { OPENING: 0, FIGHTING: 1, KNOCKED_OUT: 2, REPLAY_ASKED: 3, REPLAYING: 4, CLOSING_START: 5, CLOSING: 6, RESUMED: 7, OVER: 9, TRUE_OGRE: 10 } as const;
+export const Flow = { OPENING: 0, FIGHTING: 1, KNOCKED_OUT: 2, REPLAY_ASKED: 3, REPLAYING: 4, CLOSING_START: 5, CLOSING: 6, FORCE_LOAD: 7, STAGE_CLEAR: 8, OVER: 9, TRUE_OGRE: 10, PRACTICE_RESET: 0xb } as const;
 /** The round's status while closing: both shown, one side's winner shown, or a side's finishing shot. */
 const Status = { BOTH: 2, FIRST_WINS: 3, SECOND_WINS: 4, POSES: 5, FIRST_FINISH: 6, SECOND_FINISH: 7 } as const;
 /** The round's result bits. */
@@ -51,6 +55,11 @@ const WRAP = 0x4b00;
 /** The longest a replay reaches back, and the most it starts before the end with enough recorded. */
 const LONGEST = 0x12a;
 const LEAD = 0x96;
+/** Tekken Ball's replay: the last thirty frames. */
+const BALL_REPLAY = 0x1e;
+/** Tekken Ball: the knockout's frame its first replay starts on, and the finishing shot's length. */
+const BALL_FIRST_REPLAY = 0x10;
+const BALL_FINISH = 0xf0;
 /** The share of health a perfect leaves, and below which a win is a great. */
 const WHOLE = 0x1000;
 const GREAT = 0xcd;
@@ -62,11 +71,14 @@ const FINISH_FADE = 10000;
 /** The arcade's last stage, Ogre's. */
 const LAST_STAGE = 9;
 const BOSCONOVITCH_SET = 0x12;
+/** Tekken Force's stances, which a computer at the round's end holds still in; the frames the stage clear shows. */
+const FORCE_STANCES = { first: 0x24, count: 4 } as const;
+const STAGE_CLEAR_FRAMES = 300;
 
 /** The start and select bits the humans' pads pressed this frame, for skipping. */
 export function humanButtons(state: FightState): number {
-  if (state.mode === Mode.TEKKEN_FORCE) throw new Error("Tekken Force's pads are not remade");
   const fresh = state.input.fresh;
+  if (state.mode === Mode.TEKKEN_FORCE) return fresh[state.force.pad]!;
   switch (state.humans) {
     case 1:
       return fresh[0]!;
@@ -81,12 +93,20 @@ export function humanButtons(state: FightState): number {
 
 /* ---- The pause. ---- */
 
-/** A human's start button while fighting asks for the pause; the frame freezes while it holds. */
+/**
+ * A human's start button while fighting asks for the pause; the frame freezes while it holds. In
+ * practice only its human's start pauses, and as practice starts its menu opens by itself.
+ */
 export function checkPause(state: FightState): void {
-  if (state.mode === Mode.PRACTICE) throw new Error("practice mode's pause is not remade");
   const pause = state.pause;
-  const one = state.joined[0] !== 0 && (state.input.fresh[0]! & START) !== 0;
-  const two = state.joined[1] !== 0 && (state.input.fresh[1]! & START) !== 0;
+  let one = state.joined[0] !== 0 && (state.input.fresh[0]! & START) !== 0;
+  let two = state.joined[1] !== 0 && (state.input.fresh[1]! & START) !== 0;
+  if (state.mode === Mode.PRACTICE) {
+    const human = state.match.streakSide;
+    const starting = state.practice.starting !== 0;
+    one = state.replaying === 0 && human === 0 && (starting || (state.input.fresh[0]! & START) !== 0);
+    two = state.replaying === 0 && human === 1 && (starting || (state.input.fresh[1]! & START) !== 0);
+  }
   if (state.match.canPause === 0 || state.round.flow !== Flow.FIGHTING) pause.requested = 0;
   else if (pause.requested === 0) {
     if (one) pause.requested = state.round.flow;
@@ -142,6 +162,7 @@ export function startReplay(state: FightState, data: FightData, back: number): v
   let at = replay.recordFrame - (replay.knockoutStart >> 1);
   if (at < 0) at += WRAP;
   if (at % RING < LEAD && LEAD + 2 < replay.recorded) replay.knockoutStart = (replay.recordFrame - LEAD) * 2;
+  if (state.mode === Mode.TEKKEN_BALL) replay.knockoutStart = (replay.recordFrame - BALL_REPLAY) * 2;
   if (replay.knockoutStart < 0) replay.knockoutStart += WRAP;
   replay.state = ReplayState.BEGIN;
   state.noBlendFrames = 0x14;
@@ -205,12 +226,17 @@ function clearBlends(state: FightState): void {
  */
 export function stepReplay(state: FightState, data: FightData): number {
   const replay = state.replay;
+  const ball = state.match.ball;
   let last = replay.recordFrame * 2 - 2;
+  if (state.mode === Mode.TEKKEN_BALL) {
+    if (ball.replaysShown === 3 && ball.replaysWanted > 3) last = replay.recordFrame * 2 - 0x20;
+    if (last < 0) last += HALVES;
+  }
   if (last < 0) last = 0x256;
   switch (replay.state) {
     case ReplayState.PLAYING:
       callReplay(state);
-      replay.playFrame = wrap(replay.playFrame + 1, HALVES);
+      replay.playFrame = wrap(replay.playFrame + (state.mode === Mode.TEKKEN_BALL && ball.replaysShown < ball.replaysWanted ? 2 : 1), HALVES);
       if (replay.playFrame === last || replay.skip !== 0) replay.state = ReplayState.ENDING;
       replaySounds(state, data);
       return replay.state;
@@ -263,18 +289,20 @@ export const replayWholeFrame = (state: FightState): number => (state.replay.pla
 
 /* ---- The round's end. ---- */
 
-/** The round is over: a fighter at no health, or the time out. */
+/** The round is over: a fighter at no health, or the time out; in Tekken Force the player down, or the boss once his fight is on. */
 function roundOver(state: FightState): boolean {
-  if (state.mode === Mode.TEKKEN_FORCE) throw new Error("Tekken Force's round end is not remade");
-  if (state.fighters[0].health === 0 || state.fighters[1].health === 0) return true;
+  const [a, b] = state.fighters;
+  if (state.mode === Mode.TEKKEN_FORCE) {
+    if (a.health < 1 || (state.force.bossPhase !== 0 && b.health < 1)) return true;
+  } else if (a.health === 0 || b.health === 0) return true;
   return state.timer < 1;
 }
 
-/** Each fighter's health as a share of 0x1000, rounded up. */
+/** Each fighter's health as a share of 0x1000, rounded up (all of it with no full health to share). */
 function healthShares(state: FightState): void {
   for (const f of [state.fighters[0], state.fighters[1]]) {
     const unit = f.maxHealth >> 12;
-    f.healthShare = Math.trunc((f.health + unit - 1) / unit) & 0xffff;
+    f.healthShare = unit === 0 ? 0xffff : Math.trunc((f.health + unit - 1) / unit) & 0xffff;
   }
 }
 
@@ -337,7 +365,10 @@ function scoreRound(state: FightState): void {
     l.outcome = -1;
     w.wins = (w.wins + 1) << 16 >> 16;
   };
-  if (b.healthShare < a.healthShare) win(a, b);
+  if (state.mode === Mode.TEKKEN_FORCE) {
+    if (b.healthShare < a.healthShare && (state.round.result & Result.TIME_UP) === 0) win(a, b);
+    else win(b, a);
+  } else if (b.healthShare < a.healthShare) win(a, b);
   else if (a.healthShare < b.healthShare) win(b, a);
   else {
     state.round.last = (state.round.last - 1) & 0xffff;
@@ -359,10 +390,35 @@ function scoreRound(state: FightState): void {
   if (state.round.last <= state.round.number || needed <= a.wins || needed <= b.wins) matchOver(state);
 }
 
-/** The health each fighter carries into the next round, as the mode keeps it. */
-function carryHealth(state: FightState): void {
-  if (state.mode === Mode.TEAM_BATTLE || state.mode === Mode.SURVIVAL) throw new Error("Team Battle's and Survival's recovery between rounds are not remade");
-  for (const f of [state.fighters[0], state.fighters[1]]) f.carriedHealth = f.health;
+/** Survival's fight lengths (frames) past which its winner gets less back. */
+const SURVIVAL_LENGTHS = [299, 599, 899, 0x4af, 0x5db, 0x707, 0x833] as const;
+
+/**
+ * The health each fighter carries into the next round, as the mode keeps it: in Team Battle the
+ * winner gets some back by the eighths of its health left, in Survival the human winner by how long
+ * the fight took (none to a fighter with none left), never past full.
+ */
+function carryHealth(state: FightState, data: FightData): void {
+  const mode = state.mode;
+  [state.fighters[0], state.fighters[1]].forEach((f, side) => {
+    if (mode !== Mode.TEAM_BATTLE && mode !== Mode.SURVIVAL) {
+      f.carriedHealth = f.health;
+      return;
+    }
+    let health = f.health >>> 0;
+    const recovers = side === state.match.winnerSide && (mode === Mode.TEAM_BATTLE || side === state.match.humanSide);
+    if (recovers && health !== 0) {
+      const max = f.maxHealth >>> 0;
+      const recovery = data.roster.recovery;
+      const back =
+        mode === Mode.TEAM_BATTLE
+          ? recovery.team[Math.min(7, Math.trunc((health * 8) / max))]!
+          : recovery.survival[SURVIVAL_LENGTHS.filter((length) => length < state.match.fightFrames).length]!;
+      health = ((max | 0) >> 8) * back + health;
+      if (max < health) health = max;
+    }
+    f.carriedHealth = health;
+  });
 }
 
 /** At time out, the losers' closing marks them (a draw, neither). */
@@ -379,8 +435,12 @@ function markTimeOut(state: FightState): void {
 }
 
 /** What the computer's last move leaves it holding: the guard its move's stance asks for, or nothing. */
-function settleStance(data: FightData, f: Fighter): void {
+function settleStance(state: FightState, data: FightData, f: Fighter): void {
   if (f.character !== BOSCONOVITCH_SET) {
+    if (state.mode === Mode.TEKKEN_FORCE && ((f.moveId - FORCE_STANCES.first) & 0xffff) < FORCE_STANCES.count) {
+      f.input.replayHeld = 0x8000;
+      return;
+    }
     let move = f.next.move;
     if (move === null) move = moveById(data, f, moveAt(data, f.move!).next);
     if (move === null) throw new Error("a computer's last move goes on to no move");
@@ -400,7 +460,7 @@ function afterKnockout(state: FightState, data: FightData, f: Fighter): void {
   } else if ((state.round.result & Result.TIME_UP) === 0 && f.computer === 0) state.input.sources[f.slot] = InputSource.PAD;
   else {
     state.input.sources[f.slot] = InputSource.REPLAY;
-    settleStance(data, f);
+    settleStance(state, data, f);
   }
 }
 
@@ -523,7 +583,7 @@ function endRound(state: FightState): void {
 const replayDone = (state: FightState): boolean => state.replay.state === ReplayState.ENDED;
 
 /** Every player's input cleared, and read from `source` from now on. */
-function resetInputs(state: FightState, source: number): void {
+export function resetInputs(state: FightState, source: number): void {
   for (let i = 0; i < 3; i += 1) {
     clearInput(state, state.fighters[i]!);
     state.input.sources[i] = source;
@@ -531,12 +591,12 @@ function resetInputs(state: FightState, source: number): void {
 }
 
 /** The knockout's moment: the shares, the result and the score, the health carried, the closing's wait. */
-function knockedOut(state: FightState): void {
+function knockedOut(state: FightState, data: FightData): void {
   const round = state.round;
   healthShares(state);
   roundResult(state);
   scoreRound(state);
-  carryHealth(state);
+  carryHealth(state, data);
   if (state.match.winner !== 0 && state.mode === ARCADE && ((state.match.humanSides >> (state.match.loserSide & 0x1f)) & 1) !== 0) state.match.humanLost = 1;
   markTimeOut(state);
   state.round.posesDone[0] = 0;
@@ -585,7 +645,7 @@ function closing(state: FightState, data: FightData): void {
   if (state.status === Status.BOTH) {
     if (frames === 0x4b) round.done = 1;
   } else if ((state.status - Status.FIRST_FINISH) >>> 0 < 2) {
-    if (frames === 0x3c) round.done = 1;
+    if (frames === (state.mode === Mode.TEKKEN_BALL ? BALL_FINISH : 0x3c)) round.done = 1;
   } else if (state.status === Status.POSES) {
     const finished = (f: Fighter): boolean => f.closing < 1 || moveAt(data, f.move!).length - 1 <= f.frame;
     if (finished(a)) round.posesDone[0] = 1;
@@ -598,11 +658,60 @@ function closing(state: FightState, data: FightData): void {
   if (round.done !== 0 || round.left < 1 || (state.match.winner === 0 && state.replaySkipped !== 0 && 1 < round.flowFrames) || (humanButtons(state) & START) !== 0) endRound(state);
 }
 
+/**
+ * Tekken Ball's knockout: sixteen frames on, the first replay and the finishing shot on the loser
+ * (the next round served from its side), the HUD hidden; each replay over, the next until as many
+ * as wanted are shown (the knockout's count held meanwhile), then the HUD back.
+ */
+function ballReplays(state: FightState, data: FightData): void {
+  const [a, b] = state.fighters;
+  const round = state.round;
+  const ball = state.match.ball;
+  if (round.flowFrames === BALL_FIRST_REPLAY) {
+    ball.replaysShown = 1;
+    state.hud.shown = 0;
+    round.replayRequest = 1;
+    const first = a.outcome < 0;
+    const loser = first ? a : b;
+    startFinish(state, data, loser, loser.health);
+    state.status = first ? Status.FIRST_FINISH : Status.SECOND_FINISH;
+    ball.server = first ? 0 : 1;
+  } else if (0 < ball.replaysShown) {
+    if (!replayDone(state)) {
+      round.flowFrames -= 1;
+      return;
+    }
+    clearSparks(state);
+    clearDust(state, data);
+    endSoundScript(a);
+    endSoundScript(b);
+    if (ball.replaysShown < ball.replaysWanted) {
+      round.replayRequest = 1;
+      clearPool(state);
+      round.flowFrames -= 1;
+      ball.replaysShown += 1;
+      state.status = a.outcome < 0 ? Status.FIRST_WINS : Status.SECOND_WINS;
+    } else state.hud.shown = 1;
+  }
+}
+
+/** Tekken Ball's closing, with no replay asked: a loser beaten by a computer left the least health above none, the poses and the closing's camera. */
+function ballClosing(state: FightState, data: FightData): void {
+  const [a, b] = state.fighters;
+  state.status = Status.BOTH;
+  if (a.outcome < 0 && b.computer !== 0) a.health = 1;
+  if (b.outcome < 0 && a.computer !== 0) b.health = 1;
+  winnerPoses(state, data);
+  closingCamera(state, data);
+  if ((state.status - Status.FIRST_FINISH) >>> 0 < 2) loserPoses(state, data);
+  clearBlends(state);
+  state.match.ball.replaysShown += 1;
+}
+
 /** A frame of the round's flow. */
 export function stepRound(state: FightState, data: FightData): void {
   const [a, b] = state.fighters;
   const round = state.round;
-  if (state.mode === Mode.TEKKEN_BALL || state.mode === Mode.TEKKEN_FORCE) throw new Error(`the round flow of mode ${state.mode} is not remade`);
   if (1 < round.flow) round.flowFrames += 1;
   let flow = round.flow;
   if (flow === Flow.OPENING) {
@@ -614,6 +723,7 @@ export function stepRound(state: FightState, data: FightData): void {
   }
   if (flow === Flow.FIGHTING) {
     round.frames += 1;
+    if (state.mode === Mode.TEKKEN_FORCE) state.match.humanLost = 1;
     const over = roundOver(state);
     state.freezeHealth = over ? 1 : 0;
     if (!over) {
@@ -621,22 +731,45 @@ export function stepRound(state: FightState, data: FightData): void {
       state.match.fightFrames += 1;
       return;
     }
-    knockedOut(state);
+    knockedOut(state, data);
     return;
   }
   if (flow === Flow.KNOCKED_OUT) {
     afterKnockout(state, data, a);
     afterKnockout(state, data, b);
+    if (state.mode === Mode.TEKKEN_FORCE) afterKnockout(state, data, state.fighters[2]);
+    if (state.mode === Mode.TEKKEN_BALL) ballReplays(state, data);
     if ((round.result & 0x1f) !== 0 && round.flowFrames === 0x5a) round.done = 1;
     if (round.done === 0) return;
     for (let i = 0; i < 3; i += 1) state.input.sources[i] = InputSource.NONE;
     endSoundScript(a);
     endSoundScript(b);
     keyOff(state, 0);
+    /* Tekken Force: the player beaten ends the run; the stage cleared fades the music and shows its clear. */
+    if (state.mode === Mode.TEKKEN_FORCE) {
+      if (a.outcome !== 1) {
+        round.flow = Flow.OVER;
+        return;
+      }
+      musicAfterWin(state, 0);
+      round.flow = Flow.STAGE_CLEAR;
+      round.flowFrames = 0;
+      return;
+    }
     round.flow = Flow.REPLAY_ASKED;
     flow = Flow.REPLAY_ASKED;
   }
-  if (flow === Flow.REPLAY_ASKED) {
+  if (flow === Flow.STAGE_CLEAR) {
+    printCall(state, 2, 8, 0x29, 0x70, 'STAGE CLEAR!!');
+    if (STAGE_CLEAR_FRAMES <= round.flowFrames || ((humanButtons(state) & START) !== 0 && state.force.skippable !== 0)) round.flow = Flow.OVER;
+    state.input.sources[a.slot] = InputSource.REPLAY;
+    settleStance(state, data, a);
+    return;
+  }
+  if (flow === Flow.REPLAY_ASKED && state.mode === Mode.TEKKEN_BALL) {
+    ballClosing(state, data);
+    flow = Flow.CLOSING_START;
+  } else if (flow === Flow.REPLAY_ASKED) {
     round.flow = Flow.REPLAYING;
     round.replayRequest = 1;
     return;
@@ -663,7 +796,7 @@ export function stepRound(state: FightState, data: FightData): void {
     closing(state, data);
     return;
   }
-  if (flow === Flow.RESUMED) {
+  if (flow === Flow.FORCE_LOAD) {
     round.flow = Flow.FIGHTING;
     return;
   }

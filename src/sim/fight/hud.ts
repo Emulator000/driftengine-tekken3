@@ -37,7 +37,7 @@ const Announcer = { ROUND: 0x103b, FINAL_ROUND: 0x103a, FIGHT: 0x103c, DRAW: 0x1
 const ResultLine = { TIME_UP: 0x13, PERFECT: 0x19, DOUBLE_KO: 0x15, GREAT: 0x18, KO: 0x1a } as const;
 
 /** A fighter's own win line, unless its roster code has none (then 1). */
-function fighterLine(state: FightState, data: FightData, side: number): number {
+export function fighterLine(state: FightState, data: Pick<FightData, 'sound'>, side: number): number {
   const f = state.fighters[side]!;
   if (f.rosterCode === SILENT_CODE) return 1;
   voiceLine(state, data, f.movesetSlot, f.sound === OTHER_WIN_LINE ? 0xc64b : 0xc640, 0);
@@ -57,7 +57,8 @@ function voiceRound(state: FightState, data: FightData): void {
       if (at(0x3d, 1)) fighterLine(state, data, state.joined[0] === 0 ? 1 : 0);
       break;
     case Mode.TEKKEN_FORCE:
-      throw new Error("Tekken Force's round call is not remade");
+      if (at(0x3d, 1)) fighterLine(state, data, 0);
+      break;
     default:
       if (at(0x3d, 1)) effect(state, data, round < state.round.last ? Announcer.ROUND : Announcer.FINAL_ROUND);
       if (at(100, 0x28) && round < state.round.last) effect(state, data, data.sound.roundCalls[round + 1]!);
@@ -155,7 +156,9 @@ function callRound(state: FightState): void {
       print(state, Font.BIG, 8, 0x29, 0x70, 'PRACTICE MODE');
       break;
     case Mode.TEKKEN_FORCE:
-      throw new Error("Tekken Force's stage call is not remade");
+      if (state.match.stage < FORCE_FINAL_STAGE) print(state, Font.BIG, 8, 0x6b, 0x70, `STAGE ${state.match.stage + 1}`);
+      else print(state, Font.BIG, 8, 0x3f, 0x70, 'FINAL STAGE');
+      break;
     default:
       if (state.round.last <= round) print(state, Font.BIG, 8, 0x3f, 0x70, 'FINAL ROUND');
       else if (first ? 0x3d <= frames : 0 < frames) print(state, Font.BIG, 8, 0x6b, 0x70, `ROUND ${(round & 0xf).toString(16).toUpperCase()}`);
@@ -166,7 +169,8 @@ function callRound(state: FightState): void {
 
 /** "K.O.", "DOUBLE K.O.", "PERFECT!" or "TIME UP" after a round ends. */
 function callResult(state: FightState): void {
-  if (state.mode === Mode.TEKKEN_BALL) throw new Error("Tekken Ball's result call is not remade");
+  /* Tekken Ball's knockout waits for its last replays. */
+  if (state.mode === Mode.TEKKEN_BALL && state.match.ball.replaysShown < state.match.ball.replaysWanted - 1) return;
   if (state.round.replayRequest !== 0) return;
   const result = state.round.result;
   if ((result & Result.TIME_UP) !== 0) print(state, Font.BIG, 3, 0x6b, 0xe4, 'TIME UP');
@@ -206,10 +210,18 @@ function showStreak(state: FightState): void {
   print(state, Font.SMALL, 8, STREAK.x[digits]![state.hud.streakSide !== 0 ? 1 : 0]!, STREAK.y, `${wins < 2 ? 'WIN' : 'WINS'}:${wins}`);
 }
 
+/** A Team Battle member's mark: crossed out, and in its beaten colour. */
+export const TeamMark = { CROSSED: 1, BEATEN: 2 } as const;
 /** What a mode shows under a side's name: nothing, who should press start, GAME OVER, the stage and the run's time, the mode's name. */
-const Under = { NOTHING: 0, COIN: 1, GAME_OVER: 2, STAGE_TIME: 3, TIME_ATTACK: 5 } as const;
+const Under = { NOTHING: 0, COIN: 1, GAME_OVER: 2, STAGE_TIME: 3, TEAM_BATTLE: 4, TIME_ATTACK: 5, SURVIVAL: 6, SURVIVAL_RECORD: 8, TEKKEN_BALL: 9 } as const;
+/** Survival's place among its records as its line shows it (the tenth at most), and its wins' format by how many digits they take. */
+const RANKS = ['', ' 1ST', ' 2ND', ' 3RD', ' 4TH', ' 5TH', ' 6TH', ' 7TH', ' 8TH', ' 9TH', '10TH'] as const;
+const WINS = { most: 9999, across: 0x30 } as const;
 /** Where the lines under the names start across (who should press start is centred on its own place), and their line. */
 const UNDER = { x: [19, 208], coinX: [92, 284], y: 0x18 } as const;
+/** Tekken Force's final stage, and the player's gauge's full length. */
+const FORCE_FINAL_STAGE = 4;
+const FORCE_GAUGE = 0x9c;
 /** The match's winner when it is a draw. */
 const DRAWN = 3;
 /** The most frames the run's time shows (99'59"99). */
@@ -221,7 +233,8 @@ const MOST_FRAMES = 359999;
  * should press start, nothing while a challenger is coming and GAME OVER once the human lost or
  * is asked to continue; with two, GAME OVER blinking under the loser once the match is decided.
  * Time attack: the stage and time under the human, the mode's name under the other. The demo:
- * who should press start under both.
+ * who should press start under both. Team Battle and Tekken Ball: the mode's name under a human
+ * (the first side's with two), who should press start under the computer.
  */
 function underName(state: FightState, side: number): number {
   const match = state.match;
@@ -242,6 +255,15 @@ function underName(state: FightState, side: number): number {
     case Mode.VERSUS:
     case Mode.PRACTICE:
       return Under.NOTHING;
+    case Mode.SURVIVAL:
+      if (side !== match.humanSide) return Under.SURVIVAL;
+      return state.joined[side] !== 0 ? Under.SURVIVAL_RECORD : Under.GAME_OVER;
+    case Mode.TEAM_BATTLE:
+      if (match.humanCount === 1) return side === match.humanSide && state.joined[side] !== 0 ? Under.TEAM_BATTLE : Under.COIN;
+      return match.humanCount === 2 && side === 0 ? Under.TEAM_BATTLE : Under.NOTHING;
+    case Mode.TEKKEN_BALL:
+      if (match.humanCount === 1) return side === match.humanSide && state.joined[side] !== 0 ? Under.TEKKEN_BALL : Under.COIN;
+      return match.humanCount === 2 && side === 0 ? Under.TEKKEN_BALL : Under.NOTHING;
     default:
       throw new Error(`mode ${state.mode}'s line under a name is not remade`);
   }
@@ -286,6 +308,22 @@ function showUnderNames(state: FightState, data: FightData): void {
       case Under.TIME_ATTACK:
         print(state, Font.TINY, 6, x, UNDER.y, '  TIME ATTACK');
         break;
+      case Under.TEAM_BATTLE:
+        print(state, Font.TINY, 6, x, UNDER.y, '  TEAM BATTLE');
+        break;
+      case Under.TEKKEN_BALL:
+        print(state, Font.TINY, 6, x, UNDER.y, '  TEKKEN BALL');
+        break;
+      case Under.SURVIVAL:
+        print(state, Font.TINY, 6, x, UNDER.y, '    SURVIVAL');
+        break;
+      case Under.SURVIVAL_RECORD: {
+        const rank = state.match.survivalRank;
+        if (rank !== 0) print(state, Font.TINY, 5, x, UNDER.y, RANKS[Math.min(rank, 10)]!);
+        const wins = Math.min(state.match.survivalWins, WINS.most);
+        print(state, Font.TINY, 1, x + WINS.across, UNDER.y, wins < 2 ? ` WIN:${wins}` : `WINS:${wins}`);
+        break;
+      }
     }
   }
 }
@@ -295,8 +333,20 @@ function showBack(state: FightState, data: FightData): void {
   const hud = state.hud;
   hud.back = 1;
   if (state.mode === Mode.DEMO) print(state, Font.SMALL, 2, 0x7e, 0x104, 'GAME OVER');
-  /* Team Battle draws its own marks, not remade, and none of these. */
-  if (state.mode !== Mode.TEAM_BATTLE) {
+  for (const marks of hud.teamMarks) marks.length = 0;
+  if (state.mode === Mode.TEAM_BATTLE) {
+    /* A mark a member: crossed out once beaten (and the one beaten in this bout's end, blinking). */
+    state.match.teams.forEach((team, side) => {
+      const lost = side === 0 ? state.match.winner === 2 || state.match.winner === 3 : state.match.winner === 1 || state.match.winner === 3;
+      for (let k = 0; k < team.size; k += 1) {
+        const now = k === team.next && lost;
+        const crossed = k < team.next || now;
+        const beaten = k < team.next || (now && (state.vsyncSeen & 0x10) === 0);
+        hud.teamMarks[side]!.push((crossed ? TeamMark.CROSSED : 0) | (beaten ? TeamMark.BEATEN : 0));
+      }
+    });
+    for (const marks of hud.marksLit) marks.length = 0;
+  } else {
     for (const marks of hud.marksLit) marks.length = 0;
     for (let side = 0; side < 2; side += 1) {
       const wins = state.fighters[side]!.wins;
@@ -361,7 +411,52 @@ export function stepHud(state: FightState, data: FightData): void {
   }
   if (state.hud.shown === 0) return;
   if (state.match.showsStreak !== 0) showStreak(state);
-  if (state.mode === Mode.TEKKEN_FORCE) throw new Error("Tekken Force's HUD is not remade");
+  if (state.mode === Mode.TEKKEN_FORCE) {
+    showForceBack(state);
+    stepForceBars(state, data);
+    return;
+  }
   showBack(state, data);
   stepBars(state);
+}
+
+/** Tekken Force's back: no round marks, the score and the best under the names, the timer. */
+function showForceBack(state: FightState): void {
+  const hud = state.hud;
+  hud.back = 1;
+  for (const marks of hud.teamMarks) marks.length = 0;
+  for (const marks of hud.marksLit) marks.length = 0;
+  const figures = (n: number): string => String(n).padStart(8, ' ').slice(-8);
+  print(state, Font.TINY, 5, UNDER.x[0]!, UNDER.y, 'SCORE ');
+  print(state, Font.TINY, 6, UNDER.x[0]! + 6 * 9, UNDER.y, figures(state.force.score));
+  print(state, Font.TINY, 2, UNDER.x[1]!, UNDER.y, 'HI-SCORE ');
+  print(state, Font.TINY, 6, UNDER.x[1]! + 9 * 9, UNDER.y, figures(state.force.best));
+  hud.timerShown = state.timerStopped === 0 ? div(state.timer + 0x3b, 0x3c) : -1;
+}
+
+/**
+ * Tekken Force's three gauges toward their fighters' health, as the bars: the player's at full
+ * length, each enemy's by its kind (stepped only while it is in play and the round has opened).
+ */
+function stepForceBars(state: FightState, data: FightData): void {
+  state.hud.forceBars.forEach((bar, i) => {
+    const f = state.fighters[i]!;
+    if (i !== 0 && (f.pushImmune !== 0 || state.round.flow === Flow.OPENING)) return;
+    const length = (i === 0 ? FORCE_GAUGE : data.force.kinds[state.force.slots[i - 1]!.kind]!.gauge) - 4;
+    let target = bar.target;
+    const was = bar.shown;
+    const trail = bar.trail;
+    if (bar.seen !== f.health) {
+      bar.seen = f.health;
+      const unit = div(f.maxHealth, length);
+      target = unit === 0 ? length : div(f.health - 1 + unit, unit);
+    }
+    if (length < target) target = length;
+    let trailed = was < trail ? trail - ((trail - was + 0xf) >> 4) : was;
+    const shown = target <= was || target < was + 3 ? target : was + 3;
+    if (trailed < shown) trailed = shown;
+    bar.target = s16(target);
+    bar.shown = s16(shown);
+    bar.trail = s16(trailed);
+  });
 }

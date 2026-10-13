@@ -10,6 +10,8 @@ import { resetPool } from '../effects/pool.ts';
 import { clench } from './hands.ts';
 import { clearHits } from './hits.ts';
 import { clearInput } from './input.ts';
+import { clearShoves, startBallRound } from './ball.ts';
+import { drawMokujin } from './match.ts';
 import { endSoundScript, startRound } from './move.ts';
 import { ReplayState } from './replay.ts';
 import { resetComputers } from './computer.ts';
@@ -125,13 +127,22 @@ export function resetFighter(state: FightState, data: FightData, f: Fighter, opp
   clearHits(f);
   f.bestHit = 0;
   endSoundScript(f);
+  sizeHitSpheres(data, f);
+  clench(data, f, HAND_SPEED);
+  for (let i = 0; i < 3; i += 1) f.lastRoot[i] = root[i]!;
+}
+
+/** Tekken Force's final stage, where the player and Dr. B start this far either side of the middle. */
+const FORCE_FINAL_STAGE = 4;
+const FORCE_APART = 1000;
+
+/** A fighter's hit spheres sized for its roster. */
+export function sizeHitSpheres(data: FightData, f: Fighter): void {
   const radii = data.roster.hitRadii[data.roster.rowOf(f.roster)]!;
   f.hitSpheres.forEach((sphere, i) => {
     sphere.radius = radii[i]!;
     sphere.radiusSquared = Math.imul(radii[i]!, radii[i]!);
   });
-  clench(data, f, HAND_SPEED);
-  for (let i = 0; i < 3; i += 1) f.lastRoot[i] = root[i]!;
 }
 
 /** Every player's input cleared, and read from `source` from now on. */
@@ -142,14 +153,20 @@ function resetInputs(state: FightState, source: number): void {
   }
 }
 
-/** A round starts (in the attract's intro the replay does not record). */
+/**
+ * A round starts (in the attract's intro the replay does not record). A Tekken Force stage's: the
+ * timer set only on the first stage (later ones go on with what is left), all three fighters at
+ * the middle facing on (on the final stage the player and Dr. B apart), the enemies out of play,
+ * its three gauges cleared.
+ */
 export function startRoundOfMatch(state: FightState, data: FightData): void {
-  const [a, b] = state.fighters;
+  const [a, b, c] = state.fighters;
+  const force = state.mode === Mode.TEKKEN_FORCE;
   const round = state.round;
   round.frames = 0;
   round.framesSeen = 0;
   round.number += 1;
-  state.timer = (state.options.roundTime + 2) * 600;
+  if (!force || state.match.stage === 0) state.timer = (state.options.roundTime + 2) * 600;
   state.freezeHealth = 0;
   state.status = 0;
   state.pause.paused = 0;
@@ -167,10 +184,10 @@ export function startRoundOfMatch(state: FightState, data: FightData): void {
   round.posesDone.fill(0);
   round.flowFrames = 0;
   state.sound.mokujinHits.fill(0);
-  if (a.roster === MOKUJIN || b.roster === MOKUJIN) throw new Error("Mokujin's moveset draw is not remade");
+  if (a.roster === MOKUJIN || b.roster === MOKUJIN) drawMokujin(state, data);
   state.sparks.next = 0;
   resetPool(state);
-  for (const f of [a, b]) state.tracks[f.slot] = (f.roster - OGRE_AND_TRUE_OGRE) >>> 0 < 2 ? 1 : 0;
+  for (const f of force ? [a, b, c] : [a, b]) state.tracks[f.slot] = (f.roster - OGRE_AND_TRUE_OGRE) >>> 0 < 2 ? 1 : 0;
   const replay = state.replay;
   replay.state = ReplayState.RECORDING;
   replay.recordFrame = 0;
@@ -183,6 +200,7 @@ export function startRoundOfMatch(state: FightState, data: FightData): void {
   if (state.attractIntro !== 0) replay.state = 0;
   a.blend.kind = 0;
   b.blend.kind = 0;
+  if (force) c.blend.kind = 0;
   state.noBlendFrames = NO_BLEND;
   keyOffVoices(state, round.number !== 1);
   state.pushWeights.fill(PUSH_WEIGHT);
@@ -192,22 +210,50 @@ export function startRoundOfMatch(state: FightState, data: FightData): void {
   state.hitFlash.fill(0);
   clearInput(state, a);
   clearInput(state, b);
-  resetFighter(state, data, a, b);
-  resetFighter(state, data, b, a);
-  measurePairs(state, data, 2);
+  if (force) {
+    clearInput(state, c);
+    const apart = FORCE_FINAL_STAGE <= state.match.stage ? FORCE_APART : 0;
+    for (const f of [a, b, c]) {
+      f.position[0] = f === a ? -apart : apart;
+      f.position[2] = 0;
+      f.facing = 0x4000;
+    }
+    resetFighter(state, data, a, b, false);
+    resetFighter(state, data, b, a, false);
+    resetFighter(state, data, c, a, false);
+    for (const f of [b, c]) {
+      f.present = 0;
+      f.pushImmune = 1;
+    }
+  } else {
+    resetFighter(state, data, a, b);
+    resetFighter(state, data, b, a);
+  }
+  if (state.mode === Mode.TEKKEN_BALL) {
+    resetFighter(state, data, c, a);
+    c.counterWindow = 1;
+  }
+  measurePairs(state, data, force ? 3 : 2);
   state.camera.replay.active = 0;
   resetComputers(state, data);
-  for (const bar of state.hud.bars) {
-    bar.seen = 0;
-    bar.target = 0;
-    bar.shown = 0;
-    bar.damage = 0;
+  if (force) for (const bar of state.hud.forceBars) Object.assign(bar, { seen: 0, target: 0, shown: 0, trail: 0 });
+  else {
+    for (const bar of state.hud.bars) {
+      bar.seen = 0;
+      bar.target = 0;
+      bar.shown = 0;
+      bar.damage = 0;
+    }
   }
   state.hud.marksShown[0] = a.wins & 0xff;
   state.hud.marksShown[1] = b.wins & 0xff;
   state.flash.left = 0;
   state.flash.pull.fill(0);
   round.replayRequest = 0;
+  if (state.mode === Mode.TEKKEN_BALL) {
+    clearShoves(state);
+    startBallRound(state, data);
+  }
   playSong(state, state.stageSong, false);
 }
 

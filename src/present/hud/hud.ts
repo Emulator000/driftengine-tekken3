@@ -5,15 +5,18 @@
  * marks and timer) goes inside the frame behind the fighters, in front of the stage, and the calls
  * over the finished picture. Each picture is painted once into an atlas, one texel to a
  * device pixel, and placed on whole pixels, so nothing is magnified; a display of another height
- * paints them again. The pieces go where `layOutHud` places them, in its order.
+ * paints them again. The pieces go where `layOutHud` places them, in its order. Tekken Force's keys
+ * are painted new as metal keys, and its progress bar is light laid over the finished picture.
  */
 import type { RendererApi } from '@driftengine/core';
 import { createSpritePass, drawSprite, type SpritePass } from '@driftengine/ui2d';
 import type { FightData, FightState } from '../../sim/fight/state.ts';
+import { stageCodes } from '../../sim/fight/force-stage.ts';
 import { LARGEST, PaintAtlas, TILES, type AtlasPicture } from '../2d/atlas.ts';
+import { LightLayer } from '../2d/light.ts';
 import { setType } from '../2d/type.ts';
-import { INFINITY, layOutHud, type BarPart, type PlacedPiece } from './hud-layout.ts';
-import { BAR_RAMPS, CHROME, MARK_RAMPS, PLATE_RAMPS, TIMER_STYLE, printStyle, nameStyle } from './theme.ts';
+import { INFINITY, layOutHud, progressBar, type BarPart, type PlacedPiece } from './hud-layout.ts';
+import { BAR_RAMPS, CHROME, KEY_RAMPS, MARK_RAMPS, PLATE_RAMPS, TIMER_STYLE, printStyle, nameStyle } from './theme.ts';
 
 type Context = OffscreenCanvasRenderingContext2D;
 
@@ -53,6 +56,38 @@ const CALLS: readonly (readonly [number, number, string])[] = [
   [1, 9, 'WINNER'],
   [1, 9, 'LOSER'],
 ];
+/** Tekken Force's calls, by font and colour, painted ahead with its matches; and the digits and marks its runs of digits are laid from. */
+const FORCE_CALLS: readonly (readonly [number, number, string])[] = [
+  ...[1, 2, 3, 4].map((n) => [2, 8, `STAGE ${n}`] as const),
+  [2, 8, 'FINAL STAGE'],
+  [2, 8, 'STAGE CLEAR!!'],
+  [0, 6, 'NOW LOADING...'],
+  [1, 6, 'YOU GOT A KEY!!'],
+  [1, 2, 'YOU GOT A KEY!!'],
+  [1, 6, 'FINAL STAGE CHALLENGE!!'],
+  [1, 2, 'FINAL STAGE CHALLENGE!!'],
+  [0, 2, ' +LIFE!'],
+  [0, 5, ' +LIFE!'],
+  [0, 5, '+'],
+  [0, 6, 'SEC'],
+  [0, 5, 'SCORE '],
+  [0, 2, 'HI-SCORE '],
+];
+const FORCE_DIGITS: readonly (readonly [number, number])[] = [
+  [0, 5],
+  [0, 6],
+  [1, 5],
+];
+const TEKKEN_FORCE = 8;
+/** The printer's fonts' cells, as the layout gives each call its block: a glyph's advance and its width. */
+const PRINTER = [
+  { advance: 9, width: 10 },
+  { advance: 13, width: 14 },
+  { advance: 22, width: 24 },
+] as const;
+/** The soldiers' roster, whose names keep the first costume's colours. */
+const SOLDIERS = 0x15;
+
 /**
  * Arcade's run time under the bars, minutes, seconds and hundredths in two digits each (the small
  * font, colour 5, a two-glyph block): its hundredths change every field, so every value is painted
@@ -81,6 +116,9 @@ const cylinder = (r: readonly string[]): (readonly [number, string])[] => [
   [1, r[5]!],
 ];
 
+/** A piece's tint for its brightness (none for the usual). */
+const glowTint = (glow: number | undefined): number[] | null => (glow === undefined ? null : [glow, glow, glow, 1]);
+
 export class Hud {
   private readonly back: SpritePass;
   private readonly front: SpritePass;
@@ -89,6 +127,13 @@ export class Hud {
   private readonly renderer: RendererApi;
   private readonly atlas: PaintAtlas;
   private names: readonly string[];
+  private data: FightData;
+  /** Tekken Force's: its name rows' names as its stage may show them (side, name, costume), and its progress bar's light (made for its first match). */
+  private forceNames: readonly (readonly [0 | 1, string, number])[] = [];
+  private light: LightLayer | null = null;
+  private lit = false;
+  /** A called line's words as the players read them (the buttons named for their controllers). */
+  words: (text: string) => string = (text) => text;
   private readonly transform = new Float32Array(6);
   /** The display's height the atlas is painted for, and its pixels per unit across and down. */
   private lines = 0;
@@ -103,12 +148,27 @@ export class Hud {
     this.backHandle = renderer.registerPass(this.back);
     this.frontHandle = renderer.registerPass(this.front);
     this.atlas = new PaintAtlas([this.back, this.front]);
+    this.data = data;
     this.names = state.fighters.slice(0, 2).map((f) => data.roster.codes[f.rosterCode]?.name ?? '');
+    this.forceNames = this.forceNamesOf(data, state);
   }
 
   /** A new match: its fighters' names. */
   newMatch(data: FightData, state: FightState): void {
+    this.data = data;
     this.names = state.fighters.slice(0, 2).map((f) => data.roster.codes[f.rosterCode]?.name ?? '');
+    const forceNames = this.forceNamesOf(data, state);
+    /* A Tekken Force stage's enemies' names painted with it, not when each first comes in. */
+    if (this.lines !== 0) for (const [side, text, costume] of forceNames) this.nameplate(side, text, costume);
+    this.forceNames = forceNames;
+  }
+
+  /** In Tekken Force, the player's name and the names its stage may bring on (soldiers, boss), as their rows show them. */
+  private forceNamesOf(data: FightData, state: FightState): (readonly [0 | 1, string, number])[] {
+    if (state.mode !== TEKKEN_FORCE) return [];
+    const player = state.fighters[0]!.rosterCode;
+    const name = (side: 0 | 1, code: number): readonly [0 | 1, string, number] => [side, data.roster.codes[code]?.name ?? '', code >> 2 === SOLDIERS ? 0 : code & 3];
+    return [name(0, player), ...stageCodes(data, player, state.force.stage).map((code) => name(1, code))];
   }
 
   /* ---- The pictures, each painted in device pixels. ---- */
@@ -175,6 +235,34 @@ export class Hud {
     });
   }
 
+  /** A Team Battle member's mark: an upright pill, gold while standing, dark once beaten, a red cross over it when crossed out. */
+  private teamMark(crossed: boolean, beaten: boolean, w: number, h: number): AtlasPicture | null {
+    const { kx, ky } = this;
+    return this.atlas.picture(`team mark ${crossed} ${beaten}`, w * kx, h * ky, (g, left, top) => {
+      const [pw, ph] = [w * kx, h * ky];
+      const body = g.createLinearGradient(left, 0, left + pw, 0);
+      const stops = beaten ? ['#3a1a1a', '#6a3030', '#2a1010'] : ['#8a6010', '#ffe080', '#a07010'];
+      stops.forEach((colour, k) => body.addColorStop(k / (stops.length - 1), colour));
+      g.fillStyle = body;
+      g.beginPath();
+      g.roundRect(left + kx, top + ky, pw - 2 * kx, ph - 2 * ky, Math.min(pw, ph) / 3);
+      g.fill();
+      g.strokeStyle = '#101010';
+      g.lineWidth = Math.max(1, kx * 0.6);
+      g.stroke();
+      if (!crossed) return;
+      g.strokeStyle = '#ff2020';
+      g.lineWidth = Math.max(1.5, kx * 1.6);
+      g.lineCap = 'round';
+      g.beginPath();
+      g.moveTo(left + kx, top + ph * 0.3);
+      g.lineTo(left + pw - kx, top + ph * 0.7);
+      g.moveTo(left + pw - kx, top + ph * 0.3);
+      g.lineTo(left + kx, top + ph * 0.7);
+      g.stroke();
+    });
+  }
+
   private mark(lit: boolean): AtlasPicture | null {
     const { kx, ky } = this;
     return this.atlas.picture(`mark ${lit}`, MARK.width * kx, MARK.height * ky, (g, left, top) => {
@@ -203,6 +291,56 @@ export class Hud {
         g.roundRect(x(at), y(0.3), MARK.rim * kx, (MARK.height - 0.6) * ky, (MARK.rim * kx) / 2);
         g.fill();
       }
+    });
+  }
+
+  /** A Tekken Force key (0 copper, 1 silver, 2 gold): a polished key leaning right, its ring at the foot, its bit at the head. */
+  private key(index: number, w: number, h: number): AtlasPicture | null {
+    const { kx, ky } = this;
+    return this.atlas.picture(`key ${index}`, w * kx, h * ky, (g, left, top) => {
+      const [pw, ph] = [w * kx, h * ky];
+      const r = KEY_RAMPS[index] ?? KEY_RAMPS[0]!;
+      const size = Math.min(pw, ph * 0.62);
+      const shaft = size * 0.17;
+      const ring = size * 0.24;
+      g.save();
+      g.translate(left + pw * 0.34, top + ph * 0.8);
+      g.rotate(0.5);
+      const metal = g.createLinearGradient(-shaft * 2, 0, shaft * 2, 0);
+      [r[3]!, r[1]!, r[0]!, r[2]!, r[4]!].forEach((c, i) => metal.addColorStop(i / 4, c));
+      g.fillStyle = metal;
+      g.strokeStyle = r[4]!;
+      g.lineWidth = Math.max(1, 0.06 * size);
+      /* The ring, its hole through it. */
+      g.beginPath();
+      g.arc(0, 0, ring, 0, Math.PI * 2);
+      g.arc(0, 0, ring * 0.48, 0, Math.PI * 2, true);
+      g.fill('evenodd');
+      g.stroke();
+      /* The shaft up from the ring, and the bit's teeth along its head. */
+      const length = ph * 0.86;
+      g.beginPath();
+      g.rect(-shaft / 2, -length, shaft, length - ring * 0.9);
+      g.rect(-shaft / 2 - shaft * 1.1, -length, shaft * 1.1, shaft * 0.9);
+      g.rect(-shaft / 2 - shaft * 0.8, -length + shaft * 1.5, shaft * 0.8, shaft * 0.8);
+      g.fill();
+      g.stroke();
+      g.restore();
+    });
+  }
+
+  /** The marker over the progress bar's cursor: a triangle pointing down, white for the light layer to colour. */
+  private marker(): { slot: number; uv: AtlasPicture['uv'] } | null {
+    const light = this.light;
+    if (light === null) return null;
+    return light.atlas.picture('marker', 32, 16, (g, left, top) => {
+      g.fillStyle = '#ffffff';
+      g.beginPath();
+      g.moveTo(left, top);
+      g.lineTo(left + 32, top);
+      g.lineTo(left + 16, top + 16);
+      g.closePath();
+      g.fill();
     });
   }
 
@@ -276,7 +414,7 @@ export class Hud {
 
   /** Everything a fight shows painted, at the display's scale. */
   private paintAhead(): void {
-    for (const part of ['health', 'damage', 'lost'] as const) this.barColumn(part);
+    for (const part of ['health', 'damage', 'lost', 'empty'] as const) this.barColumn(part);
     this.cap(0);
     this.cap(1);
     this.mark(true);
@@ -285,15 +423,20 @@ export class Hud {
     this.names.forEach((name, side) => this.nameplate(side as 0 | 1, name, 0));
     for (const [font, colour, text] of [...CALLS, ...this.names.map((name) => [2, 4, `${name} WINS!`] as const)]) this.call(font, colour, text, (text.length - 1) * 22 + 24);
     for (let n = 0; n < 100; n += 1) this.call(CLOCK.font, CLOCK.colour, String(n).padStart(2, '0'), CLOCK.block);
+    if (this.forceNames.length === 0) return;
+    for (const [side, text, costume] of this.forceNames) this.nameplate(side, text, costume);
+    for (const [font, colour, text] of FORCE_CALLS) this.call(font, colour, text, (text.length - 1) * PRINTER[font]!.advance + PRINTER[font]!.width);
+    for (const [font, colour] of FORCE_DIGITS) for (const glyph of '0123456789"\'') this.call(font, colour, glyph, PRINTER[font]!.width);
+    for (let k = 0; k < 3; k += 1) this.key(k, 20, 36);
   }
 
   /* ---- Drawing. ---- */
 
   /** A picture with its top left at a point in units, moved to whole device pixels, one texel a pixel. */
-  private put(pass: SpritePass, picture: AtlasPicture, x: number, y: number, uv = picture.uv): void {
+  private put(pass: SpritePass, picture: AtlasPicture, x: number, y: number, uv = picture.uv, tint: readonly number[] | null = null): void {
     const px = Math.round(this.width / 2 + (x - MIDDLE) * this.kx);
     const py = Math.round(y * this.ky);
-    drawSprite(pass.batch, picture.slot, { x: MIDDLE + (px - this.width / 2) / this.kx, y: py / this.ky, w: picture.width / this.kx, h: picture.height / this.ky }, uv, null);
+    drawSprite(pass.batch, picture.slot, { x: MIDDLE + (px - this.width / 2) / this.kx, y: py / this.ky, w: picture.width / this.kx, h: picture.height / this.ky }, uv, tint);
   }
 
   private drawPiece(pass: SpritePass, placed: PlacedPiece): void {
@@ -303,16 +446,26 @@ export class Hud {
         const column = this.barColumn(piece.part);
         if (!column) return;
         const u = (column.uv.u0 + column.uv.u1) / 2;
-        drawSprite(pass.batch, column.slot, { x: placed.x, y: placed.y, w: placed.w, h: placed.h }, { u0: u, v0: column.uv.v0, u1: u, v1: column.uv.v1 }, null);
+        drawSprite(pass.batch, column.slot, { x: placed.x, y: placed.y, w: placed.w, h: placed.h }, { u0: u, v0: column.uv.v0, u1: u, v1: column.uv.v1 }, glowTint(piece.glow));
         return;
       }
       case 'cap': {
         const cap = this.cap(piece.end);
-        if (cap) this.put(pass, cap, placed.x, placed.y);
+        if (cap) this.put(pass, cap, placed.x, placed.y, cap.uv, glowTint(piece.glow));
         return;
       }
       case 'mark': {
         const mark = this.mark(piece.lit);
+        if (mark) this.put(pass, mark, placed.x, placed.y);
+        return;
+      }
+      case 'key': {
+        const key = this.key(piece.index, placed.w, placed.h);
+        if (key) this.put(pass, key, placed.x, placed.y);
+        return;
+      }
+      case 'team': {
+        const mark = this.teamMark(piece.crossed, piece.beaten, placed.w, placed.h);
         if (mark) this.put(pass, mark, placed.x, placed.y);
         return;
       }
@@ -335,7 +488,7 @@ export class Hud {
         return;
       }
       case 'call': {
-        const set = this.call(piece.font, piece.colour, piece.text, placed.w);
+        const set = this.call(piece.font, piece.colour, this.words(piece.text), placed.w);
         if (!set) return;
         const type = CALL_TYPE[piece.font] ?? CALL_TYPE[2];
         this.put(pass, set.picture, placed.x + placed.w / 2 - set.picture.width / 2 / this.kx, placed.y + type.baseline - set.baseline / this.ky);
@@ -356,7 +509,7 @@ export class Hud {
     }
     const half = (ACROSS / 2) * (width / height);
     this.transform.set([1 / half, 0, 0, -2 / LINES, -MIDDLE / half, 1]);
-    const { back, front } = layOutHud(state, this.names);
+    const { back, front } = layOutHud(state, this.names, this.data);
     for (const [pass, pieces] of [
       [this.back, back],
       [this.front, front],
@@ -366,6 +519,23 @@ export class Hud {
       for (const placed of pieces) this.drawPiece(pass, placed);
     }
     this.atlas.upload();
+    this.lit = state.mode === TEKKEN_FORCE;
+    if (this.lit) this.layProgress(state, width, height);
+  }
+
+  /** Tekken Force's progress bar laid as light over the finished picture. */
+  private layProgress(state: FightState, width: number, height: number): void {
+    this.light ??= new LightLayer(this.renderer, 'hud light', { middle: MIDDLE, across: ACROSS });
+    const light = this.light;
+    light.begin(width, height);
+    for (const q of progressBar(state, this.data)) {
+      if (!q.triangle) {
+        light.quad(q.blend, q.x, q.y, q.w, q.h, q.top, q.bottom, null, false, q.alpha);
+        continue;
+      }
+      const marker = this.marker();
+      if (marker !== null) light.quad(q.blend, q.x, q.y, q.w, q.h, q.top, q.bottom, marker, true, q.alpha);
+    }
   }
 
   /** The bars, names, marks and timer, inside the frame: after the stage, before the fighters. */
@@ -373,8 +543,9 @@ export class Hud {
     this.renderer.drawPass(this.backHandle);
   }
 
-  /** The calls, over the finished picture. */
+  /** The calls, over the finished picture (Tekken Force's progress bar over them). */
   drawFront(): void {
     this.renderer.drawPass(this.frontHandle);
+    if (this.lit) this.light?.end();
   }
 }

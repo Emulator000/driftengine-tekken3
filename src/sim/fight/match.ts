@@ -19,7 +19,15 @@ export interface Entrant {
 export interface MatchSetup {
   readonly stage: number;
   readonly entrants: readonly [Entrant, Entrant];
+  /** With Mokujin in it, the characters he draws a moveset from each round (roster bits). */
+  readonly draws?: number;
+  /** A Tekken Force stage's: its second enemy (the third fighter) and its boss (none on the final stage). */
+  readonly force?: { readonly third: Entrant; readonly boss: Entrant | null };
 }
+
+/** Mokujin's roster id; the characters he may draw from of those earned (the first fourteen and Gun Jack). */
+export const MOKUJIN = 0xf;
+export const MOKUJIN_DRAWS = 0x13fff;
 
 /** The tables a fight reads whatever the match: everything in the fight data but its movesets. */
 export type FightTables = Omit<FightData, 'sets' | 'moveIds'>;
@@ -43,6 +51,8 @@ const ATTRACT = 6;
 /** Full health by mode: the arcade's (one human or two), the attract's, survival's, team battle's, practice's, the rest's. */
 const Health = { ARCADE_ONE: 8, ARCADE_TWO: 3, ATTRACT: 2, SURVIVAL: 3, TEAM_BATTLE: 5, PRACTICE: 7, OTHER: 8 } as const;
 const STREAK_MOST = 999;
+/** Tekken Force's final stage, where the second enemy stands by unplaced. */
+const FORCE_FINAL_STAGE = 4;
 /** Stages whose ground fades from the fighters at once, by the stage. */
 export const groundFadeOf = (stage: number): number => (stage < 1 || (2 < stage && stage !== 7) ? 10000 : 0x1964);
 
@@ -58,6 +68,12 @@ function codeOf(tables: FightTables, roster: number, costume: number): { code: n
 export function matchMovesets(tables: FightTables, setup: MatchSetup): [number, number] {
   const [a, b] = setup.entrants.map((e) => codeOf(tables, e.roster, e.costume).moveset) as [number, number];
   return [a, b === a ? -1 : b];
+}
+
+/** A Tekken Force stage's boss's moveset (-1 none). */
+export function bossMoveset(tables: FightTables, setup: MatchSetup): number {
+  const boss = setup.force?.boss ?? null;
+  return boss === null ? -1 : codeOf(tables, boss.roster, boss.costume).moveset;
 }
 
 /** Each fighter's move ids bound to moves: its own moveset's table, the common moveset's shared moves, missing ids shared across. */
@@ -80,15 +96,54 @@ export function bindMoveIds(sets: readonly [LoadedMoveset | null, LoadedMoveset 
   return slotOf(1) === 0 ? [tables[0], [...tables[0]]] : tables;
 }
 
-/** The fight data of a match: the tables, its two movesets (one when both share) and the common one, the move ids bound. */
+/** The movesets of the characters Mokujin draws from (each roster's first costume's). */
+export function drawnMovesets(tables: FightTables, draws: number): number[] {
+  const ids = new Set<number>();
+  for (let roster = 0; roster < 0x16; roster += 1) if ((draws & (1 << roster)) !== 0) ids.add(codeOf(tables, roster, 0).moveset);
+  return [...ids];
+}
+
+/** The fight data of a match: the tables, its two movesets (one when both share) and the common one, the move ids bound; with Mokujin, the movesets he may draw. */
 export function fightDataFor(tables: FightTables, setup: MatchSetup, moveset: (id: number) => LoadedMoveset, common: LoadedMoveset): FightData {
   const [a, b] = matchMovesets(tables, setup);
   const sets: [LoadedMoveset | null, LoadedMoveset | null, LoadedMoveset] = [moveset(a), b < 0 ? null : moveset(b), common];
-  return { ...tables, sets, moveIds: bindMoveIds(sets) };
+  const draws = setup.draws ?? 0;
+  const boss = bossMoveset(tables, setup);
+  const force = setup.force === undefined ? {} : { forceSets: { enemies: sets[1] ?? sets[0]!, boss: boss < 0 ? null : moveset(boss) } };
+  if (draws === 0) return { ...tables, sets, moveIds: bindMoveIds(sets), ...force };
+  const movesets = new Map(drawnMovesets(tables, draws).map((id) => [id, moveset(id)] as const));
+  const own: [LoadedMoveset, LoadedMoveset] = [sets[0]!, sets[1] ?? sets[0]!];
+  return { ...tables, sets, moveIds: bindMoveIds(sets), mokujin: { draws, movesets, own }, ...force };
+}
+
+/**
+ * Mokujin's moveset for a round: one of the characters he draws from, at random (Paul's with none),
+ * then both sides' movesets bound again for the round.
+ */
+export function drawMokujin(state: FightState, data: FightData): void {
+  const [a, b] = state.fighters;
+  const mokujin = data.mokujin;
+  if (mokujin === undefined) throw new Error("Mokujin's match has no movesets to draw from");
+  for (const f of [a, b]) {
+    if (f.roster !== MOKUJIN) continue;
+    const rosters: number[] = [];
+    for (let roster = 0; roster < 0x16; roster += 1) if ((mokujin.draws & (1 << roster)) !== 0) rosters.push(roster);
+    state.noise = (Math.imul(state.noise, 5) + 1) >>> 0;
+    const roster = rosters.length === 0 ? 0 : rosters[(state.noise & 0xfff) % rosters.length]!;
+    f.character = codeOf(data, roster, 0).moveset;
+  }
+  const set = (f: Fighter, side: number): LoadedMoveset => {
+    if (f.roster !== MOKUJIN) return mokujin.own[side]!;
+    const found = mokujin.movesets.get(f.character);
+    if (found === undefined) throw new Error(`Mokujin drew moveset ${f.character}, which is not loaded`);
+    return found;
+  };
+  data.sets = [set(a, 0), b.character === a.character ? null : set(b, 1), data.sets[2]];
+  data.moveIds = bindMoveIds(data.sets);
 }
 
 /** A fighter on the roster: its roster id and code, its moveset, sound character and model pack. */
-function placeOnRoster(tables: FightTables, f: Fighter, entrant: Entrant): void {
+export function placeOnRoster(tables: FightTables, f: Fighter, entrant: Entrant): void {
   const { code, sound, moveset, pack } = codeOf(tables, entrant.roster, entrant.costume);
   f.roster = entrant.roster;
   f.rosterCode = code;
@@ -171,7 +226,7 @@ export function setUpModel(state: FightState, data: FightTables, f: Fighter): vo
 }
 
 /** A fighter's full health for the mode. */
-function setMaxHealth(state: FightState, data: FightTables, f: Fighter): void {
+export function setMaxHealth(state: FightState, data: FightTables, f: Fighter): void {
   const health = data.roster.health;
   let max: number;
   if (state.mode === ARCADE) max = health[state.match.humanCount !== 2 ? Health.ARCADE_ONE : Health.ARCADE_TWO]!;
@@ -207,8 +262,18 @@ export function startMatch(state: FightState, data: FightTables, setup: MatchSet
   state.hud.streak = Math.min(wins, STREAK_MOST);
   setMaxHealth(state, data, a);
   setMaxHealth(state, data, b);
+  if (state.mode === Mode.TEKKEN_BALL) setMaxHealth(state, data, state.fighters[2]!);
   a.wins = 0;
   b.wins = 0;
+  /* Tekken Force's second enemy, its model set up where a stage places it (not the final stage). */
+  const force = setup.force;
+  if (force !== undefined) {
+    const c = state.fighters[2];
+    placeOnRoster(data, c, force.third);
+    c.computer = 1;
+    c.wins = 0;
+    if (state.match.stage < FORCE_FINAL_STAGE) setUpModel(state, data, c);
+  }
   state.groundFade = groundFadeOf(setup.stage);
   state.scenery.yaw = 0;
   state.scenery.yawBefore = state.camera.drawn.yaw & 0xfff;

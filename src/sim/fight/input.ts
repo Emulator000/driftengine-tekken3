@@ -50,18 +50,23 @@ export function readInput(state: FightState, f: Fighter, data: FightData, comput
   else if (source === InputSource.REPLAY) replayInput(state, f, data);
 }
 
-/** The pad, or the computer's choice. L2 and L1 tap up and down for a few frames: the sidestep shortcut. */
+/**
+ * The pad, or the computer's choice. L2 and L1 tap up and down for a few frames: the sidestep
+ * shortcut. In Tekken Force the player reads the human's pad, and a computer at no health records
+ * what the pad read before it recorded.
+ */
 function padInput(state: FightState, f: Fighter, data: FightData, computer: ComputerInput): void {
+  const force = state.mode === Mode.TEKKEN_FORCE;
   let held = 0;
   let pressed = 0;
   let side = 0;
   if (f.computer !== 0) {
     /* The computer answers relative to its facing, so its side is always 0. */
     if (f.health !== 0) [held, pressed] = computer(state, f, data);
+    else if (force) [held, pressed] = state.input.lastRecorded as [number, number];
   } else {
-    if (state.mode === Mode.TEKKEN_FORCE) throw new Error("Tekken Force's input is not remade");
-    const pad = f.slot;
-    updateSide(f, state.fighters[(f.movesetSlot + 1) & 1]!);
+    const pad = force ? state.force.pad : f.slot;
+    updateSide(f, state.fighters[force ? f.opponent : (f.movesetSlot + 1) & 1]!);
     const rawHeld = state.input.pads.held[pad]!;
     const rawPressed = state.input.pads.pressed[pad]!;
     held = rawHeld;
@@ -93,7 +98,12 @@ function padInput(state: FightState, f: Fighter, data: FightData, computer: Comp
     held |= tapHeld;
     pressed |= tapPressed;
   }
-  if (state.mode === Mode.PRACTICE) throw new Error("practice mode's input is not remade");
+  /* Practice records what each fighter's pad held, for its input recorder. */
+  if (state.mode === Mode.PRACTICE) state.practice.heldPad[f.movesetSlot] = held & 0xffff;
+  if (force) {
+    state.input.lastRecorded[0] = held;
+    state.input.lastRecorded[1] = pressed;
+  }
   recordInput(f, data, side, held, pressed);
 }
 

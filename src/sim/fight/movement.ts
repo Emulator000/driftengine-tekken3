@@ -369,6 +369,42 @@ function hands(state: FightState, data: FightData, f: Fighter): void {
   if (f.attackDamage !== 0 && moveAt(data, f.move!).activeWindow.first - f.frame < 8) clench(data, f, HAND_SPEED);
 }
 
+/** Tekken Ball's shove from a move: its speed along the way to the target turned by its angle, over its frames. */
+function shove(state: FightState, data: FightData, f: Fighter): void {
+  const s = state.ball.shoves[f.movesetSlot]!;
+  if (s.speed === 0 || f.frame < s.first || s.last < f.frame) return;
+  const turn = s16(f.towardTarget) + s16(s.angle);
+  f.position[0] = (f.position[0]! + div(s.speed * sinWide(data, turn), 0x7fff)) | 0;
+  f.position[2] = (f.position[2]! + div(s.speed * cosWide(data, turn), 0x7fff)) | 0;
+}
+
+/** Tekken Force's effect attacks: their level, and the speed a thrown body strikes from. */
+const EFFECT = { levelHigh: 6, level: 0x607, speed: 0x5a, from: 11, damage: 10, cost: 0xa0000, flag: 0x100 } as const;
+
+/**
+ * Tekken Force's bodies as attacks: an enemy held in a throw and flung fast enough strikes what it
+ * meets by its speed; the player's move with the effect flag (all four buttons) strikes every
+ * enemy it pushes, its first frame costing ten health.
+ */
+function forceEffectHits(f: Fighter, move: ReturnType<typeof moveAt>): void {
+  const strikes = (damage: number): void => {
+    f.effectHit = 1;
+    f.levelHigh = EFFECT.levelHigh;
+    f.level = EFFECT.level;
+    f.attackDamage = damage;
+  };
+  if (f.computer !== 0) {
+    if (!(f.throwHold < 0) || f.frame < EFFECT.from || move.length <= f.frame) return;
+    const [x, y, z] = f.travel as [number, number, number];
+    const speed = isqrt((Math.imul(x, x) + Math.imul(y, y) + Math.imul(z, z)) >>> 0);
+    if (EFFECT.speed <= speed) strikes((speed >> 4) + EFFECT.damage);
+    return;
+  }
+  if (((move.hitFlags >>> 8) & EFFECT.flag) === 0) return;
+  strikes(EFFECT.damage);
+  if (f.moveStarted !== 0 && EFFECT.cost < f.health) f.health -= EFFECT.cost;
+}
+
 /** One frame of a fighter's body. */
 export function moveBody(state: FightState, data: FightData, f: Fighter, opponent: Fighter): void {
   f.landedLightly = 0;
@@ -382,7 +418,7 @@ export function moveBody(state: FightState, data: FightData, f: Fighter, opponen
     if (s8(f.inAir) === 0) f.position[1] = 0;
     else if (f.skeleton.base.translation[1]! + 0x80 < 0) f.position[1] = (f.skeleton.base.translation[1]! + 0x80) >> 1;
   }
-  if (state.mode === Mode.TEKKEN_BALL) throw new Error("Tekken Ball's movement is not remade");
+  if (state.mode === Mode.TEKKEN_BALL) shove(state, data, f);
   if (s8(f.inAir) === 0) f.launched = 0;
   if (f.turnFrames !== 0) {
     f.turnFrames = s16(f.turnFrames - 1);
@@ -403,7 +439,7 @@ export function moveBody(state: FightState, data: FightData, f: Fighter, opponen
     f.attackSegments = s8(hit.codes[2]!) === 0 ? 1 : 2;
   }
   f.effectHit = 0;
-  if (state.mode === Mode.TEKKEN_FORCE) throw new Error("Tekken Force's body rules are not remade");
+  if (state.mode === Mode.TEKKEN_FORCE) forceEffectHits(f, move);
   f.inAir = f.stunned === 0 && !(move.stepWindow.first <= f.frame && f.frame <= move.stepWindow.last) ? 0 : 1;
   if (u16(f.frame) === move.stepWindow.last && f.loops === -1 && u16(f.frame) !== 1 && s8(f.airborne) !== RISING) {
     if (s8(f.beingHit) === 0 || f.launchKind === LANDS_ON_FEET || (s8(f.kind) !== 9 && (f.stance & 4) === 0)) f.landedLightly = 1;

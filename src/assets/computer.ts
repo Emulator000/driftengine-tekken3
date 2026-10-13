@@ -62,5 +62,11 @@ export function parseComputerTables(json: unknown, where = 'tables/computer.json
       const a = expectObject(v, at);
       return { moveset: expectInt(a.moveset, `${at}.moveset`, 0, 0xffff), against: answer(a.against, `${at}.against`), own: answer(a.own, `${at}.own`) };
     }),
+    forcePacing: expectArray(o.forcePacing, `${where} forcePacing`, 3).map((level, l) =>
+      expectArray(level, `${where} forcePacing[${l}]`, 5).map((entry, i) => {
+        const [wait, hold, hangBack] = expectArray(entry, `${where} forcePacing[${l}][${i}]`, 3).map((v, k) => expectInt(v, `${where} forcePacing[${l}][${i}][${k}]`, -0x8000, 0x7fff));
+        return [wait!, hold!, hangBack!] as const;
+      }),
+    ),
   };
 }

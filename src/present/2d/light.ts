@@ -7,7 +7,7 @@
  * through a white palette, so a slice crossfades into a bright background), its silhouette.
  *
  * A quad is laid in the original's screen units (as `ScreenLayer` lays them, 480 lines down the
- * middle 4:3 of the window), its colour shaded from its top edge to its bottom one as the GPU
+ * middle 4:3 of the window; or the fight's, given as its middle and its units across), its colour shaded from its top edge to its bottom one as the GPU
  * shades a quad from its vertices, and textured or not: a picture of its own atlas multiplied by
  * the colour, or (`mask`) the colour wherever the picture has ink. `over` lays a picture as an
  * ordinary sprite does, for the slices the original draws plainly between faded ones.
@@ -50,6 +50,12 @@ const RUN = 4;
 const MIDDLE = 184;
 const LINES = 480;
 const ACROSS = 276;
+
+/** A layer's screen units: x at the window's middle, and the units across a 4:3 picture's height. */
+export interface LightUnits {
+  readonly middle: number;
+  readonly across: number;
+}
 
 const GLSL_VERTEX = `#version 300 es
 layout(location = 0) in vec4 aPositionUv;
@@ -216,10 +222,14 @@ export class LightLayer implements PassDefinition {
   /** The window's width and height in device pixels. */
   private width = 1;
   private lines = 0;
+  private readonly middle: number;
+  private readonly across: number;
 
-  constructor(renderer: RendererApi, label: string) {
+  constructor(renderer: RendererApi, label: string, units: LightUnits = { middle: MIDDLE, across: ACROSS }) {
     this.label = label;
     this.renderer = renderer;
+    this.middle = units.middle;
+    this.across = units.across;
     this.handle = renderer.registerPass(this);
     this.atlas = new PaintAtlas([this]);
   }
@@ -235,13 +245,13 @@ export class LightLayer implements PassDefinition {
     let emptied = false;
     if (height !== this.lines) {
       this.lines = height;
-      this.kx = height / ACROSS;
+      this.kx = height / this.across;
       this.ky = height / LINES;
       this.atlas.clear();
       emptied = true;
     }
-    const half = (ACROSS / 2) * (width / height);
-    this.toNdc.set([1 / half, -MIDDLE / half, -2 / LINES, 1]);
+    const half = (this.across / 2) * (width / height);
+    this.toNdc.set([1 / half, -this.middle / half, -2 / LINES, 1]);
     this.count = 0;
     this.runCount = 0;
     this.quads = [];
@@ -302,8 +312,8 @@ export class LightLayer implements PassDefinition {
     }
     this.quads.push({ blend, x, y, w, h, top, bottom, texels, mask, alpha });
     /* On the window's whole pixels across, as the layers place their pictures. */
-    const px = Math.round(this.width / 2 + (x - MIDDLE) * this.kx);
-    const left = MIDDLE + (px - this.width / 2) / this.kx;
+    const px = Math.round(this.width / 2 + (x - this.middle) * this.kx);
+    const left = this.middle + (px - this.width / 2) / this.kx;
     const kind = texels === null ? 0 : mask ? 2 : 1;
     const { u0, v0, u1, v1 } = texels?.uv ?? { u0: 0, v0: 0, u1: 0, v1: 0 };
     const corners = [
@@ -577,4 +587,26 @@ export class LightLayer implements PassDefinition {
     }
     this.gl = null;
   }
+}
+
+/** A ramp across, black at its left and white at its right, for light shaded across. */
+function rampAcross(light: LightLayer, reversed: boolean): Texels | null {
+  const picture = light.atlas.picture(`ramp across ${reversed}`, 64, 4, (g, left, top) => {
+    const gradient = g.createLinearGradient(left, 0, left + 64, 0);
+    gradient.addColorStop(0, reversed ? '#ffffff' : '#000000');
+    gradient.addColorStop(1, reversed ? '#000000' : '#ffffff');
+    g.fillStyle = gradient;
+    g.fillRect(left, top, 64, 4);
+  });
+  if (picture === null) return null;
+  const { u0, u1, v0, v1 } = picture.uv;
+  return { slot: picture.slot, uv: { u0: u0 + (u1 - u0) / 128, u1: u1 - (u1 - u0) / 128, v0: (v0 + v1) / 2, v1: (v0 + v1) / 2 } };
+}
+
+/** Light added or taken away over a rectangle, shaded across from none on one side to `level` on the other. */
+export function lightAcross(light: LightLayer, blend: 'add' | 'subtract', x: number, y: number, w: number, h: number, colour: Rgb, fullAtRight: boolean): void {
+  const texels = rampAcross(light, !fullAtRight);
+  if (texels === null) return;
+  const half: Rgb = [colour[0] / 2, colour[1] / 2, colour[2] / 2];
+  light.quad(blend, x, y, w, h, half, half, texels);
 }

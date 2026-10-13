@@ -10,9 +10,12 @@
  * fading by the square of the distance, so the floor sinks into the dark beyond the patch, which
  * is then always laid round the fighters' midpoint; with True Ogre in the match a floor shaded by
  * depth takes the midpoint's light. A view wider than the game's 4:3 widens the culling and lays
- * extra rings of tiles, continuing the map as it repeats.
+ * extra rings of tiles, continuing the map as it repeats. Tekken Force lays a wider patch, 10 × 3
+ * tiles of 2500 mm, from its own template and the first three rows of the map, always at the same
+ * depth, its shade by depth measured from the camera's own distance, its dark stage lit at the
+ * player's feet (the patch laid round them) and its final stage lit ahead of the camera.
  */
-import type { ArenaTables, StageLayout } from '../../assets/arena.ts';
+import type { ArenaTables, GroundTemplate, StageLayout } from '../../assets/arena.ts';
 import { libraryRoot, tableRoot } from '../../sim/math/roots.ts';
 import { fighterLockedOn } from '../../sim/fight/camera.ts';
 import type { FightData, FightState } from '../../sim/fight/state.ts';
@@ -21,6 +24,9 @@ import type { GroundState } from './stage/ground.ts';
 
 const TILE = 1800;
 const MAP = 10;
+/** Tekken Force's patch: its tiles, its map's rows, the depth it is laid at, and where its final stage's light stands in depth. */
+const FORCE = { tile: 2500, rows: 3, z: 0x145, lightZ: -2000 } as const;
+const TEKKEN_FORCE = 8;
 const MAX_RINGS = 10;
 const MAX_QUADS = (MAP + 2 * MAX_RINGS) ** 2;
 /** The game's picture: half its width in pixels, the culling's view angle at it (4096ths), the attract intro's. */
@@ -57,7 +63,10 @@ export interface View {
 }
 
 class Trig {
-  constructor(private readonly sine: Int16Array) {}
+  private readonly sine: Int16Array;
+  constructor(sine: Int16Array) {
+    this.sine = sine;
+  }
   sin(i: number): number {
     return this.sine[i & 0xfff]!;
   }
@@ -192,13 +201,28 @@ export function layScenery(state: FightState, data: FightData, arena: ArenaTable
   }
 }
 
+/**
+ * A ground's patch: its tiles' size, its map's columns and rows, the template it is laid from, and
+ * the depth Tekken Force lays it at (null elsewhere).
+ */
+interface Patch {
+  readonly tile: number;
+  readonly columns: number;
+  readonly rows: number;
+  readonly template: GroundTemplate;
+  readonly z: number | null;
+}
+
+const patchOf = (state: FightState, arena: ArenaTables): Patch =>
+  state.mode === TEKKEN_FORCE ? { tile: FORCE.tile, columns: MAP, rows: FORCE.rows, template: arena.forceGround, z: FORCE.z } : { tile: TILE, columns: MAP, rows: MAP, template: arena.ground, z: null };
+
 /** Under a high camera, the patch goes where the view's lower edge meets the floor. */
-function highCentre(trig: Trig, state: FightState, data: FightData): [number, number] {
+function highCentre(trig: Trig, state: FightState, data: FightData, tile: number): [number, number] {
   const drawn = state.camera.drawn;
   const [camX, camY, camZ] = [drawn.eye[0]!, drawn.eye[1]!, drawn.eye[2]!];
   const u = (drawn.pitch + 0xef) & 0xfff;
   const reach = Math.trunc((Math.abs(camY) * trig.cos(u)) / trig.sin(u));
-  const half = Math.trunc((TILE * MAP) / 2);
+  const half = Math.trunc((tile * MAP) / 2);
   let dist = tableRoot((Math.imul(reach, reach) + Math.imul(camY, camY)) | 0, data.math);
   const yaw = (drawn.yaw + 0x400) & 0xfff;
   const c = trig.cos(yaw);
@@ -209,37 +233,45 @@ function highCentre(trig: Trig, state: FightState, data: FightData): [number, nu
   const q = (drawn.yaw + 0x600) & 0xfff;
   const sector = q >> 10;
   const flip = (q >> 9) & 1;
-  const lim = q12((-0x4ce - camY) * Math.trunc((TILE << 12) / 300));
+  const lim = q12((-0x4ce - camY) * Math.trunc((tile << 12) / 300));
   const limit = Math.min(lim, half);
   const along = (f: number): number => (flip === 0 ? -q12(dist * f) : q12(dist * f));
   if (sector === 1 || sector === 3) {
-    const z = z0 + along(c) + (sector === 1 ? -Math.trunc(TILE / 2) + limit : Math.trunc(TILE / 2) - limit);
+    const z = z0 + along(c) + (sector === 1 ? -Math.trunc(tile / 2) + limit : Math.trunc(tile / 2) - limit);
     return [Math.trunc((c * (z - camZ)) / s) + camX, z];
   }
-  const x = x0 - along(s) + (sector === 0 ? -Math.trunc(TILE / 2) + limit : Math.trunc(TILE / 2) - limit);
+  const x = x0 - along(s) + (sector === 0 ? -Math.trunc(tile / 2) + limit : Math.trunc(tile / 2) - limit);
   return [x, Math.trunc((s * (x - camX)) / c) + camZ];
 }
 
-/** The ground's centre while it shows: under a high camera looking down, where the view meets the floor; else the fighters' midpoint, a tile back when the view tilts up. */
-function groundCentre(trig: Trig, state: FightState, data: FightData): [number, number] | null {
+/**
+ * The ground's centre while it shows: under a high camera looking down, where the view meets the
+ * floor; else the fighters' midpoint, a tile back when the view tilts up. Tekken Force's always at
+ * its own depth.
+ */
+function groundCentre(trig: Trig, state: FightState, data: FightData, patch: Patch): [number, number] | null {
   if (state.groundShown === 0) return null;
   const drawn = state.camera.drawn;
   const pitch = drawn.pitch;
-  if ((pitch & 0xfff) !== 0 && (pitch & 0x800) === 0 && drawn.eye[1]! < -0x6b8) return highCentre(trig, state, data);
-  const [a, b] = state.fighters;
-  let x = ((a.skeleton.base.translation[0]! + b.skeleton.base.translation[0]!) / 2) | 0;
-  let z = ((a.skeleton.base.translation[2]! + b.skeleton.base.translation[2]!) / 2) | 0;
-  const tilted = (pitch & 0x800) !== 0 ? (pitch & 0xfff) - 0x1000 : pitch & 0xfff;
-  if (tilted < -0x25) {
-    const yaw = (drawn.yaw + 0x400) & 0xfff;
-    x -= q12(TILE * trig.cos(yaw));
-    z -= q12(TILE * trig.sin(yaw));
+  const { tile } = patch;
+  let centre: [number, number];
+  if ((pitch & 0xfff) !== 0 && (pitch & 0x800) === 0 && drawn.eye[1]! < -0x6b8) centre = highCentre(trig, state, data, tile);
+  else {
+    const [a, b] = state.fighters;
+    centre = [((a.skeleton.base.translation[0]! + b.skeleton.base.translation[0]!) / 2) | 0, ((a.skeleton.base.translation[2]! + b.skeleton.base.translation[2]!) / 2) | 0];
+    const tilted = (pitch & 0x800) !== 0 ? (pitch & 0xfff) - 0x1000 : pitch & 0xfff;
+    if (tilted < -0x25) {
+      const yaw = (drawn.yaw + 0x400) & 0xfff;
+      centre[0] -= q12(tile * trig.cos(yaw));
+      centre[1] -= q12(tile * trig.sin(yaw));
+    }
   }
-  return [x, z];
+  if (patch.z !== null) centre[1] = patch.z;
+  return centre;
 }
 
-/** Floor division as the game corrects C's truncation. */
-const tileOf = (v: number): number => Math.trunc(v / TILE) - (v < 0 ? 1 : 0);
+/** Floor division by the tile as the game corrects C's truncation. */
+const tileOf = (v: number, tile: number): number => Math.trunc(v / tile) - (v < 0 ? 1 : 0);
 
 /** A point's depth through the view, as the geometry unit saturates it. */
 function depthOf(state: FightState, ox: number, oz: number, x: number, z: number): number {
@@ -250,36 +282,54 @@ function depthOf(state: FightState, ox: number, oz: number, x: number, z: number
   return depth < 0 ? 0 : depth > 0xffff ? 0xffff : depth;
 }
 
-/** A lit floor's centre: the fighters' midpoint, unless the view looks exactly level with the floor. */
-function litCentre(trig: Trig, state: FightState): [number, number] | null {
+/**
+ * A lit floor's point the patch is snapped round (half a tile on): the fighters' midpoint, or in
+ * Tekken Force the player's root half a tile further in depth; none while the view looks exactly
+ * level with the floor.
+ */
+function litCentre(trig: Trig, state: FightState, patch: Patch): [number, number] | null {
   if (trig.sin(state.camera.drawn.pitch + 0xef) === 0) return null;
   const [a, b] = state.fighters;
+  if (patch.z !== null) return [a.skeleton.base.translation[0]!, (a.skeleton.base.translation[2]! + patch.tile / 2) | 0];
   return [((a.skeleton.base.translation[0]! + b.skeleton.base.translation[0]!) / 2) | 0, ((a.skeleton.base.translation[2]! + b.skeleton.base.translation[2]!) / 2) | 0];
+}
+
+/**
+ * Where a lit floor's light stands, with the second fighter's for the two-light kind: the fighters'
+ * roots, the player's, or the point ahead of the camera on Tekken Force's final stage.
+ */
+function lightsOf(state: FightState, kind: number): readonly [readonly number[], readonly number[]] {
+  const [a, b] = state.fighters;
+  if (kind === GroundLight.CAMERA) return [[state.camera.drawn.eye[0]!, 0, FORCE.lightZ], b.skeleton.base.translation];
+  return [a.skeleton.base.translation, b.skeleton.base.translation];
 }
 
 /** The ground's patch this frame: each quad's map cell, its corners (mm) and their shades (128 unchanged). */
 export function layGround(state: FightState, data: FightData, arena: ArenaTables, stage: StageLayout, view: View, out: ReturnType<typeof newGround>): void {
   const trig = new Trig(data.math.sine);
+  const patch = patchOf(state, arena);
+  const { tile, columns, rows, template } = patch;
+  const force = patch.z !== null;
   /* The attract intro lays its floor its own way, shaded by depth. */
-  const lighting = state.attractIntro !== 0 ? { kind: GroundLight.DEPTH, brightest: 0 } : groundLighting(stage, state.stage, state.match.trueOgres);
+  const lighting = state.attractIntro !== 0 ? { kind: GroundLight.DEPTH, brightest: 0 } : groundLighting(stage, state.stage, state.match.trueOgres, force && state.force.finalStage !== 0);
   const lit = lighting.kind !== GroundLight.DEPTH;
-  const centre = lit ? litCentre(trig, state) : groundCentre(trig, state, data);
+  const centre = lit ? litCentre(trig, state, patch) : groundCentre(trig, state, data, patch);
   out.drawn = centre !== null;
   if (centre === null) return;
-  const ix = tileOf(centre[0] + TILE / 2);
-  const iz = tileOf(centre[1] + TILE / 2);
-  const ox = ix * TILE;
-  const oz = iz * TILE;
-  let column = ix % MAP;
-  if (column < 0) column += MAP;
-  let row = iz % MAP;
-  if (row < 0) row += MAP;
-  row = MAP - (row + 1);
+  const ix = tileOf(centre[0] + tile / 2, tile);
+  const iz = tileOf(centre[1] + tile / 2, tile);
+  const ox = ix * tile;
+  const oz = iz * tile;
+  let column = ix % columns;
+  if (column < 0) column += columns;
+  let row = iz % rows;
+  if (row < 0) row += rows;
+  row = rows - (row + 1);
   const [a, b] = state.fighters;
   const eye = state.camera.drawn.eye;
   const dx = eye[0]! - (((a.skeleton.base.translation[0]! + b.skeleton.base.translation[0]!) / 2) | 0);
   const dz = eye[2]! - (((a.skeleton.base.translation[2]! + b.skeleton.base.translation[2]!) / 2) | 0);
-  const reference = libraryRoot((Math.imul(dx, dx) + Math.imul(dz, dz)) | 0, data.math);
+  const reference = force ? Math.abs(eye[2]!) : libraryRoot((Math.imul(dx, dx) + Math.imul(dz, dz)) | 0, data.math);
   const fade = state.groundFade === 0 ? 1 : state.groundFade;
   const shadeAt = (depth: number): number => {
     if (stage.shadeStrength === 0) return 0x80;
@@ -290,29 +340,30 @@ export function layGround(state: FightState, data: FightData, arena: ArenaTables
     const shade = ((arena.shades[at]! * stage.shadeStrength) >> 7) + 0x80;
     return shade < 0 ? 0 : 0xfe < shade ? 0xfe : shade;
   };
-  const roots = [a.skeleton.base.translation, b.skeleton.base.translation] as const;
+  const [lightA, lightB] = lightsOf(state, lighting.kind);
   /* A corner's shade: by its depth, or by the light where it lies. */
-  const cornerShade = (x: number, z: number): number => (lit ? litShade(lighting.kind, lighting.brightest, roots[0], roots[1], x, z) : shadeAt(depthOf(state, ox, oz, x - ox, z - oz)));
-  const shades = arena.ground.vertices.map(([x, z]) => cornerShade(x + ox, z + oz));
+  const cornerShade = (x: number, z: number): number => (lit ? litShade(lighting.kind, lighting.brightest, lightA, lightB, x, z) : shadeAt(depthOf(state, ox, oz, x - ox, z - oz)));
+  const shades = template.vertices.map(([x, z]) => cornerShade(x + ox, z + oz));
   let mapRow = row;
-  for (let r = 0; r < MAP; r += 1) {
+  for (let r = 0; r < rows; r += 1) {
     let mapColumn = column;
-    for (let c = 0; c < MAP; c += 1) {
-      const quad = r * MAP + c;
-      out.cell[quad] = mapRow * MAP + mapColumn;
-      const corners = arena.ground.quads[quad]!;
+    for (let c = 0; c < columns; c += 1) {
+      const quad = r * columns + c;
+      out.cell[quad] = mapRow * columns + mapColumn;
+      const corners = template.quads[quad]!;
       for (let k = 0; k < 4; k += 1) {
-        const [x, z] = arena.ground.vertices[corners[k]!]!;
+        const [x, z] = template.vertices[corners[k]!]!;
         out.x[quad * 4 + k] = x + ox;
         out.z[quad * 4 + k] = z + oz;
         out.shade[quad * 4 + k] = shades[corners[k]!]!;
       }
-      mapColumn = mapColumn + 1 < MAP ? mapColumn + 1 : 0;
+      mapColumn = mapColumn + 1 < columns ? mapColumn + 1 : 0;
     }
-    mapRow = mapRow - 1 < 0 ? MAP - 1 : mapRow - 1;
+    mapRow = mapRow - 1 < 0 ? rows - 1 : mapRow - 1;
   }
-  out.count = MAP * MAP;
-  const rings = view.widening <= 1 ? 0 : Math.min(MAX_RINGS, Math.ceil(5 * (view.widening - 1)) + 1);
+  out.count = columns * rows;
+  /* Tekken Force's patch already reaches past the widest view, at a fixed depth. */
+  const rings = force || view.widening <= 1 ? 0 : Math.min(MAX_RINGS, Math.ceil(5 * (view.widening - 1)) + 1);
   const wrap = (v: number, n: number): number => ((v % n) + n) % n;
   let quad = out.count;
   for (let r = -rings; r < MAP + rings; r += 1) {
