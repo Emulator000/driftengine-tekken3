@@ -29,6 +29,8 @@ export type SoundCommand =
   | { readonly key: 'movie read'; readonly sector: number }
   | { readonly key: 'drive pause' }
   | { readonly key: 'music reset' }
+  | { readonly key: 'music options'; readonly set: number; readonly stereo: number }
+  | { readonly key: 'theater song'; readonly song: number; readonly set: number }
   | { readonly key: 'reverb'; readonly voices: number; readonly depth: number }
   | { readonly key: 'at'; readonly vblank: number };
 
@@ -91,6 +93,11 @@ export function lineOff(state: FightState, side: number, code: number): void {
 /** Song `song` played, or with `next` readied to play when asked for without. */
 export function playSong(state: FightState, song: number, next: boolean): void {
   state.sound.commands.push({ key: 'song', song, next });
+}
+
+/** The Theater's music player's song: its pick from `set` (0 the arrangement's, 1 the arcade's), played once from its start. */
+export function playTheaterSong(state: FightState, song: number, set: number): void {
+  state.sound.commands.push({ key: 'theater song', song, set });
 }
 
 /** The song's volume (of 127) set as it is: a movie's, from its record. */

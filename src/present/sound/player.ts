@@ -25,6 +25,8 @@ export class SoundPlayer {
   private readonly music: MusicTables;
   private readonly fetchSong: (xa: number) => Promise<ArrayBuffer>;
   private readonly asked = new Set<number>();
+  /** The set songs pick from (-1 none), as the game's music options last said. */
+  private set: number;
 
   private readonly fetchTrack: (track: number) => Promise<ArrayBuffer>;
 
@@ -35,6 +37,7 @@ export class SoundPlayer {
     this.meter.fftSize = this.samples.length;
     node.connect(this.meter);
     this.music = music;
+    this.set = music.set === 1 ? 1 : 0;
     this.fetchSong = fetchSong;
     this.fetchTrack = fetchTrack;
   }
@@ -80,7 +83,11 @@ export class SoundPlayer {
   /** A field's sound (vertical blank `vblank`): its commands (only the music's before the audio runs) and the banks in its slots. */
   field(state: FightState, vblank: number): void {
     const commands = this.running ? [...state.sound.commands] : state.sound.commands.filter((c) => !VOICE_KEYS.has(c.key));
-    for (const c of commands) if (c.key === 'song') this.fetch(c.song);
+    for (const c of commands) {
+      if (c.key === 'music options') this.set = c.set;
+      else if (c.key === 'song') this.fetch(c.song, this.set);
+      else if (c.key === 'theater song') this.fetch(c.song, c.set);
+    }
     /* VAB 2 holding the Theater's own bank goes as its own slot number. */
     const vabs = [...state.sound.vabs];
     if (state.sound.theater !== 0) vabs[2] = THEATER_SLOT;
@@ -88,8 +95,9 @@ export class SoundPlayer {
   }
 
   /** A song's XA song, or its audio track's samples, fetched and sent, once. */
-  private fetch(song: number): void {
-    const pick = this.music.picks[song]?.[this.music.set === 1 ? 1 : 0];
+  private fetch(song: number, set: number): void {
+    if (set < 0) return;
+    const pick = this.music.picks[song]?.[set];
     if (pick === undefined) return;
     const key = pick.track ? 0x100 + pick.xa : pick.xa;
     if (this.asked.has(key)) return;

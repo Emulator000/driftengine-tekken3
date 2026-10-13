@@ -8,6 +8,11 @@
  *   title's picture, the TEKKEN 3 logo over its red kanji, six cuts of 8-bit texels each through
  *   its own palette (`0x7ea0` on, a row apart), 368 × 480; and the namco mark under it, 72 × 16
  *   4-bit texels at VRAM word 800 through the palette at `0x7820`.
+ * - The Options' (the same overlay): the title's picture through their own palettes (`0x7d20` on),
+ *   blue; the pad's two pictures (the archive at `0x800d4d68`: the DualShock's, then the standard
+ *   pad's, 144 × 136 each, 8-bit); the modes' labels (`0x800eae90`, 96 × 14 each, in their colours,
+ *   then greyed through `0x7e5e`); the key configuration's step arrows (20 × 16, through the small
+ *   font's palettes for colours 5, 6, 10, 7 and 11); and the four buttons (`0x800b92a4`, 12 × 20 each).
  * - From the character select's overlay (BNS 9, at the same place; its archive where its state
  *   later lies, `0x80118628`, with the boot's textures from the title overlay's `0x800ba088`
  *   under it): each character's big icon (`0x800b8da8`, 32 × 68) and small one (`0x8002152c` in
@@ -15,6 +20,16 @@
  *   archive of 8-bit TIMs 126 × 252 whose palette moves on 64 colours every 64 lines). Kazuya's
  *   portrait and icons come from his art file when it is built. The select's frame, title and
  *   pattern are drawn new.
+ * - From the results' overlay (BNS 302, at the same place): the backdrops of Time Attack's results
+ *   (its archive at `0x800b9394`) and Tekken Force's (`0x800d8400`), each cut and drawn as the
+ *   title's picture is, 368 × 480.
+ * - From Tekken Ball's stage file (BNS 55): the beach's panorama (1024 × 256, its 32 × 32 cells as
+ *   its map lays them, texel 0 clear).
+ * - From Tekken Force's stage files (BNS 51 to 54): each stage's backdrop (its 64 × 64 cells as its
+ *   map lays them), and from the first the +LIFE item (64 × 128 at VRAM (512, 64) through the
+ *   palette at `0x7801`) and its glow (64 × 64 at (512, 0) through `0x7800`); from Tekken Force's
+ *   overlay (BNS 7, at `0x800b0548`) the three keys (`0x800b0afc`, an archive of 4-bit TIMs 20 × 36),
+ *   side by side.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -46,8 +61,9 @@ const SMALL_ICONS = 0x8002152c;
 const ICON = { w: 0x20, big: 0x44, small: 0x3a };
 const PORTRAIT = { w: 126, h: 252, band: 64, columns: 8 };
 const ROSTER = 22;
-/** True Ogre's small icon, and the empty one, are drawn in three pieces. */
+/** True Ogre's small icon, and the two question marks (no choice's orange one, a taken or unearned cell's blue one), are drawn in three pieces. */
 const TRUE_OGRE = 0x14;
+const NO_CHOICE_ICON = 0x16;
 const EMPTY_ICON = 0x17;
 const KAZUYA_ART = 'public/data/fighters/52.art';
 
@@ -61,6 +77,13 @@ function createVram() {
   };
   return {
     words,
+    /** TIMs as they are, each placed. */
+    load(tims) {
+      for (const tim of tims) {
+        if (tim.image) place(tim.image);
+        if (tim.clut) place(tim.clut);
+      }
+    },
     archive(bytes, at) {
       const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
       const count = view.getUint32(at, true);
@@ -132,11 +155,112 @@ function drawTim(sheet, tim, x0, y0) {
   for (let y = 0; y < tim.image.h; y += 1) for (let x = 0; x < tim.image.w * 2; x += 1) sheet.plot(x0 + x, y0 + y, tim.clut.data[(tim.image.data[y * tim.image.w + (x >> 1)] >> ((x & 1) * 8)) & 0xff]);
 }
 
+/** A 4-bit TIM through its first palette at (x, y). */
+function drawTim4(sheet, tim, x0, y0) {
+  for (let y = 0; y < tim.image.h; y += 1) for (let x = 0; x < tim.image.w * 4; x += 1) sheet.plot(x0 + x, y0 + y, tim.clut.data[(tim.image.data[y * tim.image.w + (x >> 2)] >> ((x & 3) * 4)) & 0xf]);
+}
+
+/** A full-screen picture of six 8-bit cuts, each through its own palette (from `palette` on, a row apart), from an archive. */
+function screenPicture(bytes, archive, palette = TITLE_PALETTE) {
+  const vram = createVram();
+  vram.archive(bytes, archive - OVERLAY);
+  const picture = createPicture(SCREEN.w, SCREEN.h);
+  TITLE_CUTS.forEach(([x, y, w, h, source, top], i) => drawImage(vram, picture, x, y, w, h, source, top, palette + i * 0x40, 0x80));
+  return picture;
+}
+
+/**
+ * The Theater's menu's (its overlay, BNS 301): its archive (`0x801143d8`) drawn through its
+ * thumbnails' records (`0x800b9984`, 12 bytes: palette x and y, picture x and y), 61 thumbnails of
+ * 48 × 64 and the film frame over them, eight to a row; and of its eight pictures (`0x8010e204`,
+ * plain TIMs) the Tekken 3 cover strip, its caption and the disc.
+ */
+const THEATER_ARCHIVE = 0x801143d8;
+const THUMB_RECORDS = 0x800b9984;
+const THUMB = { w: 0x30, h: 0x40, count: 61, columns: 8, film: { uv: (0x7f60 << 16) | (0x40 << 8) | 0x60, page: 0x1a } };
+const THEATER_PICTURES = 0x8010e204;
+const THEATER_PICTURE = { cover: 4, caption: 5, disc: 7 };
+
+function theaterPictures(theater) {
+  const vram = createVram();
+  vram.archive(theater, THEATER_ARCHIVE - OVERLAY);
+  const view = new DataView(theater.buffer, theater.byteOffset, theater.byteLength);
+  const sheet = createPicture(THUMB.w * THUMB.columns, THUMB.h * Math.ceil((THUMB.count + 1) / THUMB.columns));
+  for (let i = 0; i <= THUMB.count; i += 1) {
+    const [x, y] = [(i % THUMB.columns) * THUMB.w, Math.floor(i / THUMB.columns) * THUMB.h];
+    if (i === THUMB.count) {
+      drawSprite(vram, sheet, x, y, THUMB.w, THUMB.h, THUMB.film.uv >>> 0, THUMB.film.page);
+      continue;
+    }
+    const [cx, cy, ix, iy] = [0, 2, 4, 6].map((o) => view.getUint16(THUMB_RECORDS - OVERLAY + i * 12 + o, true));
+    const uv = ((ix & 0x7f) << 1) | ((iy & 0xff) << 8) | (((cy << 6) | ((cx >> 4) & 0x3f)) << 16);
+    drawSprite(vram, sheet, x, y, THUMB.w, THUMB.h, uv >>> 0, 0x80 | ((iy & 0x100) >> 4) | ((ix & 0x380) >> 6));
+  }
+  const tim = (n) => readTimChain(theater.subarray(view.getUint32(THEATER_PICTURES - OVERLAY + n * 4, true) - OVERLAY))[0];
+  const single = (n) => {
+    const t = tim(n);
+    const depth = t.bpp === 4 ? 4 : 2;
+    const picture = createPicture(t.image.w * depth, t.image.h);
+    if (t.bpp === 4) drawTim4(picture, t, 0, 0);
+    else drawTim(picture, t, 0, 0);
+    return picture.png();
+  };
+  return {
+    'theater-thumbs': sheet.png(),
+    'theater-cover': single(THEATER_PICTURE.cover),
+    'theater-caption': single(THEATER_PICTURE.caption),
+    'theater-disc': single(THEATER_PICTURE.disc),
+  };
+}
+
+/** The Options' pictures: their palettes for the title's picture, the archive of the pad's two pictures, the modes' labels, the step arrows and the buttons. */
+const OPTIONS_PALETTE = 0x7d20;
+const OPTIONS_PADS = 0x800d4d68;
+const PAD = { w: 0x90, h: 0x88, source: 0x180, standard: 0x7ca0, dualShock: 0x7ce0 };
+const OPTIONS_LABELS = 0x800eae90;
+const LABEL = { w: 0x60, h: 0xe, grey: 0x7e5e, page: 0xb };
+const ARROWS = { w: 0x14, h: 0x10, u: 0x80, colours: [5, 6, 10, 7, 11], font: 0x7e10 };
+const BUTTONS = [0x800b92a4, 0x800b92a8, 0x800b92ac, 0x800b92b0];
+const BUTTON = { w: 0xc, h: 0x14, page: 0x1f };
+
+function optionsPictures(title) {
+  const vram = createVram();
+  vram.archive(title, BOOT_ARCHIVE - OVERLAY);
+  vram.archive(title, TITLE_ARCHIVE - OVERLAY);
+  vram.archive(title, OPTIONS_PADS - OVERLAY);
+  const view = new DataView(title.buffer, title.byteOffset, title.byteLength);
+  const pads = createPicture(PAD.w * 2, PAD.h);
+  drawImage(vram, pads, 0, 0, PAD.w, PAD.h, PAD.source, 0x100, PAD.dualShock, 0x80);
+  drawImage(vram, pads, PAD.w, 0, PAD.w, PAD.h, PAD.source, 0, PAD.standard, 0x80);
+  const labels = createPicture(LABEL.w * 2, LABEL.h * 8);
+  for (let i = 0; i < 8; i += 1) {
+    const word = view.getUint32(OPTIONS_LABELS - OVERLAY + i * 8 + 4, true);
+    drawSprite(vram, labels, 0, i * LABEL.h, LABEL.w, LABEL.h, word, LABEL.page);
+    drawSprite(vram, labels, LABEL.w, i * LABEL.h, LABEL.w, LABEL.h, ((word & 0xffff) | (LABEL.grey << 16)) >>> 0, LABEL.page);
+  }
+  const arrows = createPicture(ARROWS.w, ARROWS.h * ARROWS.colours.length);
+  ARROWS.colours.forEach((colour, row) => drawSprite(vram, arrows, 0, row * ARROWS.h, ARROWS.w, ARROWS.h, (((ARROWS.font | colour) << 16) | ARROWS.u) >>> 0, LABEL.page));
+  const buttons = createPicture(BUTTON.w * BUTTONS.length, BUTTON.h);
+  BUTTONS.forEach((address, i) => drawSprite(vram, buttons, i * BUTTON.w, 0, BUTTON.w, BUTTON.h, view.getUint32(address - OVERLAY, true), BUTTON.page));
+  return {
+    options: screenPicture(title, TITLE_ARCHIVE, OPTIONS_PALETTE).png(),
+    'options-pads': pads.png(),
+    'options-labels': labels.png(),
+    'options-arrows': arrows.png(),
+    'options-buttons': buttons.png(),
+  };
+}
+
+const RESULTS_ARCHIVES = { results: 0x800b9394, 'force-results': 0x800d8400 };
+
+function resultsPictures(results) {
+  return Object.fromEntries(Object.entries(RESULTS_ARCHIVES).map(([name, archive]) => [name, screenPicture(results, archive).png()]));
+}
+
 function titlePictures(title) {
   const vram = createVram();
   vram.archive(title, TITLE_ARCHIVE - OVERLAY);
-  const picture = createPicture(SCREEN.w, SCREEN.h);
-  TITLE_CUTS.forEach(([x, y, w, h, source, top], i) => drawImage(vram, picture, x, y, w, h, source, top, TITLE_PALETTE + i * 0x40, 0x80));
+  const picture = screenPicture(title, TITLE_ARCHIVE);
   const mark = createPicture(MARK.w, MARK.h);
   drawImage(vram, mark, 0, 0, MARK.w, MARK.h, MARK.source, 0, MARK.clut, 0);
   return { title: picture.png(), namco: mark.png() };
@@ -151,19 +275,19 @@ function selectPictures(exe, title, select, kazuya) {
   const out = {};
   const count = ROSTER + 1;
   const big = createPicture(ICON.w * count, ICON.big);
-  const small = createPicture(ICON.w * (count + 1), ICON.small);
+  const small = createPicture(ICON.w * (count + 2), ICON.small);
   for (let roster = 0; roster < ROSTER; roster += 1) {
     drawSprite(vram, big, roster * ICON.w, 0, ICON.w, ICON.big, view.getUint32(at(BIG_ICONS) + roster * 8, true), view.getUint16(at(BIG_ICONS) + roster * 8 + 4, true));
   }
-  for (const index of [...Array(ROSTER).keys(), EMPTY_ICON]) {
+  for (const index of [...Array(ROSTER).keys(), EMPTY_ICON, NO_CHOICE_ICON]) {
     const uv = exe.u32(SMALL_ICONS + index * 8);
     const page = exe.u16(SMALL_ICONS + index * 8 + 4);
-    const x = (index === EMPTY_ICON ? count : index) * ICON.w;
+    const x = (index === EMPTY_ICON ? count : index === NO_CHOICE_ICON ? count + 1 : index) * ICON.w;
     if (index === TRUE_OGRE) {
       drawSprite(vram, small, x, 0, ICON.w, 0x18, uv, page);
       drawSprite(vram, small, x, 0x18, ICON.w, 0x18, uv + 0x20, page);
       drawSprite(vram, small, x, 0x30, ICON.w, 0xa, uv + 0x40, page);
-    } else if (index === EMPTY_ICON) {
+    } else if (index === EMPTY_ICON || index === NO_CHOICE_ICON) {
       drawSprite(vram, small, x, 0, ICON.w, 0xa, uv, page);
       drawSprite(vram, small, x, 0xa, ICON.w, 0x18, ((uv & 0xffff00ff) + 0x20) >>> 0, page);
       drawSprite(vram, small, x, 0x22, ICON.w, 0x18, ((uv & 0xffff00ff) + 0x40) >>> 0, page);
@@ -190,7 +314,98 @@ export function originalPictures(exe, root) {
   const title = bytes('public/data/bns/010.bin');
   const kazuya = existsSync(path.join(root, KAZUYA_ART)) ? bytes(KAZUYA_ART) : null;
   const theater = bytes('public/data/bns/301.bin');
-  return { ...titlePictures(title), ...selectPictures(exe, title, bytes('public/data/bns/009.bin'), kazuya), captions: captionPictures(theater), 'credits-mark': creditsMark(theater) };
+  return {
+    ...titlePictures(title),
+    ...optionsPictures(title),
+    ...selectPictures(exe, title, bytes('public/data/bns/009.bin'), kazuya),
+    ...resultsPictures(bytes('public/data/bns/302.bin')),
+    captions: captionPictures(theater),
+    ...theaterPictures(theater),
+    'credits-mark': creditsMark(theater),
+    ...ballPictures(bytes('public/data/bns/055.bin')),
+    ...forcePictures([51, 52, 53, 54].map((n) => bytes(`public/data/bns/0${n}.bin`)), bytes('public/data/bns/007.bin')),
+  };
+}
+
+/** An archive's members: a count, then each member's offset and size. */
+function members(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return Array.from({ length: view.getUint32(0, true) }, (_, i) => bytes.subarray(view.getUint32(4 + i * 8, true), view.getUint32(4 + i * 8, true) + view.getUint32(8 + i * 8, true)));
+}
+
+const TILE = 0x20;
+
+/**
+ * Tekken Ball's beach (BNS 55, an archive: its textures an archive of TIMs, then the ground's map,
+ * then the panorama's): the panorama laid out whole, each cell's texture word naming its page
+ * (bits 8 to 12) and its 32-texel cell in it (bits 0 to 5), its palette word beside it.
+ */
+function ballPictures(beach) {
+  const [textures, , map] = members(beach);
+  const vram = createVram();
+  vram.load(members(textures).flatMap((tim) => readTimChain(tim)));
+  const view = new DataView(map.buffer, map.byteOffset, map.byteLength);
+  const [width, height] = [view.getUint16(0, true), view.getUint16(2, true)];
+  const panorama = createPicture(width * TILE, height * TILE);
+  for (let row = 0; row < height; row += 1) {
+    for (let column = 0; column < width; column += 1) {
+      const cell = row * width + column;
+      const tile = view.getUint16(4 + cell * 2, true);
+      const clut = view.getUint16(4 + (width * height + cell) * 2, true);
+      const uv = ((clut << 16) | ((((tile >> 3) & 7) * TILE) << 8) | ((tile & 7) * TILE)) >>> 0;
+      drawSprite(vram, panorama, column * TILE, row * TILE, TILE, TILE, uv, (tile >> 8) & 0x1f);
+    }
+  }
+  return { 'ball-backdrop': panorama.png() };
+}
+
+const FORCE_TILE = 0x40;
+const FORCE_ITEM = { page: 8, uv: 0x4000, clut: 0x7801, w: 0x40, h: 0x80 };
+const FORCE_GLOW = { page: 8, uv: 0, clut: 0x7800, w: 0x40, h: 0x40 };
+const FORCE_OVERLAY = 0x800b0548;
+const FORCE_KEYS = 0x800b0afc;
+
+/**
+ * Tekken Force's stages (archives: their textures an archive of TIMs, then the ground's map, then
+ * the backdrop's, then the script): each backdrop laid out whole, each cell's texture word naming
+ * its page (bits 8 to 12) and its 64-texel cell in it (bits 0 to 3), its palette word beside it;
+ * the +LIFE item and its glow; and the keys from the mode's overlay.
+ */
+function forcePictures(stages, overlay) {
+  const out = {};
+  stages.forEach((bytes, k) => {
+    const [textures, , map] = members(bytes);
+    const vram = createVram();
+    vram.load(members(textures).flatMap((tim) => readTimChain(tim)));
+    const view = new DataView(map.buffer, map.byteOffset, map.byteLength);
+    const [width, height] = [view.getUint16(0, true), view.getUint16(2, true)];
+    const backdrop = createPicture(width * FORCE_TILE, height * FORCE_TILE);
+    for (let row = 0; row < height; row += 1) {
+      for (let column = 0; column < width; column += 1) {
+        const cell = row * width + column;
+        const tile = view.getUint16(4 + cell * 2, true);
+        const clut = view.getUint16(4 + (width * height + cell) * 2, true);
+        const uv = ((clut << 16) | ((((tile >> 2) & 3) * FORCE_TILE) << 8) | ((tile & 3) * FORCE_TILE)) >>> 0;
+        drawSprite(vram, backdrop, column * FORCE_TILE, row * FORCE_TILE, FORCE_TILE, FORCE_TILE, uv, (tile >> 8) & 0x1f);
+      }
+    }
+    out[`force-backdrop-${15 + k}`] = backdrop.png();
+    if (k !== 0) return;
+    for (const [name, { page, uv, clut, w, h }] of [['force-item', FORCE_ITEM], ['force-glow', FORCE_GLOW]]) {
+      const picture = createPicture(w, h);
+      drawSprite(vram, picture, 0, 0, w, h, ((clut << 16) | uv) >>> 0, page);
+      out[name] = picture.png();
+    }
+  });
+  const keys = members(overlay.subarray(FORCE_KEYS - FORCE_OVERLAY)).map((tim) => readTimChain(tim)[0]);
+  const sheet = createPicture(keys.reduce((w, tim) => w + tim.image.w * 4, 0), Math.max(...keys.map((tim) => tim.image.h)));
+  let x = 0;
+  for (const tim of keys) {
+    drawTim4(sheet, tim, x, 0);
+    x += tim.image.w * 4;
+  }
+  out['force-keys'] = sheet.png();
+  return out;
 }
 
 /** The namco mark the credits end on (a 4-bit TIM in the Theater's overlay at 0x80111d30, 260 by 45), palette index 0 clear. */

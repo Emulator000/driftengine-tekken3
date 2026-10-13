@@ -2,11 +2,12 @@
  * What the game keeps between plays: each character's plays, the characters and costumes earned,
  * the endings seen, and the unlocking that plays bring (a count of plays since the last unlock
  * moves a schedule on every 100 plays, 50 once the first has come; endings move it too); the
- * streak of wins in a row; and the best records the modes set: a best time per character, and
- * survival's ten.
+ * streak of wins in a row; and the best records the modes set: a best time per character,
+ * survival's ten, and Tekken Force's best score and the keys toward Dr. B.
  */
 import type { SceneTables } from '../data/scenes.ts';
 import { MenuMode } from './menu.ts';
+import { saveProgress } from './save.ts';
 import type { GameState } from './state.ts';
 
 /** The costumes the schedule and plays can give. */
@@ -37,9 +38,9 @@ export function playCount(game: GameState, roster: number): number {
   return counts[0]! + counts[2]! + counts[3]!;
 }
 
-/** The progress saved, if the records changed since it last was. */
+/** With auto save on, the progress saved if the records changed since it last was. */
 export function saveRecords(game: GameState): void {
-  if (game.records.changed !== 0) game.saving = 1;
+  if (game.options.autoSave !== 0 && game.records.changed !== 0) saveProgress(game);
   game.records.changed = 0;
 }
 
@@ -90,14 +91,39 @@ export function earn(game: GameState, roster: number): void {
   game.records.earnedRoster = (game.records.earnedRoster | bit) >>> 0;
 }
 
+/** Dr. B's roster, which Tekken Force's final stage earns. */
+const DR_B = 0x13;
+
+/** Whether Dr. B is earned. */
+export function drBEarned(game: GameState): number {
+  return (game.records.earnedRoster >>> DR_B) & 1;
+}
+
+/** Dr. B earned, if he is not yet. */
+export function earnDrB(game: GameState): void {
+  if (drBEarned(game) === 0) earn(game, DR_B);
+}
+
+/** Tekken Force's best score set, the records marked to be saved. */
+export function setForceBest(game: GameState, scenes: SceneTables, score: number): void {
+  game.records.forceBest = score >>> 0;
+  recordsChanged(game, scenes);
+}
+
+/** A key toward Dr. B added (at most 255), the records marked to be saved. */
+export function addForceKey(game: GameState, scenes: SceneTables): void {
+  game.records.forceKeys = Math.min(game.records.forceKeys + 1, 0xff);
+  recordsChanged(game, scenes);
+}
+
 /** Tekken Ball or the Theater earned (shown once more), the plays' count restarted when it is new. */
-function earnMode(game: GameState, mode: 'ball' | 'theater'): void {
+export function earnMode(game: GameState, mode: 'ball' | 'theater'): void {
   if (game.earned[mode] !== 0) return;
   game.earned[mode] = 1;
   game.records.playsSince = 0;
 }
 
-/** How many attract intros the cycle offers: 2 with Tekken Ball's character, 1 with fifteen characters, else 0. */
+/** How many attract intros the cycle offers: 2 with Dr. B earned, 1 with fifteen characters, else 0. */
 function updateIntros(game: GameState): void {
   const earned = game.records.earnedRoster;
   game.attract.intros = (earned & 0x80000) !== 0 ? 2 : 15 <= popcount(earned) ? 1 : 0;

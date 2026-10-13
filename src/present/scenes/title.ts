@@ -18,11 +18,11 @@ const PICTURE_LAYER = 3;
 const MARK = { x: 0x97, y: 0x184, w: 0x48, h: 0x10 } as const;
 const ENGINE_LINE = { centre: 0xb8, top: 0x1c8 } as const;
 
-/** The title's picture over the whole screen, at most the atlas's size (stretched back when it was painted smaller). */
-export function drawTitlePicture(art: ScreenLayer, picture: ImageBitmap, shade = 1): void {
+/** The title's picture (or another of the screen's size, by its name) over the whole screen, at most the atlas's size (stretched back when it was painted smaller). */
+export function drawTitlePicture(art: ScreenLayer, picture: ImageBitmap, shade = 1, name = 'title'): void {
   const fit = Math.min(1, MOST / (SCREEN.width * art.kx), MOST / (SCREEN.lines * art.ky));
   const [w, h] = [SCREEN.width * art.kx * fit, SCREEN.lines * art.ky * fit];
-  const painted = art.atlas.picture(`title picture ${w} ${h}`, w, h, (g, left, top) => paintOriginal(g, picture, 0, 0, SCREEN.width, SCREEN.lines, left, top, w, h));
+  const painted = art.atlas.picture(`${name} picture ${w} ${h}`, w, h, (g, left, top) => paintOriginal(g, picture, 0, 0, SCREEN.width, SCREEN.lines, left, top, w, h));
   if (painted === null) return;
   art.setShade(shade);
   art.put(painted, 0, 0, SCREEN.width, SCREEN.lines);

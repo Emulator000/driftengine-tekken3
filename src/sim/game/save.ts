@@ -2,8 +2,9 @@
  * The game's progress as it is kept between plays: the characters, costumes and modes earned, the
  * endings seen, the unlock schedule's progress, each character's plays, the best records, the
  * options, and the attract cycle's intros. It is read as the page starts and saved where the
- * console saves its memory card (`saveRecords`, `GameState.saving`); where it is kept is the
- * page's.
+ * console writes its memory card (the Options' card save, and with auto save on as records
+ * change: `saveRecords`, `GameState.saving`), the game keeping it as saved for the card's load;
+ * where it is kept is the page's.
  */
 import type { GameState } from './state.ts';
 
@@ -35,6 +36,9 @@ export interface Progress {
     readonly playsSince: number;
     readonly scheduleStep: number;
     readonly scheduleStarted: number;
+    /** Tekken Force's best score and the keys held; a progress saved before they were has none (0). */
+    readonly forceBest?: number;
+    readonly forceKeys?: number;
   };
   readonly options: {
     readonly difficulty: number;
@@ -47,6 +51,12 @@ export interface Progress {
     readonly keepChoices: number;
     readonly modeSetting: number;
     readonly keys: readonly (readonly number[])[];
+    /** The music's set and stereo, the hidden switch, auto save, and the display's place; a progress saved before they were has none (the game's own kept, auto save on). */
+    readonly musicSet?: number;
+    readonly stereo?: number;
+    readonly otherTitle?: number;
+    readonly autoSave?: number;
+    readonly display?: { readonly x: number; readonly y: number };
   };
   readonly earned: { readonly ball: number; readonly theater: number };
   readonly attract: { readonly intros: number; readonly intro: number };
@@ -69,6 +79,8 @@ export function progressOf(game: GameState): Progress {
       playsSince: records.playsSince,
       scheduleStep: records.scheduleStep,
       scheduleStarted: records.scheduleStarted,
+      forceBest: records.forceBest,
+      forceKeys: records.forceKeys,
     },
     options: {
       difficulty: options.difficulty,
@@ -81,6 +93,11 @@ export function progressOf(game: GameState): Progress {
       keepChoices: options.keepChoices,
       modeSetting: options.modeSetting,
       keys: options.keys.map((keys) => [...keys]),
+      musicSet: options.musicSet,
+      stereo: options.stereo,
+      otherTitle: options.otherTitle,
+      autoSave: options.autoSave,
+      display: { x: options.display.x, y: options.display.y },
     },
     earned: { ball: earned.ball, theater: earned.theater },
     attract: { intros: attract.intros, intro: attract.intro },
@@ -110,6 +127,8 @@ export function restoreProgress(game: GameState, progress: Progress): void {
   records.playsSince = saved.playsSince;
   records.scheduleStep = saved.scheduleStep;
   records.scheduleStarted = saved.scheduleStarted;
+  records.forceBest = saved.forceBest ?? 0;
+  records.forceKeys = saved.forceKeys ?? 0;
   const chosen = progress.options;
   options.difficulty = chosen.difficulty;
   options.rounds = chosen.rounds;
@@ -122,8 +141,19 @@ export function restoreProgress(game: GameState, progress: Progress): void {
   options.modeSetting = chosen.modeSetting;
   if (options.keys.length !== chosen.keys.length) throw new Error(`saved keys for ${chosen.keys.length} pads where the game keeps ${options.keys.length}`);
   options.keys.forEach((keys, pad) => fill(keys, chosen.keys[pad]!));
+  options.musicSet = chosen.musicSet ?? options.musicSet;
+  options.stereo = chosen.stereo ?? options.stereo;
+  options.otherTitle = chosen.otherTitle ?? options.otherTitle;
+  options.autoSave = chosen.autoSave ?? 1;
+  if (chosen.display !== undefined) Object.assign(options.display, chosen.display);
   earned.ball = progress.earned.ball;
   earned.theater = progress.earned.theater;
   attract.intros = progress.attract.intros;
   attract.intro = progress.attract.intro;
+}
+
+/** The progress saved as it stands: kept for a load, and written where the page keeps it. */
+export function saveProgress(game: GameState): void {
+  game.saving = 1;
+  game.kept = progressOf(game);
 }

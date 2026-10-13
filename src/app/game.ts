@@ -7,48 +7,60 @@
  * stage likewise, before their first frame).
  */
 import { loadFightTables, loadIntroModels, loadMoveset } from '../assets/load.ts';
-import { bindMoveIds, fightDataFor, matchMovesets, type MatchSetup } from '../sim/fight/match.ts';
+import { bindMoveIds, bossMoveset, drawnMovesets, fightDataFor, matchMovesets, type MatchSetup } from '../sim/fight/match.ts';
 import type { FightData, LoadedMoveset } from '../sim/fight/state.ts';
 import { Game } from '../sim/game/game.ts';
 import { Scene } from '../sim/game/state.ts';
 import { FightStep, matchSetup } from '../sim/game/fight-scene.ts';
 import { MenuMode, startMode } from '../sim/game/menu.ts';
 import { OgreChangeShows } from '../sim/game/ogre-change.ts';
-import { applySchedule, checkSurvivalRecord, checkTimeRecord, recordStageTime } from '../sim/game/records.ts';
+import { displayShift } from '../sim/game/options.ts';
+import { applySchedule, checkSurvivalRecord, checkTimeRecord, earnMode, recordStageTime } from '../sim/game/records.ts';
+import { survivorRank } from '../sim/game/arcade.ts';
+import { bossCode } from '../sim/fight/force-stage.ts';
+import { lookOf } from '../sim/game/select.ts';
 import { progressOf, restoreProgress } from '../sim/game/save.ts';
 import { FightView } from '../present/3d/fight-view.ts';
 import { Hud } from '../present/hud/hud.ts';
 import { PauseScreen } from '../present/hud/pause.ts';
 import { loadTypefaces } from '../present/2d/typefaces.ts';
 import { ScenePresenter } from '../present/scenes/scenes.ts';
-import { assetImage, canvas, dataUrl, json, pageRenderer, params, play, status, two } from './page.ts';
+import { SCREEN } from '../present/scenes/screen.ts';
+import { assetImage, canvas, controllers, dataUrl, json, pageRenderer, params, play, status, two } from './page.ts';
+import { controlWords } from '../present/2d/controls.ts';
 import { drawingFiles, introFiles } from './quick.ts';
 import { readProgress, writeProgress } from './save.ts';
 import { startSound } from './sound.ts';
+import { Rumble } from './rumble.ts';
 import { MoviePicture } from '../present/scenes/movie.ts';
 
 /** The frames each of the ten stages takes in the time record `?record=time` sets. */
 const RECORD_STAGE_FRAMES = 30 * 60;
+/** `?record=force`'s run: its score, the soldiers beaten, and its flags by default (a copper key). */
+const FORCE_RECORD = { score: 1234560, kills: 42, flags: 1 } as const;
 /** The page's shortcuts: a page started with one never saves the progress. */
-const SHORTCUTS = ['arcade', 'versus', 'ending', 'record', 'unlock'] as const;
+const SHORTCUTS = ['arcade', 'versus', 'ball', 'force', 'ending', 'record', 'unlock'] as const;
 /** The unlock schedule's steps, its last earning everything. */
 const UNLOCK_STEPS = 14;
-/** Arcade's stages; the roster ids `?arcade` takes past Mokujin's (his draw not remade), Kazuya's with his files. */
+/** Arcade's stages; the last roster id `?arcade` takes, Kazuya's with his files. */
 const ARCADE_STAGES = 10;
-const MOKUJIN = 15;
+/** Tekken Force's stages, the final one the fifth. */
+const FORCE_STAGES = 5;
 const KAZUYA = 22;
 
 export async function playGame(): Promise<void> {
   const { renderer, backend } = await pageRenderer();
   status.textContent = 'loading';
   const picture = (name: string): Promise<ImageBitmap> => assetImage(`pictures/${name}.png`);
-  const names = ['title', 'namco', 'portraits', 'select-icons-big', 'select-icons-small', 'captions', 'credits-mark'] as const;
+  const names = ['title', 'namco', 'portraits', 'select-icons-big', 'select-icons-small', 'captions', 'credits-mark', 'results', 'force-results', 'options', 'options-pads', 'options-labels', 'options-arrows', 'options-buttons', 'theater-thumbs', 'theater-cover', 'theater-caption', 'theater-disc'] as const;
   const [[{ tables, arena, commands, scenes }, common, , introSet, introModels], pictures, sound] = await Promise.all([
     Promise.all([loadFightTables(json), loadMoveset(json, 'common'), loadTypefaces(), loadMoveset(json, 'intro'), loadIntroModels(json)]),
     Promise.all(names.map(picture)),
     startSound(),
   ]);
-  const [title, namco, portraits, bigIcons, smallIcons, captions, creditsMark] = pictures as [ImageBitmap, ImageBitmap, ImageBitmap, ImageBitmap, ImageBitmap, ImageBitmap, ImageBitmap];
+  const got = Object.fromEntries(names.map((name, i) => [name, pictures[i]!])) as Record<(typeof names)[number], ImageBitmap>;
+  const { title, namco, portraits, captions, results } = got;
+  const [bigIcons, smallIcons, creditsMark] = [got['select-icons-big'], got['select-icons-small'], got['credits-mark']];
 
   /* The movesets by id, fetched once each. */
   const movesets = new Map<number, LoadedMoveset>();
@@ -65,13 +77,14 @@ export async function playGame(): Promise<void> {
   const matches = new Map<string, FightData>();
   const fightData = (setup: MatchSetup): FightData | null => {
     const [a, b] = matchMovesets(tables, setup);
-    const key = `${a} ${b}`;
+    const drawn = setup.draws === undefined ? [] : drawnMovesets(tables, setup.draws);
+    const boss = bossMoveset(tables, setup);
+    const key = `${a} ${b} ${setup.draws ?? 0} ${setup.force === undefined ? '' : boss}`;
     const known = matches.get(key);
     if (known !== undefined) return known;
-    const first = want(a);
-    const second = b < 0 ? null : want(b);
-    if (first === null || (b >= 0 && second === null)) return null;
-    const data = fightDataFor(tables, setup, (id) => (id === a ? first : second!), common);
+    const needed = [a, ...(b < 0 ? [] : [b]), ...drawn, ...(boss < 0 ? [] : [boss])].map(want);
+    if (needed.some((set) => set === null)) return null;
+    const data = fightDataFor(tables, setup, (id) => movesets.get(id)!, common);
     matches.set(key, data);
     return data;
   };
@@ -89,18 +102,35 @@ export async function playGame(): Promise<void> {
   };
 
   const game = new Game({ tables, scenes, fightData, introData });
-  /* The progress kept on this device; a page started with a shortcut reads it and never writes it. */
+  /* The pads' vibration, felt on the gamepads. */
+  const rumble = new Rumble(window);
+  /*
+   * The progress kept on this device, as the console reads its memory card at power-on (and the
+   * card's load reads it again); a page started with a shortcut reads it and never writes it. With
+   * nothing kept, auto save starts on, so the progress is kept from the first play, and both pads'
+   * vibration on.
+   */
   const saved = readProgress();
-  if (saved !== null) {
+  if (saved === null) {
+    game.state.options.autoSave = 1;
+    game.state.options.vibration.fill(1);
+  } else {
     try {
       restoreProgress(game.state, saved);
+      game.state.kept = progressOf(game.state);
     } catch (error) {
       console.warn(`[tekken3 remake] the saved progress does not fit this game: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   const saves = !SHORTCUTS.some((key) => params.has(key));
-  /* `?unlock` earns everything the game unlocks: every character, the costumes, Tekken Ball and the Theater. */
-  if (params.has('unlock')) applySchedule(game.state, scenes, UNLOCK_STEPS);
+  /*
+   * `?unlock` earns everything the game unlocks: every character, the costumes, Tekken Ball and the
+   * Theater; `?unlock=ball` earns Tekken Ball alone and `?unlock=theater` the Theater alone, as the
+   * game's own unlock earns them (new on the mode menu).
+   */
+  const unlock = params.get('unlock');
+  if (unlock === 'ball' || unlock === 'theater') earnMode(game.state, unlock);
+  else if (unlock !== null) applySchedule(game.state, scenes, UNLOCK_STEPS);
   /*
    * `?arcade=ROSTER[,COSTUME[,STAGE]]` starts Arcade at once with that character on the first pad,
    * at that stage (1 to 10; by default the tenth, Ogre's), as the menu and the character select
@@ -110,7 +140,7 @@ export async function playGame(): Promise<void> {
   if (arcade !== null) {
     const [roster = 0, costume = 0, stage = ARCADE_STAGES] = arcade.split(',').map(Number);
     const manifest = (await json('manifest.json')) as { kazuya?: boolean };
-    const playable = Number.isInteger(roster) && 0 <= roster && roster <= (manifest.kazuya === true ? KAZUYA : KAZUYA - 1) && roster !== MOKUJIN;
+    const playable = Number.isInteger(roster) && 0 <= roster && roster <= (manifest.kazuya === true ? KAZUYA : KAZUYA - 1);
     startMode(game.state, MenuMode.ARCADE, 1);
     const { entrants, world, run } = game.state;
     entrants.roster[0] = playable ? roster : 0;
@@ -123,6 +153,32 @@ export async function playGame(): Promise<void> {
   }
   /* `?versus` starts Versus at once, both pads in, on to its select. */
   if (params.has('versus')) startMode(game.state, MenuMode.VERSUS, 1);
+  /* `?ball` starts Tekken Ball at once, the first pad in, on to its select. */
+  if (params.has('ball')) startMode(game.state, MenuMode.TEKKEN_BALL, 1);
+  /*
+   * `?force` starts Tekken Force at once, the first pad in, on to its select;
+   * `?force=ROSTER[,COSTUME[,STAGE]]` with that character chosen, at that stage (1 to 4, 5 the
+   * final stage; by default the first).
+   */
+  const force = params.get('force');
+  if (force !== null) {
+    startMode(game.state, MenuMode.TEKKEN_FORCE, 1);
+    if (force !== '') {
+      const [roster = 0, costume = 0, stage = 1] = force.split(',').map(Number);
+      const manifest = (await json('manifest.json')) as { kazuya?: boolean };
+      const playable = Number.isInteger(roster) && 0 <= roster && roster <= (manifest.kazuya === true ? KAZUYA : KAZUYA - 1);
+      const { entrants, world, run } = game.state;
+      entrants.roster[0] = playable ? roster : 0;
+      entrants.costume[0] = Number.isInteger(costume) ? costume & 3 : 0;
+      entrants.chosen[0] = 1;
+      entrants.computer[0] = 0;
+      world.match.stage = Number.isInteger(stage) ? Math.max(1, Math.min(FORCE_STAGES, stage)) - 1 : 0;
+      /* A run started past the first stage has the first stage's time to go on with. */
+      world.timer = (world.options.roundTime + 2) * 600;
+      game.state.modeOverlay = run.overlay;
+      Object.assign(game.state, { scene: Scene.FIGHT, step: FightStep.MODE_SETUP });
+    }
+  }
   /* `?ending=ROSTER[,COSTUME]` goes straight to that character's Arcade ending (the first side the one human). */
   const ending = params.get('ending');
   if (ending !== null) {
@@ -132,31 +188,66 @@ export async function playGame(): Promise<void> {
     game.state.world.fighters[0]!.rosterCode = roster * 4 + costume;
   }
   /*
-   * `?record=time,ROSTER` goes straight to the records with that character's best time beaten on
-   * the first side (ten stages of 30 seconds, as Time Attack leaves it), its name to enter;
-   * `?record=survival,ROSTER,WINS` with a survival record of that many wins.
+   * `?record=time,ROSTER` goes to Time Attack's results and then the records with that character's
+   * best time beaten on the first side (ten stages of 30 seconds against Paul, as a run leaves
+   * them), its name to enter; `?record=survival,ROSTER,WINS` with a survival record of that many
+   * wins (over the first ten characters in turn), through Survival's results;
+   * `?record=force,ROSTER[,FLAGS]` to Tekken Force's results for that character on the first side,
+   * a run cleared with a new best score, its stages' bosses beaten and the run's flags (1 a copper
+   * key by default; 8 Dr. B saved, 0x10 the bosses shown).
    */
   const record = params.get('record');
   if (record !== null) {
     const [kind, roster = 0, wins = 0] = record.split(',').map((part, i) => (i === 0 ? part : Number(part))) as [string, number?, number?];
-    if (kind === 'survival') {
+    if (kind === 'force') {
+      const { world, entrants } = game.state;
+      world.mode = MenuMode.TEKKEN_FORCE;
+      entrants.roster[0] = roster;
+      entrants.costume[0] = 0;
+      game.state.versusPortraits[0] = lookOf(scenes, roster, 0) & 0x1f;
+      Object.assign(world.match.force, { score: FORCE_RECORD.score, kills: FORCE_RECORD.kills, side: 0, newRecord: 1, flags: wins === 0 ? FORCE_RECORD.flags : wins });
+      for (let stage = 0; stage < 4; stage += 1) world.match.force.bosses[stage] = bossCode(tables, roster * 4, stage);
+      game.state.records.forceBest = FORCE_RECORD.score;
+    } else if (kind === 'survival') {
       game.state.world.mode = MenuMode.SURVIVAL;
+      for (let won = 0; won < wins; won += 1) game.state.run.survival.beaten[won % 10]! += 1;
+      game.state.world.match.survivalRank = survivorRank(game.state, wins);
       checkSurvivalRecord(game.state, scenes, 0, roster, wins);
+      Object.assign(game.state.run.ending, { side: 0, code: roster * 4 });
     } else {
       game.state.world.mode = MenuMode.TIME_ATTACK;
       for (let stage = 0; stage < 10; stage += 1) recordStageTime(game.state, stage, roster, 0, 0, RECORD_STAGE_FRAMES);
       checkTimeRecord(game.state, scenes);
+      Object.assign(game.state.run.ending, { side: 0, code: roster * 4 });
     }
-    Object.assign(game.state, { scene: Scene.RECORDS_LOADER, step: 0 });
+    Object.assign(game.state, { scene: Scene.OVERLAY_LOADER, step: 0, next: kind === 'force' ? Scene.FORCE_RESULTS : kind === 'survival' ? Scene.SURVIVAL_RESULTS : Scene.TIME_RESULTS });
   }
   const movie = new MoviePicture(renderer, scenes.movies, (file) => dataUrl(`movies/${two(file)}.mp4`), (video) => sound?.connectMovie(video));
   movie.setCaptions(captions);
-  const presenter = new ScenePresenter(renderer, { scenes, roster: tables.roster }, { title, namco, select: { portraits, bigIcons, smallIcons }, creditsMark }, movie);
+  const presenter = new ScenePresenter(
+    renderer,
+    { scenes, roster: tables.roster, ball: tables.ball, math: tables.math },
+    {
+      title,
+      namco,
+      select: { portraits, bigIcons, smallIcons },
+      creditsMark,
+      results,
+      forceResults: got['force-results'],
+      optionsBackdrop: got.options,
+      drawn: { buttons: got['options-buttons'], pads: got['options-pads'], labels: got['options-labels'], arrows: got['options-arrows'], thumbs: got['theater-thumbs'], cover: got['theater-cover'], caption: got['theater-caption'], disc: got['theater-disc'] },
+    },
+    movie,
+  );
   presenter.prepare(canvas.width, canvas.height);
   /* The fight's drawing, made with the first match and given each new match's data. */
   let fight: { view: FightView; hud: Hud; pause: PauseScreen; data: FightData } | null = null;
   const fightFor = (data: FightData): NonNullable<typeof fight> => {
-    if (fight === null) fight = { view: new FightView(renderer, data, arena, drawingFiles), hud: new Hud(renderer, data, game.state.world), pause: new PauseScreen(renderer, data, commands), data };
+    if (fight === null) {
+      const hud = new Hud(renderer, data, game.state.world);
+      hud.words = (text) => controlWords(text, controllers());
+      fight = { view: new FightView(renderer, data, arena, drawingFiles), hud, pause: new PauseScreen(renderer, data, commands), data };
+    }
     else if (fight.data !== data) {
       fight.view.data = data;
       fight.pause.data = data;
@@ -200,6 +291,22 @@ export async function playGame(): Promise<void> {
   /* The fighters the HUD's names were set for; what the last frame drawn showed. */
   let named = '';
   let shown: string | null = null;
+  /*
+   * The display's place (DISPLAY ADJUST): the whole picture moved as the console moves its
+   * display, from where the place it powers on with leaves it (the canvas's 4:3 middle is 368
+   * units across and 480 lines down).
+   */
+  let placed = '';
+  const placeDisplay = (): void => {
+    const { x, y } = game.state.options.display;
+    const home = scenes.powerOn.options.display;
+    const key = `${x} ${y} ${canvas.clientHeight}`;
+    if (key === placed) return;
+    placed = key;
+    const across = ((displayShift(x) - displayShift(home.x)) * canvas.clientHeight * 4) / 3 / SCREEN.width;
+    const down = ((y - home.y) * 2 * canvas.clientHeight) / SCREEN.lines;
+    canvas.style.transform = across === 0 && down === 0 ? '' : `translate(${across}px, ${down}px)`;
+  };
 
   play(
     {
@@ -208,13 +315,16 @@ export async function playGame(): Promise<void> {
         if (next !== null) fightData(next);
         if (game.blocked() || !drawingReady()) return false;
         game.field(pads);
-        if (saves && game.state.saving !== 0) writeProgress(progressOf(game.state));
+        if (saves && game.state.saving !== 0 && game.state.kept !== null) writeProgress(game.state.kept);
+        rumble.field(game.state.rumble.out, performance.now());
         sound?.field(game.state.world, game.state.vblanks);
         movie.audible = sound?.running ?? false;
         movie.field(game.state);
         return true;
       },
       render(width, height) {
+        placeDisplay();
+        presenter.controllers = controllers();
         const state = game.state;
         const now = performance.now() / 1000;
         const aspect = height > 0 ? width / height : 1;
@@ -265,6 +375,7 @@ export async function playGame(): Promise<void> {
           () => hud.drawBack(),
           () => {
             hud.drawFront();
+            presenter.renderOverFight(state, width, height);
             pause.draw();
             presenter.renderDissolve(width, height, now);
           },

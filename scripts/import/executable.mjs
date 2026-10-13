@@ -13,6 +13,7 @@ export function openExecutable(bytes) {
   };
   return {
     u8: (address) => view.getUint8(at(address)),
+    s8: (address) => view.getInt8(at(address)),
     s16: (address) => view.getInt16(at(address), true),
     u16: (address) => view.getUint16(at(address), true),
     u32: (address) => view.getUint32(at(address), true),

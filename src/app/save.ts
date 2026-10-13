@@ -1,16 +1,21 @@
 /**
  * The progress kept on this device, in the engine's store (the browser's storage, or the app's):
  * read as the page starts and written whenever the game saves (`Progress`). A page started with
- * one of its shortcuts (`arcade`, `versus`, `ending`, `record`, `unlock`) reads it and never writes it, so a
+ * one of its shortcuts (`arcade`, `versus`, `ball`, `ending`, `record`, `unlock`) reads it and never writes it, so a
  * shortcut's run leaves the progress as it was.
  */
 import { defaultStore, type KeyValueStore } from '@driftengine/core';
 import { expectArray, expectInt, expectObject, expectString } from '../assets/validate.ts';
 import type { Progress, SavedSurvivor, SavedTime } from '../sim/game/save.ts';
 
-/** Where the progress is kept, and the shape it is kept in. */
+/**
+ * Where the progress is kept, and the shape it is kept in (the first had none of the options the
+ * Options added, and no vibration a player set: it is read as on).
+ */
 const KEY = 'tekken3.progress';
-const FORMAT = 1;
+const FORMAT = 2;
+const FIRST_FORMAT = 1;
+const VIBRATION_ON = 1;
 const WHERE = 'the saved progress';
 /** The rows the game keeps: characters' plays (an added one last), best times, survival's records, and each pad's keys. */
 const PLAY_ROWS = 23;
@@ -45,7 +50,7 @@ function survivor(value: unknown, where: string): SavedSurvivor {
 /** A saved progress checked field by field. */
 export function parseProgress(json: unknown): Progress {
   const o = expectObject(json, WHERE);
-  if (o.format !== FORMAT) throw new Error(`${WHERE} is format ${String(o.format)}, not ${FORMAT}`);
+  if (o.format !== FORMAT && o.format !== FIRST_FORMAT) throw new Error(`${WHERE} is format ${String(o.format)}, not ${FORMAT}`);
   const r = expectObject(o.records, `${WHERE}.records`);
   const at = (key: string): string => `${WHERE}.records.${key}`;
   const p = expectObject(o.options, `${WHERE}.options`);
@@ -66,6 +71,8 @@ export function parseProgress(json: unknown): Progress {
       playsSince: half(r.playsSince, at('playsSince')),
       scheduleStep: byte(r.scheduleStep, at('scheduleStep')),
       scheduleStarted: byte(r.scheduleStarted, at('scheduleStarted')),
+      forceBest: r.forceBest === undefined ? 0 : word(r.forceBest, at('forceBest')),
+      forceKeys: r.forceKeys === undefined ? 0 : byte(r.forceKeys, at('forceKeys')),
     },
     options: {
       difficulty: byte(p.difficulty, option('difficulty')),
@@ -73,11 +80,23 @@ export function parseProgress(json: unknown): Progress {
       roundTime: byte(p.roundTime, option('roundTime')),
       alwaysChip: byte(p.alwaysChip, option('alwaysChip')),
       continueChooses: byte(p.continueChooses, option('continueChooses')),
-      vibration: list(p.vibration, option('vibration'), PADS, byte),
+      vibration: o.format === FIRST_FORMAT ? [VIBRATION_ON, VIBRATION_ON] : list(p.vibration, option('vibration'), PADS, byte),
       lastChoices: list(p.lastChoices, option('lastChoices'), PADS, byte),
       keepChoices: byte(p.keepChoices, option('keepChoices')),
       modeSetting: byte(p.modeSetting, option('modeSetting')),
       keys: list(p.keys, option('keys'), PADS, (keys, where) => list(keys, where, KEYS, byte)),
+      ...(o.format === FIRST_FORMAT
+        ? {}
+        : {
+            musicSet: expectInt(p.musicSet, option('musicSet'), 0, 2),
+            stereo: expectInt(p.stereo, option('stereo'), 0, 1),
+            otherTitle: expectInt(p.otherTitle, option('otherTitle'), 0, 1),
+            autoSave: expectInt(p.autoSave, option('autoSave'), 0, 1),
+            display: (() => {
+              const d = expectObject(p.display, option('display'));
+              return { x: expectInt(d.x, option('display.x'), -6, 14), y: expectInt(d.y, option('display.y'), 0, 8) };
+            })(),
+          }),
     },
     earned: { ball: byte(earned.ball, `${WHERE}.earned.ball`), theater: byte(earned.theater, `${WHERE}.earned.theater`) },
     attract: { intros: byte(attract.intros, `${WHERE}.attract.intros`), intro: byte(attract.intro, `${WHERE}.attract.intro`) },

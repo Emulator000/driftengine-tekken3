@@ -5,7 +5,7 @@
  * menus' repeats), and the scene playing takes its step.
  */
 import { theaterScene } from './theater.ts';
-import { musicFrame, musicTick, syncMusic } from '../sound/music.ts';
+import { musicFrame, musicOptionsOf, musicTick, syncMusic } from '../sound/music.ts';
 import { recordsLoaderScene, recordsScene } from './records-screen.ts';
 import { startDemo } from './attract.ts';
 import { attractScene } from './intro.ts';
@@ -20,10 +20,12 @@ import { menuScene, modeScene } from './menu.ts';
 import { FightStep, fightScene, matchSetup } from './fight-scene.ts';
 import { OgreChangeShows } from './ogre-change.ts';
 import { goToScene, holdPicture, queueFile } from './logo.ts';
-import { stopMotors } from './menu.ts';
 import { versusScene } from './versus.ts';
 import { selectScene } from './select.ts';
 import { vsSelectScene } from './vs-select.ts';
+import { forceResultsScene, survivalResultsScene, teamResultsScene, timeResultsScene } from './results.ts';
+import { optionsScene } from './options.ts';
+import { rumbleField, stopMotors } from './rumble.ts';
 import { blankGameState, Scene, type GameState } from './state.ts';
 
 /** What the game reads: the fight's tables and the scenes', each match's data once it is loaded (null until then), and each attract intro's (its moveset and models). */
@@ -34,6 +36,9 @@ export interface GameData {
   introData(intro: number): FightData;
 }
 
+/** The music set that is silent, and the scenes it is silent in (the matches', from the fight to the records). */
+const SILENT = 2;
+const MATCH_SCENES = { first: Scene.FIGHT, last: Scene.RECORDS } as const;
 const PAD_BITS = 16;
 const UP_DOWN = 0x5000;
 const LEFT_RIGHT = 0xa000;
@@ -95,7 +100,9 @@ export class Game {
     game.next = on.next;
     game.last = on.last;
     game.attractOverlay = on.attractOverlay;
-    Object.assign(game.options, { ...on.options, vibration: [...on.options.vibration], lastChoices: [...on.options.lastChoices], keys: on.keys.map((pad) => [...pad]) });
+    Object.assign(game.options, { ...on.options, vibration: [...on.options.vibration], lastChoices: [...on.options.lastChoices], keys: on.keys.map((pad) => [...pad]), display: { ...on.options.display } });
+    game.options.musicSet = data.tables.music.set;
+    game.options.stereo = data.tables.music.stereo;
     game.earned.ball = on.ball;
     game.earned.theater = on.theater;
     game.menu.picked = on.picked;
@@ -169,6 +176,7 @@ export class Game {
   field(raw: readonly [number, number]): void {
     const game = this.state;
     const world = game.world;
+    rumbleField(game, this.data.tables.input.vibration);
     const music = syncMusic(world.sound, this.data.tables.music);
     flushSound(world, this.data.tables);
     game.vblanks = (game.vblanks + 1) >>> 0;
@@ -191,7 +199,7 @@ export class Game {
     world.sound.stamp = game.vblanks;
     game.movie.shows.length = 0;
     world.vsyncSeen = game.vblanks;
-    game.noise = (Math.imul(game.noise, 5) + 1) >>> 0;
+    game.world.noise = (Math.imul(game.world.noise, 5) + 1) >>> 0;
     world.frameSeed = Math.imul(world.frameSeed + 1, 0x10dcd) >>> 0;
     world.nothingDrawn = 0;
     world.posed = 0;
@@ -202,6 +210,7 @@ export class Game {
     clearHudView(world);
     world.pauseMenu.drawn = 0;
     game.printed.length = 0;
+    game.drawn.length = 0;
     game.fades.length = 0;
     game.ogreChange.shows = OgreChangeShows.NONE;
     game.saving = 0;
@@ -213,8 +222,22 @@ export class Game {
     if (game.theater.playing === 0) game.clock.next = Math.floor(game.clock.now) + 1;
   }
 
+  /**
+   * The music's options told to its driver where they differ from what it has: the set songs pick
+   * from (silent, none in the matches' scenes and the arrangement's elsewhere) and stereo.
+   */
+  private musicOptions(): void {
+    const game = this.state;
+    const tables = this.data.tables.music;
+    const { musicSet, stereo } = game.options;
+    const set = musicSet < SILENT ? musicSet : MATCH_SCENES.first <= game.scene && game.scene <= MATCH_SCENES.last ? -1 : 0;
+    const now = musicOptionsOf(syncMusic(game.world.sound, tables), tables);
+    if (now.set !== set || now.stereo !== stereo) game.world.sound.commands.push({ key: 'music options', set, stereo });
+  }
+
   private scene(): void {
     const game = this.state;
+    this.musicOptions();
     switch (game.scene) {
       case Scene.BOOT:
         return bootScene(game);
@@ -224,6 +247,8 @@ export class Game {
         return logoScene(game, this.data.tables);
       case Scene.MENU:
         return menuScene(game, this.data.tables, this.data.scenes);
+      case Scene.OPTIONS:
+        return optionsScene(game, this.data.tables, this.data.scenes);
       case Scene.MODE:
         return modeScene(game);
       case Scene.FIGHT:
@@ -249,6 +274,14 @@ export class Game {
         return theaterScene(game, this.data.tables, this.data.scenes);
       case Scene.SELECT:
         return selectScene(game, this.data.tables, this.data.scenes);
+      case Scene.TIME_RESULTS:
+        return timeResultsScene(game, { tables: this.data.tables, match: this.match }, this.data.scenes);
+      case Scene.TEAM_RESULTS:
+        return teamResultsScene(game, { tables: this.data.tables, match: this.match }, this.data.scenes);
+      case Scene.SURVIVAL_RESULTS:
+        return survivalResultsScene(game, { tables: this.data.tables, match: this.match }, this.data.scenes);
+      case Scene.FORCE_RESULTS:
+        return forceResultsScene(game, { tables: this.data.tables, match: this.match }, this.data.scenes);
       case Scene.VS_SELECT:
         return vsSelectScene(game, this.data.tables, this.data.scenes);
       case Scene.RECORDS_LOADER:

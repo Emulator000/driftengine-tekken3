@@ -6,19 +6,26 @@
 import type { RendererApi } from '@driftengine/core';
 import { Scene, type GameState } from '../../sim/game/state.ts';
 import { drawLogo } from './logo.ts';
-import { ScreenLayer, type DrawnSprite } from './screen.ts';
+import { FIGHT_SCREEN, SCREEN, ScreenLayer, type DrawnSprite } from './screen.ts';
 import { LightLayer, type DrawnLight } from '../2d/light.ts';
 import { drawTitle } from './title.ts';
 import type { MoviePicture } from './movie.ts';
 import { drawCredits } from './credits.ts';
 import { TitleShows } from '../../sim/game/title.ts';
+import { drawOptions } from './options.ts';
+import { drawScene, type DrawnPictures } from './drawn.ts';
+import { CONSOLE_PADS, controlWords, type Controllers } from '../2d/controls.ts';
 import { drawMenu } from './menu.ts';
 import { drawSelect, paintSelectAhead, type SelectPictures } from './select.ts';
 import { drawVersus, paintVersusAhead } from './versus.ts';
 import { drawVsSelect } from './vs-select.ts';
+import { drawForceResults, drawSurvivalResults, drawTeamResults, drawTimeResults } from './results.ts';
 import { drawRecords } from './records.ts';
 import type { SceneTables } from '../../sim/data/scenes.ts';
 import type { RosterTables } from '../../sim/data/roster.ts';
+import type { BallTables } from '../../sim/data/ball.ts';
+import type { MathTables } from '../../sim/data/tables.ts';
+import { BallView } from '../3d/ball.ts';
 
 /** The original pictures the scenes show as they are. */
 export interface ScenePictures {
@@ -27,12 +34,21 @@ export interface ScenePictures {
   readonly select: SelectPictures;
   /** The credits' namco mark. */
   readonly creditsMark: ImageBitmap;
+  /** Time Attack's results' backdrop, and Tekken Force's. */
+  readonly results: ImageBitmap;
+  readonly forceResults: ImageBitmap;
+  /** The Options' backdrop; the pictures the scenes' own draws use. */
+  readonly optionsBackdrop: ImageBitmap;
+  readonly drawn: DrawnPictures;
 }
 
 /** What the scenes' drawing reads: the scenes' tables, and the roster's names. */
 export interface SceneDrawingData {
   readonly scenes: SceneTables;
   readonly roster: RosterTables;
+  /** Tekken Ball's ball (drawn on its select) and the turns' tables it is turned by. */
+  readonly ball: BallTables;
+  readonly math: MathTables;
 }
 
 /** A cut's dissolve: how long the frame before it takes to fade out over the new one, in seconds. */
@@ -62,6 +78,9 @@ const WHITE = [1, 1, 1] as const;
 const COVERING = 0.9;
 
 /** The colour a field's fades all but cover the picture in, if one does (the attract intro ends under white); null when none does. */
+/** Tekken Ball's mode, whose select shows the ball being chosen. */
+const TEKKEN_BALL = 7;
+
 function coverOf(fades: readonly { level: number }[]): readonly [number, number, number] | null {
   let cover: readonly [number, number, number] | null = null;
   for (const { level } of fades) {
@@ -75,9 +94,13 @@ export class ScenePresenter {
   private readonly renderer: RendererApi;
   private readonly pictures: ScenePictures;
   private readonly data: SceneDrawingData;
+  /** The players' controllers, whose buttons the scenes show. */
+  controllers: Controllers = CONSOLE_PADS;
   /** The scenes' large pictures under their text, each layer with its own atlas. */
   private readonly art: ScreenLayer;
   private readonly layer: ScreenLayer;
+  /** What a mode draws of its own over the fight (practice's menus and HUD), in the fight's units. */
+  private readonly fightLayer: ScreenLayer;
   /** Light added to and taken away from the scenes' pictures, as the original's GPU blends it, between the pictures and the text. */
   private readonly light: LightLayer;
   /** Light taken away over the text as well, after everything (the mode menu's list darkening to its edges). */
@@ -92,6 +115,9 @@ export class ScenePresenter {
   /** The colour the last frame drawn was covered in (by its fades), if it was. */
   private cover: readonly [number, number, number] | null = null;
 
+  /** Tekken Ball's ball on its select, made the first time it is drawn. */
+  private ball: BallView | null = null;
+
   /** The movies, drawn under the scenes' layers (made before them, so their pass is first). */
   private readonly movie: MoviePicture | null;
 
@@ -103,6 +129,9 @@ export class ScenePresenter {
     this.art = new ScreenLayer(renderer, 'scene art', 1024, 2048, ART_SCREENS);
     this.light = new LightLayer(renderer, 'scene light');
     this.layer = new ScreenLayer(renderer, 'scenes');
+    this.layer.words = (text) => controlWords(text, this.controllers);
+    this.fightLayer = new ScreenLayer(renderer, 'fight 2d', 2048, 2048, 0, FIGHT_SCREEN);
+    this.fightLayer.words = this.layer.words;
     this.over = new LightLayer(renderer, 'scene light over');
   }
 
@@ -208,7 +237,8 @@ export class ScenePresenter {
   render(game: GameState, width: number, height: number, over = false, now = 0): boolean {
     if (game.held !== 0) return false;
     const layer = this.layer;
-    if (!over) {
+    const ball = !over && game.scene === Scene.VS_SELECT && game.vsSelect.mode === TEKKEN_BALL;
+    if (!over && !ball) {
       this.renderer.beginFrame([0, 0, 0]);
       this.renderer.endFrame();
     }
@@ -222,8 +252,12 @@ export class ScenePresenter {
         drawTitle(game, game.title.shows, this.art, layer, this.pictures);
         break;
       case Scene.MOVIE:
-        /* The ending: its movie (drawn whole by the movie's own pass), then the credits. */
-        if (game.step === 3 && this.movie?.showing !== true) drawCredits(game, this.data.scenes.credits, this.art, layer, this.pictures.creditsMark);
+        /* The Theater's menu (its lines cut to the screen); the ending: its movie (drawn whole by the movie's own pass), then the credits. */
+        if (game.step === 1) {
+          layer.clipAcross(0, SCREEN.width);
+          drawScene(game, layer, this.drawnContext());
+          layer.clipAcross(null);
+        } else if (game.step === 3 && this.movie?.showing !== true) drawCredits(game, this.data.scenes.credits, this.art, layer, this.pictures.creditsMark);
         else this.movie?.draw(width, height);
         break;
       case Scene.ATTRACT:
@@ -232,14 +266,29 @@ export class ScenePresenter {
       case Scene.MENU:
         drawMenu(game, this.art, layer, this.over, this.pictures.title);
         break;
+      case Scene.OPTIONS:
+        drawOptions(game, this.art, layer, this.pictures.optionsBackdrop, this.drawnContext());
+        break;
       case Scene.SELECT:
         drawSelect(game, this.data.scenes, this.data.roster, this.art, this.light, layer, this.pictures.select);
+        break;
+      case Scene.TIME_RESULTS:
+        drawTimeResults(game, this.data.scenes, this.art, this.light, layer, { results: this.pictures.results, smallIcons: this.pictures.select.smallIcons });
+        break;
+      case Scene.TEAM_RESULTS:
+        drawTeamResults(game, this.data.scenes, this.art, this.light, layer, this.pictures.select.smallIcons);
+        break;
+      case Scene.SURVIVAL_RESULTS:
+        drawSurvivalResults(game, this.data.scenes, this.art, this.light, layer, this.pictures.select.smallIcons);
+        break;
+      case Scene.FORCE_RESULTS:
+        drawForceResults(game, this.art, layer, { backdrop: this.pictures.forceResults, portraits: this.pictures.select.portraits, smallIcons: this.pictures.select.smallIcons });
         break;
       case Scene.VS_SELECT:
         drawVsSelect(game, this.data.scenes, this.art, this.light, layer, this.pictures.select.smallIcons);
         break;
       case Scene.VERSUS:
-        drawVersus(game, this.art, layer, this.pictures.select.portraits);
+        drawVersus(game, this.art, this.light, layer, this.pictures.select.portraits, this.pictures.select.smallIcons);
         break;
       case Scene.RECORDS:
         drawRecords(game, this.data.scenes, this.art, layer, this.pictures.select.smallIcons);
@@ -257,8 +306,37 @@ export class ScenePresenter {
     this.last = over || movie ? null : { art: this.art.drawn.slice(), light: this.light.drawn.slice(), layer: layer.drawn.slice(), over: this.over.drawn.slice() };
     this.cover = coverOf(game.fades);
     this.drawDissolve(now);
-    this.end();
+    if (ball) this.endOverBall(game, width / height);
+    else this.end();
     return true;
+  }
+
+  /** The layers drawn with Tekken Ball's ball between the pictures and the text, all in one frame. */
+  private endOverBall(game: GameState, aspect: number): void {
+    const renderer = this.renderer;
+    renderer.beginFrame([0, 0, 0]);
+    this.art.end();
+    this.light.end();
+    if (this.ball === null) {
+      const white = renderer.createSurfaceTexture(new ImageData(new Uint8ClampedArray([255, 255, 255, 255]), 1, 1), { colorSpace: 'linear', filter: 'nearest', mipmap: false, wrap: 'clamp' });
+      this.ball = new BallView(renderer, this.data.ball, this.data.math, white);
+    }
+    this.ball.drawSelect(game.vsSelect.ball, game.world.match.ball.kind, aspect);
+    renderer.endFrame();
+    this.layer.end();
+    this.over.end();
+  }
+
+  private drawnContext(): { pictures: DrawnPictures; options: SceneDrawingData['scenes']['options']; controllers: Controllers } {
+    return { pictures: this.pictures.drawn, options: this.data.scenes.options, controllers: this.controllers };
+  }
+
+  /** Over the fight, what its mode drew of its own (practice's menus and HUD): the printer's runs and its draws, in the fight's units. */
+  renderOverFight(game: GameState, width: number, height: number): void {
+    if (game.printed.length === 0 && game.drawn.length === 0) return;
+    this.fightLayer.begin(width, height);
+    drawScene(game, this.fightLayer, this.drawnContext());
+    this.fightLayer.end();
   }
 
   /** A dissolve over a frame the scenes did not draw (the fight's); nothing when none is under way. */

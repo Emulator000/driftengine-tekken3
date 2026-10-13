@@ -32,8 +32,9 @@ export interface SongPick {
 
 /**
  * Each song's picks (the arrangement's, then the arcade's), each XA song's first and end sectors
- * on the disc, each audio track's sectors, the music set (0 the arrangement, 1 the arcade's),
- * stereo, and the music's volume option (of 127).
+ * on the disc, each audio track's sectors, the music set (0 the arrangement, 1 the arcade's) and
+ * stereo as the game powers on (the game tells the driver when its options change them), and the
+ * music's volume option (of 127).
  */
 export interface MusicTables {
   readonly picks: readonly (readonly [SongPick, SongPick])[];
@@ -89,6 +90,8 @@ export interface MusicState {
   movieFields: number;
   spanPlace: number;
   spanEnd: number;
+  /** The music's options as the game last told them (null: as the tables have them at power-on): the set songs pick from (-1 none) and stereo. */
+  options: { readonly set: number; readonly stereo: number } | null;
 }
 
 /** The driver at power-on: nothing playing, the volume up (the option at its full 127, as the driver sets it). */
@@ -115,6 +118,7 @@ export function newMusic(): MusicState {
     movieFields: 0,
     spanPlace: 0,
     spanEnd: 0,
+    options: null,
   };
   setVolume(m, { volume: 0x7f }, 0x7f, -1);
   return m;
@@ -159,16 +163,36 @@ function stop(m: MusicState, tables: MusicTables): void {
   m.mode = MusicMode.STOPPED;
 }
 
+/** The music's options as the driver reads them: as the game last told it, else the tables'. */
+export function musicOptionsOf(m: MusicState, tables: MusicTables): { readonly set: number; readonly stereo: number } {
+  return m.options ?? { set: tables.set === 1 ? 1 : 0, stereo: tables.stereo };
+}
+
 function play(m: MusicState, tables: MusicTables, song: number, next: boolean): void {
-  const pick = tables.picks[song]?.[tables.set === 1 ? 1 : 0];
+  const set = musicOptionsOf(m, tables).set;
+  if (set < 0) return;
+  const pick = tables.picks[song]?.[set];
   if (pick === undefined) return;
   m.stopTime = STARTING_TIME;
   if (song === m.song) {
     setVolume(m, tables, 0x7f, -1);
     return;
   }
+  start(m, tables, song, pick, next, pick.loops);
+}
+
+/** The Theater's song: its pick from the set it names, never looping, started over even when it plays. */
+function playOnce(m: MusicState, tables: MusicTables, song: number, set: number): void {
+  const pick = tables.picks[song]?.[set];
+  if (pick === undefined) return;
+  m.stopTime = STARTING_TIME;
+  start(m, tables, song, pick, false, false);
+}
+
+/** A song's pick started (with `next` readied), its volume up at once. */
+function start(m: MusicState, tables: MusicTables, song: number, pick: SongPick, next: boolean, loops: boolean): void {
   setVolume(m, tables, 0, -1);
-  m.loops = pick.loops;
+  m.loops = loops;
   m.songVolume = pick.volume;
   if (pick.track) {
     if (next) return;
@@ -200,6 +224,7 @@ function play(m: MusicState, tables: MusicTables, song: number, next: boolean): 
 /** A command, in its frame's order. */
 export function musicCommand(m: MusicState, tables: MusicTables, c: SoundCommand): void {
   if (c.key === 'song') play(m, tables, c.song, c.next);
+  else if (c.key === 'theater song') playOnce(m, tables, c.song, c.set);
   else if (c.key === 'music fade') setVolume(m, tables, c.volume, c.frames);
   else if (c.key === 'music end after fade') {
     m.mode = MusicMode.FADING_OUT;
@@ -226,7 +251,7 @@ export function musicCommand(m: MusicState, tables: MusicTables, c: SoundCommand
   } else if (c.key === 'music reset') {
     setVolume(m, tables, 0x7f, -1);
     stop(m, tables);
-  }
+  } else if (c.key === 'music options') m.options = { set: c.set, stereo: c.stereo };
 }
 
 /** A field: the drive reads on. */
@@ -292,7 +317,7 @@ export function musicFrame(m: MusicState, tables: MusicTables): void {
 /** The CD's gain each side to its own and across, 0 to 1, as the drive mixes it: nothing while a song is still to be heard. */
 export function musicGains(m: MusicState, tables: MusicTables): { same: number; across: number } {
   if (m.starting === Starting.WAITING || m.starting === Starting.TRACK_WAITING) return { same: 0, across: 0 };
-  if (tables.stereo === 0) {
+  if (musicOptionsOf(m, tables).stereo === 0) {
     const each = div(m.volume * 0x50, 100) & 0xff;
     return { same: each / 0x80, across: each / 0x80 };
   }
