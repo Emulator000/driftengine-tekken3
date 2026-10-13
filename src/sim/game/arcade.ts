@@ -3,10 +3,13 @@
  * stage and its song), and Arcade's run: its ten opponents drawn for the human's character (four
  * from the first ten, four from all those earned, the boss ninth, Ogre last; an added character
  * meets its own first opponent first), and each round's opponent put on the computer's side.
+ * Tekken Ball plays on its beach to the character's song, a lone human against a character drawn
+ * at random (Gon the first time).
  */
 import type { FightTables } from '../fight/match.ts';
 import type { SceneTables } from '../data/scenes.ts';
 import { MenuMode } from './menu.ts';
+import { sortPairs } from './records.ts';
 import { stepNoise } from './select.ts';
 import type { GameState } from './state.ts';
 
@@ -84,17 +87,64 @@ export function chooseStage(game: GameState, tables: FightTables): void {
     case MenuMode.PRACTICE:
       code = codeOf(game, run.newcomer);
       break;
-    case MenuMode.TEKKEN_BALL:
     case MenuMode.TEKKEN_FORCE:
-      throw new Error(`mode ${world.mode}'s stage is not remade`);
+      code = codeOf(game, world.force.pad);
+      break;
     default:
       code = codeOf(game, sideOf());
   }
-  const { stage, song } = record(code);
+  const { stage: home, song: own } = record(code);
+  let stage = world.mode === MenuMode.TEKKEN_BALL ? BALL_STAGE : home;
+  let song = own;
+  if (world.mode === MenuMode.TEKKEN_FORCE) {
+    stage = world.match.stage + FORCE_STAGES.first;
+    if (FORCE_STAGES.last < stage) [stage, song] = [FORCE_STAGES.first, FORCE_STAGES.finalSong];
+  }
   world.stageSong = song;
   world.stage = stage;
   run.stageChosen = stage;
   run.songChosen = song & 0xff;
+}
+
+/** Tekken Force's stages, one a stage index from the first; the final stage, past the last, is the first's with Dr. B's song. */
+const FORCE_STAGES = { first: 0xf, last: 0x12, finalSong: 0x19 } as const;
+/** Tekken Ball's stage; the characters it draws from (the first fourteen, Gun Jack, Anna); its first opponent (Gon). */
+const BALL_STAGE = 0x13;
+const BALL_POOL = 0x53fff;
+const BALL_FIRST = 0x44;
+
+/**
+ * Tekken Ball's computer opponent: drawn at random from the earned characters it draws from, listed
+ * by how often each was met, most first (and counted); Gon the first time.
+ */
+function chooseBallOpponent(game: GameState): number {
+  const pool = game.records.earnedRoster & BALL_POOL;
+  const met = game.run.ball.met;
+  const pairs: [number, number][] = [];
+  for (let roster = 0; roster < 0x16; roster += 1) if ((pool & (1 << roster)) !== 0) pairs.push([roster, met[roster]!]);
+  if (pairs.length !== 0) sortPairs(pairs, false);
+  let count = 0;
+  while (count < pairs.length && !(pairs[0]![1] + 4 < pairs[count]![1])) count += 1;
+  if (game.records.extraDrawn === 0) {
+    game.records.extraDrawn = 1;
+    return BALL_FIRST;
+  }
+  const pick = pairs[(stepNoise(game) >>> 0) % count]![0];
+  met[pick] = (met[pick]! + 1) & 0xffff;
+  return pick * 4 + (game.world.vsyncSeen & 1);
+}
+
+/** Tekken Ball's match: the computer tuned by its difficulty, and with a lone human its opponent drawn onto the computer's side. */
+export function ballMatch(game: GameState): void {
+  const world = game.world;
+  world.computer.arcadeStage = (world.computer.difficulty * 4 + 1) & 0xff;
+  if (world.match.humanCount !== 1) return;
+  const code = chooseBallOpponent(game);
+  const side = world.match.computerSide;
+  game.entrants.roster[side] = code >> 2;
+  game.entrants.costume[side] = code & 3;
+  game.entrants.computer[side] = 1;
+  settleCostumes(game, side);
 }
 
 /**
@@ -165,4 +215,88 @@ export function arcadeRound(game: GameState): void {
   settleCostumes(game, side);
   record.roster = game.entrants.roster[side]!;
   record.costume = game.entrants.costume[side]!;
+}
+
+/** No character: Survival's last opponents before there are four. */
+const NO_ONE = 0x16;
+/**
+ * The characters Survival's opponents come from: the first ten for its first seven wins, all but
+ * Ogre until its seventeenth, then all; never Mokujin, Gon, Dr. B or Tekken Force's.
+ */
+const SURVIVAL_FIRST = 0x3ff;
+const SURVIVAL_NO_OGRE = 0xfbfff;
+const SURVIVAL_ALL = 0x1fffff;
+const SURVIVAL_NEVER = 0x157fff;
+/** Past twenty wins an opponent beaten up to four times more than the least beaten may come. */
+const SURVIVAL_SPREAD = { after: 0x13, by: 4 } as const;
+
+/** Survival's place among its ten records for `wins` (1 the first), or 0 when it takes none. */
+export function survivorRank(game: GameState, wins: number): number {
+  const at = game.records.survivors.findIndex((record) => record.wins < wins);
+  return at < 0 ? 0 : at + 1;
+}
+
+/**
+ * Survival's next opponent: of the characters it may meet (none of its last four), one of those
+ * beaten least, at random, in the first costume or the second by the field; it becomes the
+ * newest of the last four.
+ */
+function chooseSurvivalOpponent(game: GameState): void {
+  const world = game.world;
+  const survival = game.run.survival;
+  const stage = world.match.stage;
+  let pool = 6 < stage ? (stage < 0x11 ? SURVIVAL_NO_OGRE : SURVIVAL_ALL) : SURVIVAL_FIRST;
+  pool &= SURVIVAL_NEVER;
+  for (const recent of survival.recent) if (recent !== NO_ONE) pool &= ~(1 << (recent & 0x1f));
+  const pairs: [number, number][] = [];
+  for (let roster = 0; roster < NO_ONE; roster += 1) if ((pool & (1 << roster)) !== 0) pairs.push([roster, survival.beaten[roster]!]);
+  if (pairs.length === 0) throw new Error('Survival has no opponent left to meet');
+  sortPairs(pairs, true);
+  let least = pairs[0]![1];
+  if (SURVIVAL_SPREAD.after < world.match.survivalWins >>> 0) least += SURVIVAL_SPREAD.by;
+  let count = 0;
+  while (count < pairs.length && !(least < pairs[count]![1])) count += 1;
+  const pick = pairs[(stepNoise(game) >>> 0) % count]![0];
+  survival.opponent = pick * 4 + (world.vsyncSeen & 1);
+  survival.recentAt = 3 < survival.recentAt + 1 ? 0 : survival.recentAt + 1;
+  survival.recent[survival.recentAt] = pick;
+}
+
+/**
+ * Survival's next match: its place among the records so far, its opponent on the computer's side
+ * at full health, and the computer's strength rising with the wins (now and then stronger past
+ * twenty, every tenth win from fifty an easy one).
+ */
+export function survivalRound(game: GameState): void {
+  const world = game.world;
+  world.match.survivalRank = survivorRank(game, world.match.survivalWins);
+  chooseSurvivalOpponent(game);
+  const side = world.match.computerSide;
+  const code = game.run.survival.opponent;
+  game.entrants.roster[side] = code >> 2;
+  game.entrants.costume[side] = code & 3;
+  game.entrants.computer[side] = 1;
+  settleCostumes(game, side);
+  world.fighters[side]!.health = 0;
+  world.fighters[side]!.carriedHealth = 0;
+  const wins = world.match.survivalWins;
+  const random = (n: number): number => (stepNoise(game) & 0xffff) % n;
+  let difficulty = 1;
+  let level: number;
+  if (wins < 5) level = random(3) + 1;
+  else if (wins < 10) level = random(3) + 2;
+  else if (wins < 20) level = random(5) + 3;
+  else if (wins < 50) {
+    level = random(5) + 3;
+    if ((world.vsyncSeen & 0x10) !== 0) difficulty = 2;
+  } else if (wins % 10 === 0) level = 0;
+  else if (wins % 5 !== 3) {
+    level = random(7) + 3;
+    if ((world.vsyncSeen & 0x14) !== 0) difficulty = 2;
+  } else {
+    level = random(4) + 6;
+    difficulty = 2;
+  }
+  world.computer.difficulty = difficulty;
+  world.computer.arcadeStage = Math.min(level, 9);
 }

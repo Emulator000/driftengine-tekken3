@@ -15,6 +15,11 @@ export function parseRosterTables(json: unknown, where = 'tables/roster.json'): 
       return { name: c.name, sound: sound!, moveset: moveset!, pack: pack!, stage: stage!, song: song! };
     }),
     health: [...expectInts(o.health, `${where} health`, 9, (n) => new Int32Array(n), 0, 0x7fffffff)],
+    recovery: (() => {
+      const r = expectObject(o.recovery, `${where} recovery`);
+      const row = (key: string): number[] => [...expectInts(r[key], `${where} recovery.${key}`, 8, (n) => new Int32Array(n), 0, 0x7fffffff)];
+      return { team: row('team'), survival: row('survival') };
+    })(),
     standIns: expectArray(o.standIns, `${where} standIns`).map((pair, i) => {
       const [added, as] = expectInts(pair, `${where} standIns[${i}]`, 2, (n) => new Int16Array(n), 0, 0xff);
       return [added!, as!] as const;
