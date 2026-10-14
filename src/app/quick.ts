@@ -8,11 +8,12 @@ import { loadFightTables, loadMoveset } from '../assets/load.ts';
 import { Fight } from '../sim/fight/fight.ts';
 import { fightDataFor, matchMovesets, type MatchSetup } from '../sim/fight/match.ts';
 import { FightView, type ArcadeStageFiles, type DrawingFiles } from '../present/3d/fight-view.ts';
-import { TEXTURE_SCALE, type ArcadeObject, type ArcadePanorama } from '../assets/manifest.ts';
+import { parseManifest, type ArcadeObject, type ArcadePanorama } from '../assets/manifest.ts';
 import { Hud } from '../present/hud/hud.ts';
 import { PauseScreen } from '../present/hud/pause.ts';
 import { loadTypefaces } from '../present/2d/typefaces.ts';
 import { assetBytes, assetImage, dataBytes, image, json, pageQuality, pageRenderer, params, play, status, two } from './page.ts';
+import { asked, settings } from './settings.ts';
 import { startSound } from './sound.ts';
 
 /** Roster ids the remake cannot set up yet: Mokujin's draw. */
@@ -22,26 +23,35 @@ const PAUL = 0;
 const LAW = 1;
 
 /** Whether the fighters and stages are drawn with their textures enlarged and smooth, or as the console drew them (`?textures=psx`). */
-const smooth = params.get('textures') !== 'psx';
+const smooth = asked(params, 'textures', settings.textures, [null, 'psx']) !== 'psx';
 /**
  * Whether a stage the arcade board's data has is drawn with the arcade's scenery, the default once
  * `npm run arcade` has read it, or with the disc's (`?stages=psx`).
  */
-const arcadeScenery = params.get('stages') !== 'psx';
+const arcadeScenery = asked(params, 'stages', settings.stages, [null, 'psx']) !== 'psx';
+/** Whether a fighter the board's data has a model of is drawn with it, the default, or with the disc's (`?fighters=psx`). */
+const arcadeModels = asked(params, 'fighters', settings.fighters, [null, 'psx']) !== 'psx';
 interface ArcadeList {
   readonly stages: ReadonlySet<number>;
   readonly panoramas: readonly ArcadePanorama[];
   readonly objects: readonly ArcadeObject[];
+  readonly fighters: ReadonlySet<number>;
 }
-let arcadeStages: Promise<ArcadeList> | null = null;
-/** The stages drawn with the arcade's scenery, their panoramas and their moving pieces. */
+let arcadeLists: Promise<ArcadeList> | null = null;
+/** The stages drawn with the arcade's scenery, their panoramas and their moving pieces; the packs drawn with the board's fighters. */
 const arcadeStagesOf = (): Promise<ArcadeList> =>
-  (arcadeStages ??= arcadeScenery
-    ? json('manifest.json').then((m) => {
-        const manifest = m as { arcadeStages?: number[]; arcadePanoramas?: ArcadePanorama[]; arcadeObjects?: ArcadeObject[] };
-        return { stages: new Set(manifest.arcadeStages ?? []), panoramas: manifest.arcadePanoramas ?? [], objects: manifest.arcadeObjects ?? [] };
-      })
-    : Promise.resolve({ stages: new Set(), panoramas: [], objects: [] }));
+  (arcadeLists ??=
+    arcadeScenery || arcadeModels
+      ? json('manifest.json').then((m) => {
+          const manifest = parseManifest(m);
+          return {
+            stages: new Set(arcadeScenery ? manifest.arcadeStages : []),
+            panoramas: manifest.arcadePanoramas,
+            objects: manifest.arcadeObjects,
+            fighters: new Set(arcadeModels ? manifest.arcadeFighters : []),
+          };
+        })
+      : Promise.resolve({ stages: new Set(), panoramas: [], objects: [], fighters: new Set() }));
 /** A fighter's, an intro model's or a stage's texture atlas by its file's name: the enlarged one, or the original. */
 const atlas = (kind: string, name: string): Promise<ImageBitmap> => (smooth ? assetImage(`textures/${kind}/${name}.png`) : image(`${kind}/${name}.png`));
 /**
@@ -50,8 +60,8 @@ const atlas = (kind: string, name: string): Promise<ImageBitmap> => (smooth ? as
  * cost a third of its frame.
  */
 const rounded = (): boolean => {
-  const asked = params.get('models');
-  return asked === null ? pageQuality() !== 'verylow' : asked !== 'psx';
+  const models = asked(params, 'models', settings.models, [null, 'rounded', 'psx']);
+  return models === null ? pageQuality() !== 'verylow' : models !== 'psx';
 };
 /** A fighter's or an intro model's mesh by its file's name: the rounded one, or the original. */
 const fighterMesh = (kind: string, name: string): Promise<ArrayBuffer> => (rounded() ? assetBytes(`models/${kind}/${name}.ftr`) : dataBytes(`${kind}/${name}.ftr`));
@@ -67,7 +77,7 @@ const backdropOf = (id: number): Promise<ImageBitmap> | undefined => {
   return undefined;
 };
 
-/** The arcade's scenery for a stage and its atlas, where it is drawn, and its panorama where it has one. */
+/** The arcade's scenery for a stage and its atlas, where it is drawn, and its background where it has one. */
 const arcadeOf = async (id: number): Promise<ArcadeStageFiles | undefined> => {
   const { stages, panoramas, objects } = await arcadeStagesOf();
   if (!stages.has(id)) return undefined;
@@ -79,8 +89,7 @@ const arcadeOf = async (id: number): Promise<ArcadeStageFiles | undefined> => {
     sky === undefined ? null : atlas('arcade/stages', `${two(id)}.sky`),
     Promise.all(own.map(async (o) => ({ ...o, mesh: await dataBytes(`arcade/stages/${two(id)}-${o.piece}.stg`), texture: await atlas('arcade/stages', `${two(id)}-${o.piece}`) }))),
   ]);
-  const scale = smooth ? TEXTURE_SCALE.stages : 1;
-  const panorama = sky === undefined || picture === null ? undefined : { picture, width: picture.width / scale, height: picture.height / scale, top: sky.top, bottom: sky.bottom, horizon: sky.horizon };
+  const panorama = sky === undefined || picture === null ? undefined : { picture, layout: sky };
   return { mesh, texture, objects: pieces, ...(panorama === undefined ? {} : { panorama }) };
 };
 
@@ -92,7 +101,8 @@ const stage = async (id: number): Promise<{ mesh: ArrayBuffer; ground: ArrayBuff
 /** The fighters' and stages' drawing data, by pack and stage. */
 export const drawingFiles: DrawingFiles = {
   fighter: async (pack) => {
-    const [mesh, texture] = await Promise.all([fighterMesh('fighters', two(pack)), atlas('fighters', two(pack))]);
+    const kind = (await arcadeStagesOf()).fighters.has(pack) ? 'arcade/fighters' : 'fighters';
+    const [mesh, texture] = await Promise.all([fighterMesh(kind, two(pack)), atlas(kind, two(pack))]);
     return { mesh, texture };
   },
   stage,
@@ -163,6 +173,11 @@ export async function playQuickMatch(): Promise<void> {
             pause.draw();
           },
         );
+      },
+      about: () => {
+        const world = fight.state;
+        const name = (f: (typeof world.fighters)[number]): string => `${tables.roster.codes[f.rosterCode]?.name ?? '?'} (roster ${f.roster}, model ${f.costume})`;
+        return { Scene: 'quick match', Fighters: `${name(world.fighters[0]!)} vs ${name(world.fighters[1]!)}`, Stage: world.stage, Round: world.round.number };
       },
       probe: () => ({
         setup,

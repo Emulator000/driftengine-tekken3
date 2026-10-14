@@ -1,10 +1,11 @@
 /**
- * The frame rate in the window's top right corner, shown and hidden with `F`: the frames the page
- * showed over the last second (each one drawn, or kept where nothing in it changed), their mean
- * time and the longest of them. Whether it shows is kept in the browser for next time.
+ * The frame rate in the window's top right corner, shown and hidden with `F` or REMAKE OPTION's
+ * FRAME RATE: the frames the page showed over the last second (each one drawn, or kept where
+ * nothing in it changed), their mean time and the longest of them. Whether it shows is kept with
+ * the remake's settings for next time.
  */
+import { readSettings, settings, writeSettings } from './settings.ts';
 
-const KEY = 'tekken3.fps';
 /** How often the reading changes, milliseconds. */
 const REFRESH = 500;
 /** The frames it is taken over, milliseconds back. */
@@ -37,13 +38,13 @@ export class FpsMeter {
       e.preventDefault();
       this.show(!this.shown);
     });
-    let remembered = false;
-    try {
-      remembered = localStorage.getItem(KEY) === '1';
-    } catch {
-      /* Hidden. */
-    }
-    if (remembered) this.show(true);
+    if (settings.frameRate === 1) this.show(true);
+    meter = this;
+  }
+
+  /** Whether it shows. */
+  get showing(): boolean {
+    return this.shown;
   }
 
   /** A frame shown at `now` (`performance.now()`). */
@@ -60,16 +61,25 @@ export class FpsMeter {
     this.box.textContent = `${Math.round(1000 / mean)} FPS  ${mean.toFixed(1)} ms  max ${longest.toFixed(1)}`;
   }
 
-  private show(on: boolean): void {
+  /** Shown or hidden, and kept so. */
+  show(on: boolean): void {
     this.shown = on;
     this.box.style.display = on ? 'block' : 'none';
     this.times.length = 0;
     this.written = 0;
     this.box.textContent = '-- FPS';
-    try {
-      localStorage.setItem(KEY, on ? '1' : '0');
-    } catch {
-      /* A browser that keeps nothing starts with it hidden. */
-    }
+    const kept = readSettings();
+    if (kept.frameRate !== (on ? 1 : 0)) writeSettings({ ...kept, frameRate: on ? 1 : 0 });
   }
+}
+
+/** The page's meter, once it has one. */
+let meter: FpsMeter | null = null;
+
+/** Whether the frame rate shows. */
+export const frameRateShown = (): boolean => meter?.showing ?? false;
+
+/** The frame rate shown or hidden. */
+export function showFrameRate(on: boolean): void {
+  meter?.show(on);
 }

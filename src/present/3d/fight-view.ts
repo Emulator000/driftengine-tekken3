@@ -21,10 +21,10 @@ import { Effects } from './effects/effects.ts';
 import { BallView } from './ball.ts';
 import { Beach, BEACH_STAGE, beachClear } from './stage/beach.ts';
 import { FORCE_STAGES, ForceBackdrop } from './stage/force-backdrop.ts';
-import { ArcadeSky, arcadeSkyOver } from './stage/arcade-sky.ts';
+import { ArcadeBackground } from './stage/arcade-background.ts';
 import { placeParts } from './stage/pieces.ts';
 import { freeView } from './free-view.ts';
-import type { PieceMotion } from '../../assets/manifest.ts';
+import type { ArcadePanorama, PieceMotion } from '../../assets/manifest.ts';
 import { ForceItems } from './effects/force-items.ts';
 import { stageCodes } from '../../sim/fight/force-stage.ts';
 
@@ -45,14 +45,10 @@ export interface DrawingFiles {
   readonly smooth: boolean;
 }
 
-/** A panorama's picture, its size in the original texels, the colours of its top and bottom rows (8-bit sRGB), and how far down it its horizon lies. */
+/** An arcade stage's background: its picture (its panorama's tiles over a few white rows) and how the stage lays it out. */
 export interface ArcadePanoramaFiles {
   readonly picture: ImageBitmap;
-  readonly width: number;
-  readonly height: number;
-  readonly top: readonly number[];
-  readonly bottom: readonly number[];
-  readonly horizon: number;
+  readonly layout: ArcadePanorama;
 }
 
 /** An arcade stage's scenery and atlas, its panorama where it has one, and its moving pieces (each a mesh and atlas, where its middle stands, how fast it turns). */
@@ -71,13 +67,13 @@ export interface ArcadePieceFiles extends PieceMotion {
   readonly fields: number;
 }
 
-/** A stage as drawn: its scenery and ground, Tekken Ball's beach, a Tekken Force backdrop, an arcade stage's sky and moving pieces. */
+/** A stage as drawn: its scenery and ground, Tekken Ball's beach, a Tekken Force backdrop, an arcade stage's background and moving pieces. */
 interface StageDrawing {
   readonly stage: Stage;
   readonly ground: Ground;
   readonly beach: Beach | null;
   readonly force: ForceBackdrop | null;
-  readonly sky: ArcadeSky | null;
+  readonly background: ArcadeBackground | null;
   readonly objects: readonly { readonly stage: Stage; readonly motion: ArcadePieceFiles; readonly placed: Float32Array[] }[];
 }
 
@@ -93,6 +89,12 @@ const EDGED = new Map([[11, 1068]]);
 const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 /** How much nearer the fighters' depth lies than the fighters (a share of their distance from the eye): a few centimetres at the fight's distances. */
 const FIGHTER_DEPTH = 0.01;
+/** A camera's pitch and yaw as the game counts them (4096ths), from where it looks in the engine's axes: the fight's, a replay's or the free camera's. */
+const lookOf = (camera: Camera): { pitch: number; yaw: number } => {
+  const [x, y, z] = camera.forward as [number, number, number];
+  const turn = 4096 / (2 * Math.PI);
+  return { pitch: Math.round(Math.asin(Math.max(-1, Math.min(1, -y))) * turn) & 0xfff, yaw: Math.round(Math.atan2(-x, -z) * turn) & 0xfff };
+};
 /** The picture's half-height in the game's pixels, which its projection distance is against. */
 const HALF_HEIGHT = 240;
 /** Stage 11's sky behind its clouds, unless True Ogre plays there (8-bit sRGB). */
@@ -261,9 +263,9 @@ export class FightView {
         const force = backdrop !== undefined && FORCE_STAGES.first <= id && id <= FORCE_STAGES.last;
         const beach = backdrop === undefined || force ? null : new Beach(this.renderer, backdrop, this.white);
         const forceBackdrop = force ? new ForceBackdrop(this.renderer, backdrop) : null;
-        const sky = arcade !== undefined && arcadeSkyOver(id) ? new ArcadeSky(this.renderer, id, arcade.panorama ?? null) : null;
+        const background = arcade?.panorama === undefined ? null : new ArcadeBackground(this.renderer, arcade.panorama);
         const objects = (arcade?.objects ?? []).map((o) => ({ stage: createStage(this.renderer, o.mesh, this.renderer.createSurfaceTexture(o.texture, this.textureOptions(true))), motion: o, placed: [] }));
-        this.stages.set(id, { stage, ground: new Ground(this.renderer, ground, atlas.width, atlas.height, handle, this.groundTint), beach, force: forceBackdrop, sky, objects });
+        this.stages.set(id, { stage, ground: new Ground(this.renderer, ground, atlas.width, atlas.height, handle, this.groundTint), beach, force: forceBackdrop, background, objects });
       });
     }
     return this.stages.get(id) ?? null;
@@ -491,8 +493,8 @@ export class FightView {
     if (scenery) layScenery(state, this.data, this.arena, drawn.stage, { widening }, this.scenery, drawn.stage.grid === ARCADE_GRID ? this.heldArcade : this.heldDisc);
     /* The free camera sees every cell: the game's culling is its own camera's. */
     if (scenery && freeView.active) this.scenery.cells.fill(1);
-    /* An arcade stage's sky and panorama, behind everything drawn after them. */
-    if (drawn?.sky != null && only.scenery && state.match.trueOgres === 0) drawn.sky.draw(state, this.camera, this.env, aspect, this.scenery.yaw);
+    /* An arcade stage's background, behind everything drawn after it. */
+    if (drawn?.background != null && only.scenery && state.match.trueOgres === 0) drawn.background.draw(lookOf(this.camera), aspect, this.scenery.yaw);
     const ball = state.mode === TEKKEN_BALL && !stageAlone;
     /* Tekken Force's backdrop is the farthest thing drawn: everything after it lies over it. */
     if (drawn?.force != null && state.mode === TEKKEN_FORCE) drawn.force.draw(state, this.data, aspect);
@@ -508,12 +510,14 @@ export class FightView {
        * sinks into it stays in sight as the game, drawing the floor first and everything over it,
        * keeps it.
        */
-      layGround(state, this.data, this.arena, layout, { widening }, this.ground, drawn.stage.grid === ARCADE_GRID);
+      const reach = drawn.stage.grid === ARCADE_GRID ? drawn.stage.reach * 1000 + HELD.arcade.radius : 0;
+      layGround(state, this.data, this.arena, layout, { widening }, this.ground, reach);
       const edge = drawn.stage.grid === ARCADE_GRID ? EDGED.get(state.stage) : undefined;
       drawn.ground.update(this.ground, edge === undefined ? null : { x: this.scenery.x, z: this.scenery.z, yaw: this.scenery.yaw, half: edge * 8 });
-      if (drawn.ground.mesh !== null) {
+      if (drawn.ground.mesh !== null || drawn.ground.farMesh !== null) {
         renderer.setMaterial(drawn.ground.material);
-        renderer.drawMesh(drawn.ground.mesh, IDENTITY);
+        if (drawn.ground.mesh !== null) renderer.drawMesh(drawn.ground.mesh, IDENTITY);
+        if (drawn.ground.farMesh !== null) renderer.drawMesh(drawn.ground.farMesh, IDENTITY);
         renderer.setMaterial(null);
       }
       if (drawn.beach !== null) {

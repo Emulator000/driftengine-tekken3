@@ -155,6 +155,14 @@ function moveById(t: Turn, id: number): MoveRef | null {
   if (ref === undefined) throw new Error(`move id ${id} is outside the id table`);
   return ref;
 }
+/**
+ * The move a cancel's target id binds to, or null: an id neither side's moveset has a move for (nor
+ * the default move it would fall back to), which the fight cannot play, so the computer never picks it.
+ */
+function targetMove(t: Turn, id: number): Move | null {
+  const ref = moveById(t, id);
+  return ref === null ? null : moveAt(t.data, ref);
+}
 
 const entryAt = (t: Turn, ref: CancelRef): Cancel => (ref.shared ? t.data.cancels.shared[ref.index]! : t.data.sets[ref.set]!.moveset.cancels[ref.index]!);
 const listOf = (ref: MoveRef, move: Move): CancelRef => ({ shared: false, set: ref.set, index: move.cancels });
@@ -966,7 +974,9 @@ function followUps(m: Moment): boolean {
       let count = 0;
       for (const ref of cancels()) {
         const entry = entryAt(m, ref);
-        if (!conditionHolds(m, entry) || ((moveOf(m, moveById(m, entry.target)).hitFlags >> 8) & 0x20) === 0) continue;
+        if (!conditionHolds(m, entry)) continue;
+        const target = targetMove(m, entry.target);
+        if (target === null || ((target.hitFlags >> 8) & 0x20) === 0) continue;
         rec.specials[count] = ref;
         count += 1;
         if (3 < count) break;
@@ -986,7 +996,8 @@ function followUps(m: Moment): boolean {
       for (const ref of cancels()) {
         const entry = entryAt(m, ref);
         if (!conditionHolds(m, entry)) continue;
-        const target = moveOf(m, moveById(m, entry.target));
+        const target = targetMove(m, entry.target);
+        if (target === null) continue;
         if ((lowAttack !== 0 && (kindOf(target) & 0x400000) !== 0) || (target.flags & 0x20000) !== 0) continue;
         let kind = kindOf(target);
         if ((kind & 0x200000) === 0 && (target.flags & 0x80000) === 0) {
@@ -1026,7 +1037,9 @@ function followUps(m: Moment): boolean {
           for (const ref of cancels()) {
             const entry = entryAt(m, ref);
             if (entry.from !== 1 || entry.to !== entry.start || !conditionHolds(m, entry)) continue;
-            if (((moveOf(m, moveById(m, entry.target)).hitFlags >> 8) & 0x20) !== 0 && mix12(m) < chance) continue;
+            const target = targetMove(m, entry.target);
+            if (target === null) continue;
+            if (((target.hitFlags >> 8) & 0x20) !== 0 && mix12(m) < chance) continue;
             rec.string[count] = ref;
             if (entry.to < 0x3c && rec.stringLast < entry.to) rec.stringLast = entry.to;
             count += 1;
@@ -1922,8 +1935,10 @@ function gather(t: Turn, mode: number): number {
   let count = 0;
   const add = (ref: CancelRef): boolean => {
     if (CANDIDATES - 1 < count) return false;
+    const move = moveById(t, entryAt(t, ref).target);
+    if (move === null) return true;
     const candidate = candidateAt(t, count);
-    candidate.move = moveById(t, entryAt(t, ref).target);
+    candidate.move = move;
     candidate.entry = ref;
     candidate.taken = 0;
     count += 1;
@@ -1945,7 +1960,7 @@ function gather(t: Turn, mode: number): number {
   const frame = self.frame;
   const end = entryAt(t, at);
   const next = moveById(t, end.target);
-  if (end.from <= frame && frame <= end.to && !sameMove(next, self.move)) {
+  if (next !== null && end.from <= frame && frame <= end.to && !sameMove(next, self.move)) {
     const bits = rec.around;
     outer: for (let list = movesList(t, next); entryAt(t, list).command !== END; list = nextOf(list)) {
       for (const ref of expand(t, list)) {
@@ -2031,7 +2046,8 @@ function chooseCandidate(t: Turn): number {
 /** A cancel just played, noted: throws counted; an attack sets a new wait (the tuning's base plus one of four extras) and drops the plans. */
 function noteChosen(t: Turn, entry: Cancel): void {
   const rec = t.rec;
-  const move = moveOf(t, moveById(t, entry.target));
+  const move = targetMove(t, entry.target);
+  if (move === null) return;
   if ((kindOf(move) & 0x400000) !== 0) rec.throwFollowUps = s16(rec.throwFollowUps + 1);
   if (s8(move.activeWindow.first) === 0) return;
   rec.wait = s16(rec.tuning[Tune.WAIT]! + rec.tuning[Tune.WAIT_EXTRAS + mixBits(t, 3)]!);
@@ -2071,7 +2087,7 @@ function canPlay(t: Turn, id: number): boolean {
   const frame = self.frame;
   const end = entryAt(t, tail);
   const next = moveById(t, end.target);
-  if (sameMove(next, self.move) || frame < end.from || end.to < frame) return false;
+  if (next === null || sameMove(next, self.move) || frame < end.from || end.to < frame) return false;
   for (let at = movesList(t, next); entryAt(t, at).command !== END; at = nextOf(at)) {
     for (const ref of expand(t, at)) {
       const item = entryAt(t, ref);
@@ -2091,7 +2107,8 @@ function throwOpen(t: Turn): boolean {
   for (let at = movesList(t, t.self.move); entryAt(t, at).command !== END; at = nextOf(at)) {
     for (const ref of expand(t, at)) {
       const item = entryAt(t, ref);
-      if (followUpOpen(t, item) && (kindOf(moveOf(t, moveById(t, item.target))) & 0x400000) !== 0) {
+      const target = targetMove(t, item.target);
+      if (followUpOpen(t, item) && target !== null && (kindOf(target) & 0x400000) !== 0) {
         found = true;
         break;
       }

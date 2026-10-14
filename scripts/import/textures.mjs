@@ -1,8 +1,9 @@
 /**
  * The fighters' and the stages' texture atlases enlarged by edge-directed interpolation
  * (`scripts/lib/upscale.mjs`) for the smooth textures the remake draws by default:
- * `textures/fighters/NN.png` (and the attract intros' `textures/intro/I-PP.png`) four times their
- * size, `textures/stages/NN.png` and the arcade's `textures/arcade/stages/NN.png` twice (a stage's
+ * `textures/fighters/NN.png` (and the attract intros' `textures/intro/I-PP.png`, and the arcade's
+ * `textures/arcade/fighters/NN.png`) four times their size, `textures/stages/NN.png` and the
+ * arcade's `textures/arcade/stages/NN.png` twice (a stage's
  * atlas is already 1024 square). Each is made again only when its source or the enlarger is newer,
  * the work spread over worker threads, an atlas each.
  */
@@ -21,6 +22,7 @@ export async function upscaleTextures(root, output) {
     ['intro', TEXTURE_SCALE.fighters],
     ['stages', TEXTURE_SCALE.stages],
     ['arcade/stages', TEXTURE_SCALE.stages],
+    ['arcade/fighters', TEXTURE_SCALE.fighters],
   ]) {
     const dir = path.join(root, 'public/data', kind);
     if (!existsSync(dir)) continue;

@@ -7,17 +7,23 @@
 import { arcMembers } from '../bns.mjs';
 import { decompress } from '../lz.mjs';
 import { CUT, LAYER_SHIFT, ONE_SIDED, SHADED, writeStageMesh } from '../stage.mjs';
-import { absoluteVram, packAtlas, readTimChain } from '../texture.mjs';
+import { absoluteVram, decodePage, packAtlas, readTimChain } from '../texture.mjs';
+import { BACKGROUND_TABLES, PROGRAM_CODE } from './board.mjs';
 
 const MODEL_MAGIC = 0x41;
 /** The most layers polygons stack in one plane; how near two planes are to be one (model units, and their normals' cosine); how far two polygons must overlap to lie over each other. */
 const LAYERS = 3;
 const PLANE = { distance: 1.5, cosine: 0.999 };
 const OVERLAP = 0.5;
-/** A panorama's tiles, texels each way; the share of its height that fades into the sky above it; the rows its sky's colour is taken from. */
+/** A panorama's tiles, texels each way; the white rows under them that its filled cells are drawn from. */
 const TILE = 64;
-const FADE = 0.3;
-const SKY_ROWS = 8;
+const WHITE = 4;
+/** A background's mask cells: its panorama's tile, the colour below it, a filled tile's colour; any other value draws nothing. */
+const MASK = new Map([
+  [0x31, 'p'],
+  [100, 'b'],
+  [0x74, 't'],
+]);
 /** The board's VRAM, twice the PlayStation's rows. */
 const VRAM_ROWS = 1024;
 /** A colour that leaves the texel as it is. */
@@ -183,14 +189,14 @@ function stackLayers(polygons) {
  * each flipbook (a run of frames' textures, from `program`), its polygons taken out of the scenery
  * and drawn once a frame, each frame a cell of a mesh of its own.
  */
-export function exportArcadeStage(archive, encodePng, flipbooks = [], program = null) {
-  const [model, ...pages] = arcMembers(Buffer.from(archive.buffer, archive.byteOffset, archive.byteLength));
+export function exportArcadeStage(archive, encodePng, flipbooks = [], program = null, leftOut = []) {
+  const [model] = arcMembers(Buffer.from(archive.buffer, archive.byteOffset, archive.byteLength));
   const { cellSize, grid, polygons } = readArcadeModel(model);
-  /* A page stored compressed is read once unpacked. */
-  const tims = pages.flatMap((page) => readTimChain(page.readUInt32LE(0) === 0x10 ? page : decompress(page, 0)));
-  let scenery = polygons;
+  const tims = stageTims(archive);
+  /* The cells the game leaves out of the scenery. */
+  let scenery = polygons.filter((p) => !leftOut.includes(p.cell));
   const books = flipbooks.map(([from, to]) => {
-    const frames = readTimChain(program.subarray(from, to));
+    const frames = ownPalettes(readTimChain(program.subarray(from, to)));
     const slot = closestTexture(
       tims.filter((t) => t.image !== null && scenery.some((p) => p.target !== null && texelsIn(p, t.image))),
       frames[0],
@@ -203,6 +209,20 @@ export function exportArcadeStage(archive, encodePng, flipbooks = [], program = 
     return writeArcadeMesh(shown, absoluteVram(frames, VRAM_ROWS), 0, cells, encodePng);
   });
   return { ...writeArcadeMesh(scenery, absoluteVram(tims, VRAM_ROWS), cellSize, grid, encodePng), books };
+}
+
+/**
+ * A flipbook's frames with their palettes a row apart: each frame loads its own palette to the same
+ * place as it is shown, so in one VRAM holding them all each keeps its own.
+ */
+function ownPalettes(frames) {
+  const moved = frames.map((frame, k) => (frame.clut === null ? frame : { ...frame, clut: { ...frame.clut, y: frame.clut.y + k * frame.clut.h } }));
+  for (const { clut } of moved) {
+    if (clut === null) continue;
+    const hit = moved.some(({ image }) => image !== null && image.x < clut.x + clut.w && clut.x < image.x + image.w && image.y < clut.y + clut.h && clut.y < image.y + image.h);
+    if (hit) throw new Error('a flipbook palette moved over a frame');
+  }
+  return moved;
 }
 
 /** A texture's texels as colours, for comparing. */
@@ -290,41 +310,70 @@ function writeArcadeMesh(polygons, vram, cellSize, grid, encodePng) {
   return { mesh, atlas: encodePng(packed.width, packed.height, packed.atlas), stats: { polygons: polygons.length, layered, atlas: [packed.width, packed.height], cellSize, grid } };
 }
 
-/** A 15-bit colour as RGB8. */
-const rgb8 = (colour) => [colour & 31, (colour >> 5) & 31, (colour >> 10) & 31].map((v) => (v << 3) | (v >> 2));
+/** A stage archive's textures: its pages after its model, a page stored compressed read unpacked. */
+function stageTims(archive) {
+  const [, ...pages] = arcMembers(Buffer.from(archive.buffer, archive.byteOffset, archive.byteLength));
+  return pages.flatMap((page) => readTimChain(page.readUInt32LE(0) === 0x10 ? page : decompress(page, 0)));
+}
 
 /**
- * A stage's panorama: its tiles (4-bit, 64 texels square, each with its own palette) laid
- * `columns` a row, every texel opaque, its top fading out so the sky above shows through; and the
- * colours of its top and bottom rows, which the sky above and below it takes.
+ * A stage's background from the game's code (`code`, the program's code unpacked): its panorama,
+ * `columns` × `rows` tiles of 64 texels, each from the stage's textures where its tile word and its
+ * palette word say (its page, the VRAM's half, its place in the page), with white rows under them;
+ * its mask, per row a cell for each tile's width round a whole turn (`perTurn` of them): the
+ * panorama's tile (`p`), the colour below (`b`), a filled tile's colour (`t`) or nothing (`.`); how
+ * its top stands (`offset` lines, and `pitch` 256ths of a line for each 4096th the camera pitches);
+ * its colours (a filled tile's, the one above the panorama, the one below it and its `b` cells), and
+ * whether the colours above and below it are drawn.
  */
-export function exportArcadePanorama(archive, { first, count, columns }, encodePng) {
-  const [, ...pages] = arcMembers(Buffer.from(archive.buffer, archive.byteOffset, archive.byteLength));
-  const tiles = pages.flatMap((page) => readTimChain(page)).slice(first, first + count);
-  if (tiles.length !== count || tiles.some((t) => t.bpp !== 4 || t.image === null || t.image.w * 4 !== TILE || t.image.h !== TILE)) throw new Error('not a panorama of 64-texel tiles');
-  const width = columns * TILE;
-  const height = Math.ceil(count / columns) * TILE;
-  const pixels = new Uint8Array(width * height * 4);
-  tiles.forEach((tile, i) => {
-    const x0 = (i % columns) * TILE;
-    const y0 = Math.floor(i / columns) * TILE;
-    for (let y = 0; y < TILE; y += 1) {
-      for (let x = 0; x < TILE; x += 1) {
-        const index = (tile.image.data[y * (TILE / 4) + (x >> 2)] >> ((x & 3) * 4)) & 15;
-        pixels.set([...rgb8(tile.clut.data[index] ?? 0), 255], ((y0 + y) * width + x0 + x) * 4);
-      }
-    }
-  });
-  const average = (from) => {
-    const sum = [0, 0, 0];
-    for (let i = from * width; i < (from + SKY_ROWS) * width; i += 1) for (let k = 0; k < 3; k += 1) sum[k] += pixels[i * 4 + k];
-    return sum.map((v) => Math.round(v / (width * SKY_ROWS)));
+export function exportArcadeBackground(code, stage, archive, encodePng) {
+  const view = new DataView(code.buffer, code.byteOffset, code.byteLength);
+  const at = (address) => address - PROGRAM_CODE.base;
+  const layout = at(BACKGROUND_TABLES.layouts + stage * 20);
+  const columns = view.getInt16(layout, true);
+  const rows = view.getInt16(layout + 2, true);
+  const [tiles, palettes, mask] = [4, 8, 12].map((k) => at(view.getUint32(layout + k, true)));
+  const offset = view.getInt16(layout + 16, true);
+  /* The screen's 512 pixels span this many degrees: a turn is 512 × 360 over them, in tiles. */
+  const degrees = view.getUint16(layout + 18, true);
+  const perTurn = Math.trunc(0x2d000 / degrees) >> 6;
+  const pitch = view.getInt16(at(BACKGROUND_TABLES.pitch + stage * 2), true);
+  const colour = (k) => {
+    const o = at(BACKGROUND_TABLES.colours + stage * 12 + k * 4);
+    return { rgb: [code[o], code[o + 1], code[o + 2]], drawn: code[o + 3] !== 0 };
   };
-  const top = average(0);
-  const bottom = average(height - SKY_ROWS);
-  const fade = Math.round(height * FADE);
-  for (let y = 0; y < fade; y += 1) for (let x = 0; x < width; x += 1) pixels[(y * width + x) * 4 + 3] = Math.round((255 * y) / fade);
-  return { atlas: encodePng(width, height, pixels), top, bottom, size: [width, height] };
+  const [cell, above, below] = [0, 1, 2].map(colour);
+  const vram = absoluteVram(stageTims(archive), VRAM_ROWS);
+  const pages = new Map();
+  const width = columns * TILE;
+  const height = rows * TILE + WHITE;
+  const pixels = new Uint8Array(width * height * 4);
+  for (let r = 0; r < rows; r += 1) {
+    for (let c = 0; c < columns; c += 1) {
+      const word = view.getUint16(tiles + (r * columns + c) * 2, true);
+      const palette = view.getUint16(palettes + (r * columns + c) * 2, true);
+      const { page, clut } = target(((word >> 8) & 0xf) | (((word >> 12) & 1) << 4) | (((word >> 13) & 1) << 11), palette);
+      const key = JSON.stringify([page, clut]);
+      if (!pages.has(key)) pages.set(key, decodePage(vram, page, clut));
+      const texels = pages.get(key);
+      const [u0, v0] = [(word & 3) * TILE, ((word >> 2) & 3) * TILE];
+      for (let y = 0; y < TILE; y += 1) pixels.set(texels.subarray(((v0 + y) * 256 + u0) * 4, ((v0 + y) * 256 + u0 + TILE) * 4), ((r * TILE + y) * width + c * TILE) * 4);
+    }
+  }
+  pixels.fill(255, rows * TILE * width * 4);
+  const cells = Array.from({ length: rows }, (_, r) => Array.from(code.subarray(mask + r * perTurn, mask + (r + 1) * perTurn), (v) => MASK.get(v) ?? '.').join(''));
+  return {
+    atlas: encodePng(width, height, pixels),
+    columns,
+    rows,
+    degrees,
+    perTurn,
+    mask: cells,
+    offset,
+    pitch,
+    colours: { cell: cell.rgb, above: above.rgb, below: below.rgb },
+    drawn: { above: above.drawn, below: below.drawn },
+  };
 }
 
 /**

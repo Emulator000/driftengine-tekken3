@@ -19,7 +19,8 @@ import { applySchedule, checkSurvivalRecord, checkTimeRecord, earnMode, recordSt
 import { survivorRank } from '../sim/game/arcade.ts';
 import { bossCode } from '../sim/fight/force-stage.ts';
 import { lookOf } from '../sim/game/select.ts';
-import { progressOf, restoreProgress } from '../sim/game/save.ts';
+import { progressOf, restoreProgress, saveProgress } from '../sim/game/save.ts';
+import { REMAKE_PAGE, restartWanted } from '../sim/game/remake-options.ts';
 import { FightView } from '../present/3d/fight-view.ts';
 import { Hud } from '../present/hud/hud.ts';
 import { PauseScreen } from '../present/hud/pause.ts';
@@ -30,6 +31,8 @@ import { assetImage, canvas, controllers, dataUrl, json, pageRenderer, params, p
 import { controlWords } from '../present/2d/controls.ts';
 import { drawingFiles, introFiles } from './quick.ts';
 import { readProgress, writeProgress } from './save.ts';
+import { settings, writeSettings } from './settings.ts';
+import { frameRateShown, showFrameRate } from './fps-meter.ts';
 import { startSound } from './sound.ts';
 import { Rumble } from './rumble.ts';
 import { MoviePicture } from '../present/scenes/movie.ts';
@@ -123,6 +126,37 @@ export async function playGame(): Promise<void> {
     }
   }
   const saves = !SHORTCUTS.some((key) => params.has(key));
+  /* REMAKE OPTION's settings as the page started with them. */
+  Object.assign(game.state.remake.settings, settings);
+  Object.assign(game.state.remake.started, settings);
+  /*
+   * REMAKE OPTION's settings: kept as they change, the frame rate shown or hidden at once (and `F`'s
+   * switch shown on the page), and on leaving the page with one a restart applies changed, the
+   * progress saved where auto save keeps it, then the page started again.
+   */
+  let keptSettings = { ...settings };
+  let meterOn = settings.frameRate;
+  let restarting = false;
+  const settle = (): void => {
+    const state = game.state;
+    const remake = state.remake.settings;
+    const shown = frameRateShown() ? 1 : 0;
+    if (shown !== meterOn) remake.frameRate = shown;
+    else if (remake.frameRate !== meterOn) showFrameRate(remake.frameRate === 1);
+    meterOn = remake.frameRate;
+    if ((Object.keys(remake) as (keyof typeof remake)[]).some((key) => remake[key] !== keptSettings[key])) {
+      keptSettings = { ...remake };
+      writeSettings(keptSettings);
+    }
+    const onPage = state.scene === Scene.OPTIONS && state.optionsScreen.page === REMAKE_PAGE;
+    if (restarting || onPage || !restartWanted(state)) return;
+    restarting = true;
+    if (saves && state.options.autoSave !== 0) {
+      saveProgress(state);
+      if (state.kept !== null) writeProgress(state.kept);
+    }
+    location.reload();
+  };
   /*
    * `?unlock` earns everything the game unlocks: every character, the costumes, Tekken Ball and the
    * Theater; `?unlock=ball` earns Tekken Ball alone and `?unlock=theater` the Theater alone, as the
@@ -316,6 +350,7 @@ export async function playGame(): Promise<void> {
         if (game.blocked() || !drawingReady()) return false;
         game.field(pads);
         if (saves && game.state.saving !== 0 && game.state.kept !== null) writeProgress(game.state.kept);
+        settle();
         rumble.field(game.state.rumble.out, performance.now());
         sound?.field(game.state.world, game.state.vblanks);
         movie.audible = sound?.running ?? false;
@@ -384,6 +419,18 @@ export async function playGame(): Promise<void> {
       moving: () => presenter.moving,
       fighting: () => shown === 'fight',
       probe: () => ({ scene: game.state.scene, sceneState: game.state.step, sound: sound?.probe() ?? null, movie: movie.probe() }),
+      about: () => {
+        const state = game.state;
+        const world = state.world;
+        const mode = Object.entries(MenuMode).find(([, v]) => v === world.mode)?.[0];
+        const scene = Object.entries(Scene).find(([, v]) => v === state.scene)?.[0];
+        const name = (f: (typeof world.fighters)[number]): string => `${tables.roster.codes[f.rosterCode]?.name ?? '?'} (roster ${f.roster}, model ${f.costume})`;
+        return {
+          Scene: `${scene ?? state.scene}, step ${state.step}`,
+          Mode: mode ?? world.mode,
+          ...(state.scene === Scene.FIGHT ? { Fighters: `${name(world.fighters[0]!)} vs ${name(world.fighters[1]!)}`, Stage: world.stage, Round: world.round.number } : {}),
+        };
+      },
     },
     renderer,
     backend,

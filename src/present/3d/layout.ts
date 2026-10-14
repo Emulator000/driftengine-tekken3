@@ -28,7 +28,15 @@ const MAP = 10;
 /** Tekken Force's patch: its tiles, its map's rows, the depth it is laid at, and where its final stage's light stands in depth. */
 const FORCE = { tile: 2500, rows: 3, z: 0x145, lightZ: -2000 } as const;
 const TEKKEN_FORCE = 8;
-const MAX_RINGS = 10;
+/** Rings of tiles past the patch: at most on a wide picture, and the most an arcade stage's floor takes to reach its scenery's far end. */
+const WIDE_RINGS = 10;
+/**
+ * The darkest an arcade stage's floor is shaded, by distance or away from its lights: the disc's
+ * fades into its dark backdrop, where an arcade stage's scenery goes on, its floor in sight to its
+ * far end.
+ */
+const ARCADE_LEAST_SHADE = 0x60;
+const MAX_RINGS = 48;
 const MAX_QUADS = (MAP + 2 * MAX_RINGS) ** 2;
 /** The game's picture: half its width in pixels, the culling's view angle at it (4096ths), the attract intro's. */
 const HALF_WIDTH = 192;
@@ -110,13 +118,14 @@ function hold(out: SceneryLayout, held: HeldScenery): void {
   out.yaw = held.yaw;
 }
 
-export const newGround = (): GroundState & { drawn: boolean; count: number } => ({
+export const newGround = (): GroundState & { drawn: boolean; count: number; near: number } => ({
   drawn: false,
   count: 0,
   cell: new Int16Array(MAX_QUADS),
   x: new Int32Array(MAX_QUADS * 4),
   z: new Int32Array(MAX_QUADS * 4),
   shade: new Uint8Array(MAX_QUADS * 4),
+  near: 0,
 });
 
 /** The view's width over the game's 4:3, at least 1. */
@@ -184,9 +193,8 @@ function cullScenery(trig: Trig, arena: ArenaTables, fov: number, yaw: number, c
     return last;
   };
   if (n !== DISC_GRID) {
-    /* An arcade grid: every cell, which the GPU clips, but those nearer the camera than the fighters. */
+    /* An arcade grid: every cell, which the GPU clips. Its polygons face into the stage, so a wall behind the camera never hides the fighters. */
     out.fill(1);
-    hideNear(out, n, half, cell, gridX, gridZ, cx, cz);
     return;
   }
   let [row, column] = ray(-yaw - (fov >> 1));
@@ -390,7 +398,7 @@ function lightsOf(state: FightState, kind: number): readonly [readonly number[],
 }
 
 /** The ground's patch this frame: each quad's map cell, its corners (mm) and their shades (128 unchanged). */
-export function layGround(state: FightState, data: FightData, arena: ArenaTables, stage: StageLayout, view: View, out: ReturnType<typeof newGround>, wide = false): void {
+export function layGround(state: FightState, data: FightData, arena: ArenaTables, stage: StageLayout, view: View, out: ReturnType<typeof newGround>, reach = 0): void {
   const trig = new Trig(data.math.sine);
   const patch = patchOf(state, arena);
   const { tile, columns, rows, template } = patch;
@@ -427,7 +435,8 @@ export function layGround(state: FightState, data: FightData, arena: ArenaTables
   };
   const [lightA, lightB] = lightsOf(state, lighting.kind);
   /* A corner's shade: by its depth, or by the light where it lies. */
-  const cornerShade = (x: number, z: number): number => (lit ? litShade(lighting.kind, lighting.brightest, lightA, lightB, x, z) : shadeAt(depthOf(state, ox, oz, x - ox, z - oz)));
+  const shadeOf = (x: number, z: number): number => (lit ? litShade(lighting.kind, lighting.brightest, lightA, lightB, x, z) : shadeAt(depthOf(state, ox, oz, x - ox, z - oz)));
+  const cornerShade = (x: number, z: number): number => (reach > 0 ? Math.max(shadeOf(x, z), ARCADE_LEAST_SHADE) : shadeOf(x, z));
   const shades = template.vertices.map(([x, z]) => cornerShade(x + ox, z + oz));
   let mapRow = row;
   for (let r = 0; r < rows; r += 1) {
@@ -448,24 +457,30 @@ export function layGround(state: FightState, data: FightData, arena: ArenaTables
   }
   out.count = columns * rows;
   /* Tekken Force's patch already reaches past the widest view, at a fixed depth. */
-  /* An arcade stage's floor reaches out to its walls, its scenery standing much farther off than the disc's. */
-  const rings = force ? 0 : wide ? MAX_RINGS : view.widening <= 1 ? 0 : Math.min(MAX_RINGS, Math.ceil(5 * (view.widening - 1)) + 1);
+  /* An arcade stage's floor reaches `reach` (mm) out, as far as its scenery stands, much farther off than the disc's. */
+  const along = reach > 0 ? Math.min(MAX_RINGS, Math.max(WIDE_RINGS, Math.ceil((reach - (MAP * TILE) / 2) / TILE) + 1)) : 0;
+  const rings = force ? 0 : reach > 0 ? along : view.widening <= 1 ? 0 : Math.min(WIDE_RINGS, Math.ceil(5 * (view.widening - 1)) + 1);
   const wrap = (v: number, n: number): number => ((v % n) + n) % n;
   let quad = out.count;
-  for (let r = -rings; r < MAP + rings; r += 1) {
-    for (let c = -rings; c < MAP + rings; c += 1) {
-      if (0 <= r && r < MAP && 0 <= c && c < MAP) continue;
-      const x0 = ox - 9000 + c * TILE;
-      const z0 = oz - 9000 + r * TILE;
-      out.cell[quad] = wrap(row - r, MAP) * MAP + wrap(column + c, MAP);
-      const corners = [[x0, z0 + TILE], [x0 + TILE, z0 + TILE], [x0, z0], [x0 + TILE, z0]] as const;
-      corners.forEach(([x, z], k) => {
-        out.x[quad * 4 + k] = x;
-        out.z[quad * 4 + k] = z;
-        out.shade[quad * 4 + k] = cornerShade(x, z);
-      });
-      quad += 1;
+  /* The rings a wide picture takes first, shaded as the fight goes; then those past them, under an arcade stage's own floors, at its least shade. */
+  for (const far of [false, true]) {
+    for (let r = -rings; r < MAP + rings; r += 1) {
+      for (let c = -rings; c < MAP + rings; c += 1) {
+        if (0 <= r && r < MAP && 0 <= c && c < MAP) continue;
+        if (far !== (r < -WIDE_RINGS || MAP + WIDE_RINGS <= r || c < -WIDE_RINGS || MAP + WIDE_RINGS <= c)) continue;
+        const x0 = ox - 9000 + c * TILE;
+        const z0 = oz - 9000 + r * TILE;
+        out.cell[quad] = wrap(row - r, MAP) * MAP + wrap(column + c, MAP);
+        const corners = [[x0, z0 + TILE], [x0 + TILE, z0 + TILE], [x0, z0], [x0 + TILE, z0]] as const;
+        corners.forEach(([x, z], k) => {
+          out.x[quad * 4 + k] = x;
+          out.z[quad * 4 + k] = z;
+          out.shade[quad * 4 + k] = far ? ARCADE_LEAST_SHADE : cornerShade(x, z);
+        });
+        quad += 1;
+      }
     }
+    if (!far) out.near = quad;
   }
   out.count = quad;
 }

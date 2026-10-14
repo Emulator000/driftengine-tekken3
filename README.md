@@ -4,7 +4,7 @@ Tekken 3, rebuilt as a modern browser game on [DriftEngine](https://driftengine.
 of your own disc: the fighters, their moves, the stages, the music, the voices and the movies are
 read from the image you make of your Tekken 3 disc, on your machine, and played in the browser at
 the display's resolution. Optionally, a dump of your own Tekken 3 arcade board adds the arcade
-release's stages.
+release's stages and fighter models.
 
 ## Project Status and Disclaimer
 
@@ -201,17 +201,19 @@ He brings his Tekken 4 model, moves and voice, and meets Jin first in Arcade.
 
 The arcade release of Tekken 3 ran on Namco System 12 hardware, and its stages are full 3D
 scenes: the buildings, temples and towers that the PlayStation draws as flat pictures are
-modelled, with their own skies and their moving pieces (the funfair's carousel, the helicopter
-over the helipad, the temples' torches). When you own an original Tekken 3 arcade board and have
-made a dump of it yourself, the game draws the arcade's stages in place of the disc's.
+modelled, with their own backgrounds and their moving pieces (the funfair's carousel, the
+helicopter over the helipad, the temples' torches). Its fighters' models have more vertices than
+the disc's, their joints blended by weights of their own, and their own accessories. When you own
+an original Tekken 3 arcade board and have made a dump of it yourself, the game draws the arcade's
+stages and fighters in place of the disc's.
 
 - The arcade version is not needed: the PlayStation disc remains the game's source, and everything
-  else (the fighters, their moves, the sound, the menus) still comes from it.
+  else (the fighters' moves, the sound, the menus) still comes from it.
 - This repository contains no arcade ROMs, board dumps, or anything extracted or converted from
   them, and does not say where to obtain any.
-- Everything happens on your machine: the importer reads your dump and converts the stages
-  locally, into ignored folders (`.cache/arcade/`, `public/data/arcade/`,
-  `public/assets/textures/arcade/`).
+- Everything happens on your machine: the importer reads your dump and converts the stages and
+  the fighters locally, into ignored folders (`.cache/arcade/`, `public/data/arcade/`,
+  `public/assets/textures/arcade/`, `public/assets/models/arcade/`).
 - Never commit, upload or share the converted content, or an app built with it: like an app built
   from your disc, it is for your own devices.
 
@@ -221,7 +223,7 @@ own and are permitted to use under the laws applicable to you.
 1. Own an original Tekken 3 board (Namco System 12).
 2. Dump its program and data chips yourself, with appropriate hardware and procedures, into one
    folder on your machine.
-3. Read the dump and convert its stages:
+3. Read the dump and convert its stages and fighters:
 
    ```sh
    npm run arcade -- "path/to/your-own-tekken3-arcade-dump"
@@ -231,9 +233,10 @@ own and are permitted to use under the laws applicable to you.
    The importer recognises each chip by its SHA-256 checksum, whatever its file is called, and
    stops if one is missing or is not from the revision it supports. The checksums are in
    `scripts/lib/arcade/board.mjs`, for identification and validation only.
-4. It joins the chips' data into `.cache/arcade/`; `npm run extract` converts the stages the arcade
-   has into `public/data/arcade/`.
-5. Start or build the game as usual. `?stages=psx` in the address draws the disc's stages instead.
+4. It joins the chips' data into `.cache/arcade/`; `npm run extract` converts the stages and the
+   fighters the arcade has into `public/data/arcade/`.
+5. Start or build the game as usual. STAGES and FIGHTERS in REMAKE OPTION (in the Options), or
+   `?stages=psx` and `?fighters=psx` in the address, draw the disc's instead.
 
 The importer parses the dump's data as it is stored: it does not run the board's program, and it
 reads, bypasses and emulates no security hardware.
@@ -292,7 +295,10 @@ field. What is done and what is not yet:
 | An iPhone app built from your disc | Partly | `npm run ios`, on a Mac with Xcode; not yet built or played |
 | Windows, macOS, Linux | Done | Developed and tested on Linux |
 | Kazuya from Tekken 4 | Done | Optional, from your own Tekken 4 disc |
-| The arcade release's stages | Done | Optional, from a dump of your own arcade board: the 14 stages it has, their skies, the carousel, the helicopter and the torches; `?stages=psx` draws the disc's |
+| The arcade release's stages | Done | Optional, from a dump of your own arcade board: the 14 stages it has, their backgrounds as the board lays them, the carousel, the helicopter and the torches; `?stages=psx` draws the disc's |
+| The arcade release's fighters | Done | Optional, from the same dump: the 32 models it has, their seams' own weights, their accessories as the board hangs them (on the game's swinging joints where they match); `?fighters=psx` draws the disc's. They do not close their eyes, as the board has no closed eyes to draw |
+| The remake's settings in the game | Done | REMAKE OPTION in the Options: the textures, the models, the arcade's stages and fighters, the picture, the frame rate and the touch pad, kept on the device |
+| A stop shown as the game's own | Done | A window with what went wrong and what was playing, its details to copy into an issue |
 | A free camera and a frame-rate meter | Done | `P` holds a fight and flies a camera through it; `F` shows the frame rate |
 | Discs of other regions (PAL, Japanese) | Not yet | The USA disc (SLUS-00402) alone is read |
 

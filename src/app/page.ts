@@ -5,6 +5,7 @@
  */
 import { createRenderer, describeGpu, ResolutionGovernor, startLoop, type RendererApi } from '@driftengine/core';
 import { entryLevelGpu, fightQuality, isQuality, type Quality } from '../present/3d/quality.ts';
+import { crashDetails, showCrash } from './crash.ts';
 import { FpsMeter } from './fps-meter.ts';
 import { FrameStats } from './frame-stats.ts';
 import { FreeCamera } from './free-camera.ts';
@@ -13,6 +14,7 @@ import { PadInput } from './input.ts';
 import { CONSOLE_PADS, type Controllers } from '../present/2d/controls.ts';
 import { evenFrames } from './pacing.ts';
 import { tellWith } from './remote-log.ts';
+import { asked, settings } from './settings.ts';
 import { onPhone, TouchPad, wantsTouch } from './touch.ts';
 
 const ASSETS = `${import.meta.env.BASE_URL}assets/`;
@@ -54,13 +56,13 @@ let quality: Quality = 'high';
 export const pageQuality = (): Quality => quality;
 
 /**
- * The picture's quality: the address's (`?quality=high`, `low` or `verylow`); else `verylow` where a
+ * The picture's quality: the address's (`?quality=high`, `low` or `verylow`), or REMAKE OPTION's; else `verylow` where a
  * start before found a fight's frames too slow even at their least density, or on a phone whose GPU
  * the browser names as an entry-level part; else `low` on a phone and `high` elsewhere.
  */
 async function pickQuality(): Promise<{ quality: Quality; why: string }> {
-  const asked = params.get('quality');
-  if (isQuality(asked)) return { quality: asked, why: 'asked' };
+  const chosen = asked(params, 'quality', settings.picture, [null, 'high', 'low', 'verylow']);
+  if (isQuality(chosen)) return { quality: chosen, why: params.has('quality') ? 'asked' : 'set in REMAKE OPTION' };
   if (stored(SLOW)) return { quality: 'verylow', why: 'a fight before ran too slow at its least density' };
   if (!onPhone()) return { quality: 'high', why: 'not a phone' };
   const { rendererName } = await describeGpu();
@@ -106,6 +108,8 @@ export interface Player {
   fighting(): boolean;
   /** What the page's probe tells about the game. */
   probe(): Record<string, unknown>;
+  /** What was playing, by name, for the game's stop (`crash.ts`). */
+  about?(): Record<string, unknown>;
 }
 
 /** The frame time the picture's density is held to, milliseconds: a 60 Hz frame and a fifth. */
@@ -190,6 +194,8 @@ export function play(player: Player, renderer: RendererApi, backend: string): vo
   new FreeCamera(canvas);
   const meter = new FpsMeter();
   let failure: Error | null = null;
+  /** A frame failed to draw: the picture is held as it was. */
+  let undrawable = false;
   let fields = 0;
   /** The fields and the window size the last frame drawn showed, and the frames drawn and left. */
   let drawnAt = { fields: -1, width: 0, height: 0 };
@@ -209,11 +215,11 @@ export function play(player: Player, renderer: RendererApi, backend: string): vo
           }
         } catch (e) {
           failure = e as Error;
-          console.error(e);
-          status.textContent = `stopped: ${failure.message}`;
+          showCrash(e, 'stepping the game');
         }
       },
       render() {
+        if (undrawable) return;
         const { width, height } = canvas;
         const now = performance.now();
         const same = fields === drawnAt.fields && width === drawnAt.width && height === drawnAt.height && player.moving?.() !== true && !freeView.active;
@@ -232,13 +238,21 @@ export function play(player: Player, renderer: RendererApi, backend: string): vo
         drawnAt = { fields, width, height };
         frames.drawn += 1;
         stats.drawing();
-        player.render(width, height);
+        try {
+          player.render(width, height);
+        } catch (e) {
+          failure = e as Error;
+          undrawable = true;
+          showCrash(e, 'drawing the game');
+          return;
+        }
         stats.drawn();
         meter.frame(now);
       },
     },
     { fixedDt: 1 / 60, maxFrameTime: MOST_FIELDS / 60, frameSource: evenFrames() },
   );
+  crashDetails(() => ({ ...(player.about?.() ?? player.probe()), Field: fields, Renderer: backend, Quality: quality }));
   Object.assign(globalThis, {
     __tekken3: () => ({ remake: true, backend, quality, fields, frames: { ...frames }, density: governor?.scale ?? 1, timing: stats.line(), ...player.probe(), failure: failure?.message ?? null }),
   });

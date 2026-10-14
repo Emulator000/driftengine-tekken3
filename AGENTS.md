@@ -5,7 +5,8 @@
 Tekken 3 on DriftEngine: an unofficial, independently developed runtime that reads the data of a
 user's own Tekken 3 disc (USA, SLUS-00402) and plays the game in the browser, rebuilt as a typed,
 deterministic simulation (`src/sim`) with a DriftEngine presentation (`src/present`). Optionally
-it draws the arcade release's stages from a dump of the user's own arcade board.
+it draws the arcade release's stages and fighter models from a dump of the user's own arcade
+board.
 
 ## Rules
 

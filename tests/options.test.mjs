@@ -4,7 +4,8 @@
  * picked one applies to; the music's options told to its driver (silent in the matches' scenes);
  * the key configuration's boxes opening while a button is held, their values changed and the pad
  * mapped by them on leaving, and vibration switched; SAVE DATA (the memory card's page) saving,
- * loading and turning auto save on; the display's place; and the records' lists.
+ * loading and turning auto save on; the display's place; REMAKE OPTION's settings; and the
+ * records' lists.
  */
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
@@ -14,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 
 import { loadFightTables } from '../src/assets/load.ts';
 import { Game } from '../src/sim/game/game.ts';
+import { REMAKE_PAGE, RESTART_LINE } from '../src/sim/game/remake-options.ts';
 import { Scene } from '../src/sim/game/state.ts';
 import { musicCommand, newMusic } from '../src/sim/sound/music.ts';
 
@@ -56,11 +58,12 @@ test('the first page lists the others; select leaves for the mode menu, which op
   const { state, hold, press } = await options();
   assert.equal(state.menu.toOptions, 1);
   assert.equal(state.optionsScreen.page, 0);
-  for (const label of ['OPTION MODE', 'GAME OPTION', 'KEY CONFIGURATION', 'RECORDS', 'DISPLAY ADJUST', 'SAVE DATA', 'EXIT']) assert.ok(texts(state).includes(label), label);
+  for (const label of ['OPTION MODE', 'GAME OPTION', 'KEY CONFIGURATION', 'RECORDS', 'DISPLAY ADJUST', 'SAVE DATA', 'REMAKE OPTION', 'EXIT']) assert.ok(texts(state).includes(label), label);
+  assert.equal(printed(state, 'EXIT').y, 0x64 + 6 * 0x28, 'REMAKE OPTION listed before EXIT');
   const bar = state.drawn.find((d) => d.kind === 'tile' && d.layer === 4);
   assert.deepEqual([bar.x, bar.y, bar.w, bar.h], [0x14 - 3, 0x64 - 3, 'GAME OPTION'.length * 9 + 6, 0x16], 'the bar under the picked row');
   press(UP);
-  assert.equal(state.optionsScreen.pages[0].cursor, 5, 'up from the first wraps to EXIT');
+  assert.equal(state.optionsScreen.pages[0].cursor, 6, 'up from the first wraps to EXIT');
   press(SELECT);
   assert.equal(state.step, 2, 'the page past the last leaves');
   hold();
@@ -207,6 +210,32 @@ test('DISPLAY ADJUST moves the display\'s place within its limits, start puts it
   assert.deepEqual(state.options.display, { x: -2, y: 0 });
   press(CROSS);
   assert.equal(state.optionsScreen.page, 0);
+});
+
+test('REMAKE OPTION changes the remake\'s settings, says a restart applies one, and goes back to the first page', { skip }, async () => {
+  const { state, press } = await options();
+  for (let i = 0; i < 5; i += 1) press(DOWN);
+  press(CROSS);
+  assert.equal(state.optionsScreen.page, REMAKE_PAGE);
+  for (const label of ['REMAKE OPTION', 'TEXTURES', 'MODELS', 'STAGES', 'FIGHTERS', 'PICTURE', 'FRAME RATE', 'TOUCH PAD', 'EXIT']) assert.ok(texts(state).includes(label), label);
+  assert.equal(printed(state, 'SMOOTH').colour, 1, 'the default value');
+  assert.ok(!texts(state).includes(RESTART_LINE));
+  press(RIGHT);
+  assert.equal(state.remake.settings.textures, 1);
+  assert.ok(texts(state).includes('ORIGINAL'));
+  assert.ok(texts(state).includes(RESTART_LINE), 'a change a restart applies');
+  press(LEFT);
+  assert.ok(!texts(state).includes(RESTART_LINE), 'back as it started');
+  for (let i = 0; i < 5; i += 1) press(DOWN);
+  press(RIGHT);
+  assert.equal(state.remake.settings.frameRate, 1);
+  assert.ok(!texts(state).includes(RESTART_LINE), 'the frame rate is shown at once');
+  press(DOWN);
+  press(LEFT);
+  assert.equal(state.remake.settings.touchPad, 2, 'left from the first wraps to the last');
+  press(SELECT);
+  assert.equal(state.optionsScreen.page, 0);
+  assert.equal(state.remake.settings.touchPad, 2, 'kept on leaving');
 });
 
 test('RECORDS shows the four lists, the best times quickest first', { skip }, async () => {

@@ -6,7 +6,8 @@
  * right showing the modes the picked one applies to; KEY CONFIGURATION gives each pad its side,
  * where holding a button opens its box's list of values for up and down to change; RECORDS shows
  * four rankings a page at a time; DISPLAY ADJUST moves the picture on the screen; the memory
- * card's page saves and loads the progress and turns the auto save on or off. The progress is
+ * card's page saves and loads the progress and turns the auto save on or off; REMAKE OPTION, listed
+ * before the first page's EXIT, sets the remake's own settings (`remake-options.ts`). The progress is
  * kept on the device, not on a card, so that page and its lines are named for saving: SAVE DATA,
  * SAVE and LOAD. Select goes back a page, and from the first leaves for the mode menu, which opens
  * on the Options again.
@@ -20,6 +21,7 @@ import { mapPads } from './menu.ts';
 import { print } from './printer.ts';
 import { playCount, sortPairs } from './records.ts';
 import { share } from './records-screen.ts';
+import { isRemakeSetting, REMAKE_ITEM, REMAKE_OPTIONS, REMAKE_PAGE, RESTART_LINE, restartWanted } from './remake-options.ts';
 import { restoreProgress, saveProgress } from './save.ts';
 import { buttonRow, draw, tile } from './draw.ts';
 import { Scene, type GameState, type KeySide } from './state.ts';
@@ -132,12 +134,27 @@ function titleColour(game: GameState): number {
 }
 
 function valueOf(game: GameState, value: OptionValue): number {
+  if (isRemakeSetting(value)) return game.remake.settings[value];
   return value === 'none' ? 0 : value === 'page' ? game.optionsScreen.page : game.options[value];
 }
 
 function setValue(game: GameState, value: OptionValue, v: number): void {
-  if (value === 'page') game.optionsScreen.page = v & 0xff;
+  if (isRemakeSetting(value)) game.remake.settings[value] = v & 0xff;
+  else if (value === 'page') game.optionsScreen.page = v & 0xff;
   else if (value !== 'none') game.options[value] = v & 0xff;
+}
+
+/** The first page with the remake's settings listed before its EXIT. */
+const withRemake = new WeakMap<OptionsPage, OptionsPage>();
+function mainPage(page: OptionsPage): OptionsPage {
+  let listed = withRemake.get(page);
+  if (listed === undefined) {
+    const items = [...page.items];
+    items.splice(items.length - 1, 0, REMAKE_ITEM);
+    listed = { ...page, items };
+    withRemake.set(page, listed);
+  }
+  return listed;
 }
 
 /** A list's input: up and down move its cursor (wrapping), left and right change the item under it, a button does what the item does, select goes back. */
@@ -684,6 +701,12 @@ function recordsFrame(game: GameState, data: OptionsData, tables: OptionsTables)
 function pageFrame(game: GameState, data: OptionsData, scenes: SceneTables): void {
   const tables = scenes.options;
   const screen = game.optionsScreen;
+  if (screen.page === REMAKE_PAGE) {
+    listInput(game, data, REMAKE_OPTIONS, screen.remake);
+    listDraw(game, REMAKE_OPTIONS, screen.remake);
+    if (restartWanted(game)) message(game, RESTART_LINE, 5);
+    return;
+  }
   const page = tables.pages[screen.page];
   const state = screen.pages[screen.page];
   if (page === undefined || state === undefined) {
@@ -692,8 +715,8 @@ function pageFrame(game: GameState, data: OptionsData, scenes: SceneTables): voi
   }
   switch (screen.page) {
     case Page.MAIN:
-      listInput(game, data, page, state);
-      listDraw(game, page, state);
+      listInput(game, data, mainPage(page), state);
+      listDraw(game, mainPage(page), state);
       break;
     case Page.GAME:
       listInput(game, data, page, state);
@@ -741,7 +764,7 @@ export function optionsScene(game: GameState, data: OptionsData, scenes: SceneTa
       game.menu.toOptions = 1;
       listLabels(game, scenes.options);
       keyConfigReset(game, scenes);
-      for (const page of screen.pages) Object.assign(page, { cursor: 0, sub: 0 });
+      for (const page of [...screen.pages, screen.remake]) Object.assign(page, { cursor: 0, sub: 0 });
       screen.page = Page.MAIN;
       game.step = 1;
       pageFrame(game, data, scenes);

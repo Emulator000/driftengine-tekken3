@@ -564,7 +564,8 @@ function chooseMove(state: FightState, data: FightData, f: Fighter): void {
   if (f.next.move === null) chooseCancel(state, data, f, opponent);
   const falling = (ref: MoveRef | null): boolean => ref !== null && FALLS.includes(s16(moveAt(data, ref).next));
   if (f.health === 0 && f.hitClean !== 0) {
-    const ref = moveById(data, f, f.next.id);
+    /* The move chosen next, if any: none was when the knockout gave no reaction and no cancel opened. */
+    const ref = f.next.move;
     const move = ref === null ? null : moveAt(data, ref);
     if (state.knockoutRule === 0) {
       if (falling(ref)) {

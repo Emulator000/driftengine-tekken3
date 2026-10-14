@@ -50,8 +50,10 @@ import { readMoveset } from './lib/t4/moveset.mjs';
 import { exportFighter, partTable } from './lib/fighter.mjs';
 import { parseModel } from './lib/model.mjs';
 import { exportStage } from './lib/stage.mjs';
-import { archiveAt, PROGRAM_STAGES, STAGE_ARCHIVES, STAGE_OBJECTS, STAGE_PANORAMAS } from './lib/arcade/board.mjs';
-import { exportArcadeObject, exportArcadePanorama, exportArcadeStage } from './lib/arcade/stage.mjs';
+import { ACCESSORY_TABLES, archiveAt, BACKGROUND_RULES, BACKGROUND_TABLES, PROGRAM_CODE, PROGRAM_STAGES, STAGE_ARCHIVES, STAGE_LEFT_OUT, STAGE_OBJECTS } from './lib/arcade/board.mjs';
+import { exportArcadeBackground, exportArcadeObject, exportArcadeStage } from './lib/arcade/stage.mjs';
+import { arcadeFighters, boardAccessories, exportArcadeFighter } from './lib/arcade/fighter.mjs';
+import { decompress } from './lib/lz.mjs';
 import { readTimChain } from './lib/texture.mjs';
 import { decodePng, encodePng } from './lib/png.mjs';
 import { openDisc } from './lib/iso.mjs';
@@ -65,7 +67,7 @@ const out = path.join(root, 'public/data');
 const exePath = path.join(root, '.cache/disc/SLUS_004.02');
 if (!existsSync(exePath)) throw new Error('no disc data: run npm run disc first');
 /** The format of what this writes, in its manifest: raised when the output changes, so `npm run dev` extracts again. */
-const DATA_FORMAT = 12;
+const DATA_FORMAT = 14;
 /** The arcade board's data, when `npm run arcade` has read it. */
 const arcadePath = path.join(root, '.cache/arcade/data.bin');
 /* Extracted already: at this format, and with the arcade's stages exactly when its data is there. */
@@ -142,6 +144,8 @@ function eyesOf(pack) {
 /** True Ogre's roster id: his model's second record on the chest has its shapes past the first in his moveset. */
 const TRUE_OGRE = 0x14;
 const WINGS_RECORD = 2;
+/** The hands' joints, whose parts have shapes. */
+const HANDS = [6, 10];
 
 /**
  * Where a pack's model keeps shapes outside itself: for True Ogre's, his moveset (by the roster
@@ -177,6 +181,7 @@ function texturesOf(pack, members) {
 
 /* Character packs: four files each from BNS 71; the model, a sound bank, the archive, a copy of a moveset. */
 const fighters = [];
+const skeletons = new Map();
 for (let pack = 0; 71 + pack * 4 + 3 <= 278; pack += 1) {
   const first = 71 + pack * 4;
   const id = String(pack).padStart(2, '0');
@@ -184,6 +189,7 @@ for (let pack = 0; 71 + pack * 4 + 3 <= 278; pack += 1) {
   const result = exportFighter(file(first), texturesOf(pack, arcMembers(Buffer.from(file(first + 2)))), parts, parseModel, encodePng, { eyes: eyesOf(pack), shapesFrom: shapesFromOf(pack) });
   put(`fighters/${id}.ftr`, result.mesh);
   put(`fighters/${id}.json`, JSON.stringify({ skeleton: result.skeleton }));
+  skeletons.set(pack, result.skeleton);
   put(`fighters/${id}.png`, result.atlas);
   put(`fighters/${id}.3dmk`, file(first));
   put(`fighters/${id}.tim`, arcMembers(Buffer.from(file(first + 2)))[0]);
@@ -322,18 +328,24 @@ for (let s = 15; s < 20; s += 1) {
   stages.push({ stage: s, height: exe.readInt16LE(at(0x80025138) + s * 4), ...result.stats });
 }
 
-/* The arcade's stages, from the board's data, when it is there: drawn in place of the disc's, with their panoramas. */
+/*
+ * The arcade's stages, from the board's data, when it is there: drawn in place of the disc's, with
+ * their backgrounds; and its fighters, each pack the board has a model of drawn with it (True
+ * Ogre's, whose wings his moveset shapes, stays the disc's).
+ */
+const arcadeFighterPacks = [];
 const arcadeStages = [];
 const arcadePanoramas = [];
 const arcadeObjects = [];
 if (existsSync(arcadePath)) {
   const data = new Uint8Array(readFileSync(arcadePath));
   const program = new Uint8Array(readFileSync(path.join(root, '.cache/arcade/program.bin')));
-  const archives = [...STAGE_ARCHIVES.map((at, s) => [s, archiveAt(data, at)]), ...[...PROGRAM_STAGES].map(([s, at]) => [s, archiveAt(program, at)])];
+  const code = decompress(program, PROGRAM_CODE.at);
+  const archives = [...[...STAGE_ARCHIVES].map(([s, at]) => [s, archiveAt(data, at)]), ...[...PROGRAM_STAGES].map(([s, at]) => [s, archiveAt(program, at)])].sort(([a], [b]) => a - b);
   archives.forEach(([s, archive]) => {
     const id = String(s).padStart(2, '0');
     const pieces = STAGE_OBJECTS.get(s) ?? [];
-    const result = exportArcadeStage(archive, encodePng, pieces.filter((p) => p.flipbook !== undefined).map((p) => p.flipbook), program);
+    const result = exportArcadeStage(archive, encodePng, pieces.filter((p) => p.flipbook !== undefined).map((p) => p.flipbook), program, STAGE_LEFT_OUT.get(s) ?? []);
     put(`arcade/stages/${id}.stg`, result.mesh);
     put(`arcade/stages/${id}.png`, result.atlas);
     arcadeStages.push(s);
@@ -357,11 +369,29 @@ if (existsSync(arcadePath)) {
         fields: object.fields ?? 1,
       });
     });
-    const layout = STAGE_PANORAMAS.get(s);
-    if (layout === undefined) return;
-    const panorama = exportArcadePanorama(archive, layout, encodePng);
-    put(`arcade/stages/${id}.sky.png`, panorama.atlas);
-    arcadePanoramas.push({ stage: s, top: panorama.top, bottom: panorama.bottom, horizon: layout.horizon });
+    if (!(s < BACKGROUND_TABLES.stages)) return;
+    const { atlas, ...background } = exportArcadeBackground(code, s, archive, encodePng);
+    put(`arcade/stages/${id}.sky.png`, atlas);
+    arcadePanoramas.push({ stage: s, ...background, ...(BACKGROUND_RULES.get(s) ?? {}) });
+  });
+  arcadeFighters(data).forEach((board, pack) => {
+    if (shapesFromOf(pack) !== null) return;
+    const id = String(pack).padStart(2, '0');
+    const first = 71 + pack * 4;
+    const parts = partTable(exe, pack);
+    const disc = { model: parseModel(file(first)), parts };
+    const hands = new Map(parts.filter((p) => p.joint === HANDS[0] || p.joint === HANDS[1]).map((p) => [p.joint, p.index]));
+    let result;
+    try {
+      result = exportArcadeFighter(board, boardAccessories(code, PROGRAM_CODE.base, ACCESSORY_TABLES, pack), disc, hands, encodePng);
+    } catch (error) {
+      console.warn(`the board's fighter ${id} is left out (the disc's is drawn): ${error.message}`);
+      return;
+    }
+    put(`arcade/fighters/${id}.ftr`, result.mesh);
+    put(`arcade/fighters/${id}.png`, result.atlas);
+    put(`arcade/fighters/${id}.json`, JSON.stringify({ skeleton: skeletons.get(pack) }));
+    arcadeFighterPacks.push(pack);
   });
 }
 
@@ -429,7 +459,7 @@ if (haveFfmpeg()) {
   put('movies/version.json', JSON.stringify({ version: MOVIE_VERSION }));
 } else console.log('no ffmpeg: no movies (the game shows black for their length)');
 
-put('manifest.json', JSON.stringify({ format: DATA_FORMAT, fighters, stages, arcadeStages, arcadePanoramas, arcadeObjects, files, kazuya, kazuyaVoice: kazuya, songs: songs.length, tracks, movies }, null, 2));
+put('manifest.json', JSON.stringify({ format: DATA_FORMAT, fighters, stages, arcadeStages, arcadePanoramas, arcadeObjects, arcadeFighters: arcadeFighterPacks, files, kazuya, kazuyaVoice: kazuya, songs: songs.length, tracks, movies }, null, 2));
 
 /*
  * Files are overwritten in place, never the directory removed and made again: a running dev server

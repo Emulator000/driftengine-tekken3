@@ -10,6 +10,7 @@
  * landscape, where the browser lets it.
  */
 import { DOWN, LEFT, RIGHT, UP } from './input.ts';
+import { asked, settings } from './settings.ts';
 
 /** How far the thumb moves from where it landed, as a share of the stick's radius, before it is a direction. */
 const DEAD = 0.35;
@@ -61,10 +62,10 @@ export function onPhone(): boolean {
   return /Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1;
 }
 
-/** Whether the page shows the touch pad. */
+/** Whether the page shows the touch pad: as the address (`?touch=0` or `1`) or REMAKE OPTION says, else on a touch screen or a phone. */
 export function wantsTouch(params: URLSearchParams): boolean {
-  const asked = params.get('touch');
-  if (asked !== null) return asked !== '0';
+  const touch = asked(params, 'touch', settings.touchPad, [null, '1', '0']);
+  if (touch !== null) return touch !== '0';
   return matchMedia('(pointer: coarse)').matches || onPhone();
 }
 

@@ -8,6 +8,7 @@
 import { blankFightState } from '../fight/blank.ts';
 import type { FightState } from '../fight/state.ts';
 import type { Progress } from './save.ts';
+import { REMAKE_DEFAULTS } from './remake-options.ts';
 
 /** The game's scenes, as it numbers them. */
 export const Scene = {
@@ -423,6 +424,22 @@ export interface CreditsState {
 }
 
 /**
+ * The remake's own settings, each 0 by default: the textures (smooth, or the console's), the
+ * fighters' models (by the picture's quality, rounded, or the console's), the stages and the
+ * fighters (the arcade's where they were read, or the console's), the picture's quality (by the device, high, low or very
+ * low), the frame rate shown (off, on) and the touch pad (on a touch screen, on, off).
+ */
+export interface RemakeSettings {
+  textures: number;
+  models: number;
+  stages: number;
+  fighters: number;
+  picture: number;
+  frameRate: number;
+  touchPad: number;
+}
+
+/**
  * The movie player's records: its state (1 waiting to start, 2 playing, 3 at its last frame, 5
  * ending, 0 done), the start's countdown, the last frame taken, whether the disc's lid opened, whether
  * the stream ended; from the record's flags whether it loops, its captions, how it ends, whether
@@ -545,6 +562,8 @@ export interface GameState {
     readonly display: { x: number; y: number };
   };
   readonly earned: { ball: number; theater: number };
+  /** The remake's own settings (its page in the Options), as set and as the page started with them. */
+  readonly remake: { readonly settings: RemakeSettings; readonly started: RemakeSettings };
   /** The progress as last saved, which a load brings back (null: none saved), as the memory card holds it. */
   kept: Progress | null;
   practice: PracticeState;
@@ -557,6 +576,8 @@ export interface GameState {
   readonly optionsScreen: {
     page: number;
     readonly pages: { cursor: number; sub: number }[];
+    /** The remake's settings page's cursor. */
+    readonly remake: { cursor: number; sub: number };
     readonly labels: number[];
     card: number;
     readonly sides: KeySide[];
@@ -887,11 +908,13 @@ export function blankGameState(): GameState {
       display: { x: 0, y: 0 },
     },
     earned: { ball: 0, theater: 0 },
+    remake: { settings: { ...REMAKE_DEFAULTS }, started: { ...REMAKE_DEFAULTS } },
     kept: null,
     practice: blankPractice(),
     optionsScreen: {
       page: 0,
       pages: Array.from({ length: 6 }, () => ({ cursor: 0, sub: 0 })),
+      remake: { cursor: 0, sub: 0 },
       labels: [],
       card: 0,
       sides: [0, 1].map(() => ({ cursor: 0, active: 0, busy: 0, type: 0, held: 0, repeats: 0, used: 0, boxes: Array.from({ length: 8 }, () => ({ state: 0, grow: 0 })) })),

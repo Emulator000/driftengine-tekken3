@@ -121,6 +121,22 @@ delete env.ELECTRON_RUN_AS_NODE;
 run(process.execPath, [bin, 'bootstrap', `--target=${target}`], { env });
 run(process.execPath, [bin, 'build', `--target=${target}`, ...flags], { env });
 
+/*
+ * A build that ended without the app's files (the packager finished, its archives were never
+ * made): the staged copy goes, the unpacked app stays, as it runs as it is, and the build says so.
+ */
+if (!readdirSync(out).some((name) => FINISHED.test(name) || (KEPT_FOLDERS[target] ?? []).includes(name))) {
+  rmSync(path.join(out, 'stage'), { recursive: true, force: true });
+  const unpacked = readdirSync(out).find((name) => name.endsWith('-unpacked'));
+  refuse(
+    [
+      `\nThe packager finished without the app's files (${target === 'linux-x64' ? 'an AppImage and a tar.gz' : 'its archives'}) in ${path.relative(root, out) || out}.`,
+      unpacked === undefined ? 'Nothing was packed either.' : `The unpacked app is kept, and runs as it is: ${path.relative(root, path.join(out, unpacked))}`,
+      'Run the build again with DEBUG=electron-builder set to see where it stopped, and tell us in an issue.',
+    ].join('\n'),
+  );
+}
+
 /* What the packager staged, and the unpacked app beside the finished files, hold the data again. */
 for (const name of readdirSync(out)) {
   const at = path.join(out, name);

@@ -27,26 +27,62 @@ export const PROGRAM_CHIP_SIZE = 2 << 20;
 /** Each data chip's size, and so each pair's half. */
 export const CHIP_SIZE = 4 << 20;
 
-/** The stages whose archive is in the program instead (by stage number), its texture pages compressed. */
-export const PROGRAM_STAGES = new Map([[13, 0x283abc]]);
+/** The stages whose archive is in the program instead (by stage number), its texture pages compressed: the park. */
+export const PROGRAM_STAGES = new Map([[7, 0x283abc]]);
 
-/** Each stage's archive in the joined data, by its stage number: a scenery model, then its texture pages. */
-export const STAGE_ARCHIVES = [0x11d663c, 0x125ab40, 0x12d54d8, 0x1338768, 0x13817fc, 0x13ce3c0, 0x142d808, 0x14652a4, 0x14917f4, 0x1521630, 0x15570b8, 0x15c7a34, 0x15f6f08];
+/** Each stage's archive in the joined data, by its stage number (the park's is the program's): a scenery model, then its texture pages. */
+export const STAGE_ARCHIVES = new Map([
+  [0, 0x11d663c],
+  [1, 0x125ab40],
+  [2, 0x12d54d8],
+  [3, 0x1338768],
+  [4, 0x13817fc],
+  [5, 0x13ce3c0],
+  [6, 0x142d808],
+  [8, 0x14917f4],
+  [9, 0x1521630],
+  [10, 0x15570b8],
+  [11, 0x15c7a34],
+  [12, 0x15f6f08],
+]);
+
+/** The game's code in the program, compressed, and where it runs from. */
+export const PROGRAM_CODE = { at: 0x45df8, base: 0x8007e684 };
 
 /**
- * The panoramas the stages draw behind their scenery, by stage number: a run of the stage's
- * textures (counted through its archive's texture pages in order), each 64 texels square, laid
- * `columns` a row, and how far down the picture its horizon lies (a share of its height).
+ * The fighters' accessories in the code (records 18 to 23 of a fighter's model): a byte each, six a
+ * fighter from `shown` + 18 (0 not drawn, 1 drawn as stored, more the index of the turn its points
+ * are given as the fighter loads, three 16-bit angles 8 bytes apart from `turns`), and a word each,
+ * six a fighter from `springs`, its spring's halfwords (the first three added to its rest).
  */
-export const STAGE_PANORAMAS = new Map([
-  [1, { first: 125, count: 80, columns: 16, horizon: 0.9 }],
-  [3, { first: 90, count: 32, columns: 8, horizon: 1 }],
-  [5, { first: 147, count: 24, columns: 8, horizon: 1 }],
-  [8, { first: 146, count: 96, columns: 16, horizon: 0.9 }],
-  [9, { first: 68, count: 30, columns: 10, horizon: 0.95 }],
-  [10, { first: 139, count: 80, columns: 16, horizon: 0.95 }],
-  [11, { first: 17, count: 72, columns: 12, horizon: 0.45 }],
-  [12, { first: 76, count: 32, columns: 8, horizon: 0.85 }],
+export const ACCESSORY_TABLES = { shown: 0x801fd2e6, turns: 0x801fd3e4, springs: 0x801fdc88 };
+
+/**
+ * Where the code keeps each stage's background, in its running addresses: per stage, 20 bytes of
+ * its panorama (its tiles across and down, its tile words', palettes' and mask's tables, its top's
+ * offset and the degrees the picture's width spans), a halfword of how far its top moves with the
+ * camera's pitch, and 12 bytes of colours (a filled tile's, the one above it, the one below it, each
+ * with a byte saying whether it is drawn). Stages 0 to 12 have one.
+ */
+export const BACKGROUND_TABLES = { layouts: 0x801749a0, pitch: 0x80174aa4, colours: 0x80174ac0, stages: 13 };
+
+/**
+ * What the code does for some stages beyond their tables: the highest and lowest their panorama's
+ * top stands (in the picture's 480 lines), stage 3's sky a gradient in place of its tiles, stage
+ * 5's fourth row drawn upside down, and stage 6 one colour over the whole picture.
+ */
+export const BACKGROUND_RULES = new Map([
+  [0, { most: 0 }],
+  [3, { most: 0, gradient: { from: [0, 0x14, 0x66], to: [0, 0, 0], lines: 0xc0 } }],
+  [5, { most: 0, flipped: 3 }],
+  [6, { whole: true }],
+  [11, { most: 0, least: -0xc0 }],
+]);
+
+/** Cells of a stage's model the game leaves out of the scenery, by stage number. */
+export const STAGE_LEFT_OUT = new Map([
+  [0, [198, 199, 216]],
+  [5, [83, 99, 107]],
 ]);
 
 /**

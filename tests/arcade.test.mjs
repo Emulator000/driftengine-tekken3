@@ -2,8 +2,8 @@
  * The arcade board's reader on synthetic bytes: its chips recognised by their SHA-256 and joined a
  * pair at a time, a stage model's polygons of each kind read (their colours stored or shaded as the
  * fight runs, their corners, a tiled texture's window, a decal's layer over the polygon it lies on),
- * and a panorama laid from its tiles. And on the board's own data, when `npm run arcade` has read
- * it: every stage, panorama and moving piece reads.
+ * and a background taken from the game's tables (its tiles, mask and colours). And on the board's
+ * own data, when `npm run arcade` has read it: every stage, background and moving piece reads.
  */
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
@@ -11,8 +11,10 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { archiveAt, identifyChips, joinData, joinPair, PROGRAM_STAGES, sha256, STAGE_ARCHIVES, STAGE_OBJECTS, STAGE_PANORAMAS } from '../scripts/lib/arcade/board.mjs';
-import { exportArcadeObject, exportArcadePanorama, exportArcadeStage, readArcadeModel } from '../scripts/lib/arcade/stage.mjs';
+import { archiveAt, BACKGROUND_TABLES, identifyChips, joinData, joinPair, PROGRAM_CODE, PROGRAM_STAGES, sha256, STAGE_ARCHIVES, STAGE_OBJECTS } from '../scripts/lib/arcade/board.mjs';
+import { exportArcadeBackground, exportArcadeObject, exportArcadeStage, readArcadeModel } from '../scripts/lib/arcade/stage.mjs';
+import { arcadeFighters, placeAccessories, readArcadeFighter, resolveArcadeFighter } from '../scripts/lib/arcade/fighter.mjs';
+import { decompress } from '../scripts/lib/lz.mjs';
 import { decodePng, encodePng } from '../scripts/lib/png.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -110,65 +112,187 @@ test('a stage model reads each kind of polygon: its colours stored or shaded, un
   assert.ok(read.every((p) => p.oneSided));
 });
 
-test('a panorama is laid from its tiles a row at a time, its top fading and its sky\'s colours taken', () => {
-  /* Two 4-bit tiles of 64 texels, each one colour through its own palette: red, then blue. */
-  const tile = (colour) => {
+test('a background takes its tiles, mask and colours from the game\'s tables', () => {
+  /* Two 4-bit tiles of 64 texels side by side in one page, each one colour through its own palette: red, then blue. */
+  const tim = (x, y, colour, clutX) => {
     const clut = new Uint8Array(12 + 32);
     const cv = new DataView(clut.buffer);
-    cv.setUint32(0, clut.length, true);
-    cv.setUint16(8, 16, true);
-    cv.setUint16(10, 1, true);
+    [clut.length, clutX | (480 << 16), 16 | (1 << 16)].forEach((w, k) => cv.setUint32(k * 4, w, true));
     for (let k = 0; k < 16; k += 1) cv.setUint16(12 + k * 2, colour, true);
-    const image = new Uint8Array(12 + 64 * 64 / 2);
+    const image = new Uint8Array(12 + (64 * 64) / 2);
     const iv = new DataView(image.buffer);
-    iv.setUint32(0, image.length, true);
-    iv.setUint16(8, 16, true);
-    iv.setUint16(10, 64, true);
+    [image.length, x | (y << 16), 16 | (64 << 16)].forEach((w, k) => iv.setUint32(k * 4, w, true));
     const header = new Uint8Array(8);
     new DataView(header.buffer).setUint32(0, 0x10, true);
     new DataView(header.buffer).setUint32(4, 8, true);
     return [...header, ...clut, ...image];
   };
-  const chain = Uint8Array.from([...tile(31), ...tile(31 << 10)]);
+  const chain = Uint8Array.from([...tim(128, 0, 31, 0), ...tim(144, 0, 31 << 10, 16)]);
   const archive = new Uint8Array(4 + 16 + 4 + chain.length);
   const av = new DataView(archive.buffer);
-  av.setUint32(0, 2, true);
-  av.setUint32(4, 20, true);
-  av.setUint32(8, 4, true);
-  av.setUint32(12, 24, true);
-  av.setUint32(16, chain.length, true);
+  [2, 20, 4, 24, chain.length].forEach((w, k) => av.setUint32(k * 4, w, true));
   archive.set(chain, 24);
-  const result = exportArcadePanorama(archive, { first: 0, count: 2, columns: 1 }, encodePng);
-  const png = decodePng(result.atlas);
-  assert.deepEqual([png.width, png.height], [64, 128]);
-  assert.deepEqual(result.top, [255, 0, 0]);
-  assert.deepEqual(result.bottom, [0, 0, 255]);
-  assert.equal(png.rgba[3], 0);
-  assert.equal(png.rgba[(127 * 64) * 4 + 3], 255);
+
+  /* Stage 1's tables in the code: two columns, a row, 180 degrees across the screen (16 tiles a turn). */
+  const at = (address) => address - PROGRAM_CODE.base;
+  const code = new Uint8Array(at(BACKGROUND_TABLES.colours) + BACKGROUND_TABLES.stages * 12);
+  const cv = new DataView(code.buffer);
+  const [tiles, palettes, mask] = [0x100, 0x110, 0x120].map((k) => PROGRAM_CODE.base + k);
+  const layout = at(BACKGROUND_TABLES.layouts) + 20;
+  cv.setInt16(layout, 2, true);
+  cv.setInt16(layout + 2, 1, true);
+  [tiles, palettes, mask].forEach((p, k) => cv.setUint32(layout + 4 + k * 4, p, true));
+  cv.setInt16(layout + 16, -16, true);
+  cv.setUint16(layout + 18, 180, true);
+  cv.setInt16(at(BACKGROUND_TABLES.pitch) + 2, 288, true);
+  [0x0200, 0x0201].forEach((w, k) => cv.setUint16(at(tiles) + k * 2, w, true));
+  [480 << 6, (480 << 6) | 1].forEach((w, k) => cv.setUint16(at(palettes) + k * 2, w, true));
+  code.set([0x31, 0x31, 100, 0x74], at(mask));
+  code.set([1, 2, 3, 0, 4, 5, 6, 1, 7, 8, 9, 0], at(BACKGROUND_TABLES.colours) + 12);
+
+  const { atlas, ...background } = exportArcadeBackground(code, 1, archive, encodePng);
+  assert.deepEqual(background, {
+    columns: 2,
+    rows: 1,
+    degrees: 180,
+    perTurn: 16,
+    mask: ['ppbt' + '.'.repeat(12)],
+    offset: -16,
+    pitch: 288,
+    colours: { cell: [1, 2, 3], above: [4, 5, 6], below: [7, 8, 9] },
+    drawn: { above: true, below: false },
+  });
+  const png = decodePng(atlas);
+  assert.deepEqual([png.width, png.height], [128, 68]);
+  const texel = (x, y) => [...png.rgba.subarray((y * 128 + x) * 4, (y * 128 + x) * 4 + 4)];
+  assert.deepEqual(texel(10, 10), [255, 0, 0, 255]);
+  assert.deepEqual(texel(100, 63), [0, 0, 255, 255]);
+  assert.deepEqual(texel(64, 66), [255, 255, 255, 255]);
+});
+
+test('a board\'s fighter reads its blocks and blends a seam between two joints by its weights', () => {
+  /* Three records: none, a joint leaving one vertex whole and one at half weight, a joint copying the first and adding its own to the second's. */
+  const blocks = [];
+  const block = (...w) => {
+    blocks.push(w);
+    return blocks.length - 1;
+  };
+  const point = (x, y, z) => [(x & 0xffff) | ((y & 0xffff) << 16), z & 0xffff];
+  const records = [
+    null,
+    {
+      vertices: block(2, ...point(10, 0, 0), ...point(20, 0, 0), 0, 2, 0 | (0x1000 << 16), 1 | (0x800 << 16), 0),
+      normals: block(1, ...point(0, -4096, 0), 0, 0, 0),
+      polygons: block(1, 0 | (1 << 8) | (0 << 16), 0, 0, 0, 0),
+      texture: block(1, 0x0000 | (0x86 << 16), 0x0408, 0x0800, 0, 0, 0),
+    },
+    {
+      vertices: block(1, ...point(5, 5, 5), 1, 0, 0, 1, 1 | (0x800 << 16)),
+      normals: block(1, ...point(0, 0, 4096), 0, 0, 0),
+      polygons: block(0, 0, 1, 0 | (1 << 8) | (0 << 16), 0, 0),
+      texture: block(0, 0, 1, 0x1010 | (0x01 << 16), 0x1020 | (0x80 << 16), 0x2010, 0),
+    },
+  ];
+  const header = 16 + records.length * 0x38;
+  const at = [];
+  let offset = header;
+  for (const b of blocks) {
+    at.push(offset);
+    offset += b.length * 4;
+  }
+  const bytes = new Uint8Array(offset);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(0, records.length, true);
+  bytes.set([0x33, 0x44, 0x4d, 0x4b], 8);
+  records.forEach((r, i) => {
+    if (r === null) return;
+    [r.vertices, 0, r.normals, r.polygons, r.texture].forEach((b, k) => view.setInt32(16 + i * 0x38 + k * 4, k === 1 ? 0 : at[b], true));
+    view.setInt32(16 + i * 0x38 + 8 * 4, i - 1, true);
+  });
+  blocks.forEach((b, k) => b.forEach((w, n) => view.setUint32(at[k] + n * 4, w >>> 0, true)));
+
+  const model = readArcadeFighter(bytes);
+  assert.equal(model.records[0], null);
+  assert.deepEqual(model.records[1].vertices.left, [{ slot: 0, weight: 0x1000 }, { slot: 1, weight: 0x800 }]);
+  const { polygons, problems } = resolveArcadeFighter(model);
+  assert.deepEqual(problems, []);
+  assert.equal(polygons.length, 2);
+  /* The first joint draws its own points whole. */
+  assert.deepEqual(polygons[0].corners.map((c) => c.position), [[{ joint: 1, p: [10, 0, 0], w: 1 }], [{ joint: 1, p: [20, 0, 0], w: 1 }], [{ joint: 1, p: [10, 0, 0], w: 1 }]]);
+  assert.deepEqual(polygons[0].corners[0].uv, [0, 0]);
+  assert.deepEqual(polygons[0].target, { page: { x: 0x1c & 0xf, y: 1, mode: 0 }, clut: { x: ((0x5c30 + 0x86) & 0x3f) * 16, y: (0x5c30 + 0x86) >> 6 } });
+  /* The second joint's vertex blended half and half with the first's, and the first's other vertex copied whole. */
+  assert.deepEqual(polygons[1].corners[0].position, [
+    { joint: 2, p: [5, 5, 5], w: 0.5 },
+    { joint: 1, p: [20, 0, 0], w: 0.5 },
+  ]);
+  assert.deepEqual(polygons[1].corners[1].position, [{ joint: 1, p: [10, 0, 0], w: 1 }]);
+  assert.deepEqual(polygons[1].corners[1].normal, { joint: 2, n: [0, 0, 4096] });
+  assert.equal(polygons[1].target.page.mode, 1, 'its page word an 8-bit one');
+});
+
+test('a board\'s accessory is turned as it loads, and rides on the game\'s accessory joint that hangs where it does, else on its body joint', () => {
+  const block = (points) => ({ points, copied: [], left: [], added: [] });
+  const records = Array(24).fill(null);
+  records[18] = { index: 18, vertices: block([[10, 0, 0]]), normals: block([[4096, 0, 0]]), shapes: null, offset: [20, 0, -121], parent: 11, rest: [0, 0, 0] };
+  const board = Array.from({ length: 6 }, (_, k) => ({ shown: k === 0, turn: k === 0 ? [0, -0x8000, 0] : null, spring: [0, 0, 0] }));
+  const disc = (hangs) => ({
+    model: { records: Object.assign(Array(22).fill(null), { 21: { offset: hangs, rest: [0, 0, 0], parent: 2 } }) },
+    parts: [
+      { index: 2, joint: 11, record: 3, drawn: true },
+      { index: 18, joint: 18, record: 21, drawn: true },
+    ],
+  });
+  /* Half a turn about the up axis as it loads; the game's joint hangs where it does, so it rides on it as it is. */
+  const on = placeAccessories({ records }, board, disc([20, 0, -121]));
+  assert.deepEqual(on.model.records[18].vertices.points, [[-10, 0, 0]]);
+  assert.equal(on.accessories.get(18).joint, 18);
+  assert.deepEqual(on.accessories.get(18).point([-10, 0, 0]), [-10, 0, 0]);
+  /* The game's joint a long way off: held on the body joint, at its offset (z negated, as the game reads it). */
+  const held = placeAccessories({ records }, board, disc([400, 0, 0]));
+  assert.equal(held.accessories.get(18).joint, 11);
+  assert.deepEqual(held.accessories.get(18).point([-10, 0, 0]), [10, 0, 121]);
+  assert.deepEqual(held.accessories.get(18).normal([-4096, 0, 0]), [-4096, 0, 0]);
+  /* One the board's tables leave out is gone. */
+  const none = placeAccessories({ records }, board.map((b) => ({ ...b, shown: false })), disc([20, 0, -121]));
+  assert.equal(none.model.records[18], null);
+  assert.equal(none.accessories.size, 0);
 });
 
 const arcade = path.join(root, '.cache/arcade');
 const read = existsSync(path.join(arcade, 'data.bin')) && existsSync(path.join(arcade, 'program.bin'));
 const skip = !read && 'no arcade data; run npm run arcade';
 
-test('every arcade stage, panorama and moving piece reads from the board\'s data', { skip }, () => {
+test('every arcade stage, background and moving piece reads from the board\'s data', { skip }, () => {
   const data = new Uint8Array(readFileSync(path.join(arcade, 'data.bin')));
   const program = new Uint8Array(readFileSync(path.join(arcade, 'program.bin')));
-  const archives = [...STAGE_ARCHIVES.map((at, s) => [s, archiveAt(data, at)]), ...[...PROGRAM_STAGES].map(([s, at]) => [s, archiveAt(program, at)])];
+  const code = decompress(program, PROGRAM_CODE.at);
+  const archives = [...[...STAGE_ARCHIVES].map(([s, at]) => [s, archiveAt(data, at)]), ...[...PROGRAM_STAGES].map(([s, at]) => [s, archiveAt(program, at)])].sort(([a], [b]) => a - b);
   for (const [s, archive] of archives) {
     const books = (STAGE_OBJECTS.get(s) ?? []).filter((o) => o.flipbook !== undefined).map((o) => o.flipbook);
     const stage = exportArcadeStage(archive, encodePng, books, program);
     assert.equal(stage.stats.grid, 16, `stage ${s}'s grid`);
     assert.ok(stage.stats.polygons > 300, `stage ${s}'s polygons`);
     for (const book of stage.books) assert.ok(book.stats.polygons > 0, `stage ${s}'s flipbook`);
-    const layout = STAGE_PANORAMAS.get(s);
-    if (layout !== undefined) {
-      const png = decodePng(exportArcadePanorama(archive, layout, encodePng).atlas);
-      assert.equal(png.width, layout.columns * 64, `stage ${s}'s panorama`);
+    if (s < BACKGROUND_TABLES.stages) {
+      const { atlas, columns, rows, perTurn, mask } = exportArcadeBackground(code, s, archive, encodePng);
+      const png = decodePng(atlas);
+      assert.deepEqual([png.width, png.height], [columns * 64, rows * 64 + 4], `stage ${s}'s panorama`);
+      assert.ok(mask.length === rows && mask.every((row) => row.length === perTurn), `stage ${s}'s mask`);
     }
     for (const object of STAGE_OBJECTS.get(s) ?? []) {
       if (object.parts === undefined) continue;
       assert.ok(exportArcadeObject(program, object, encodePng).stats.polygons > 0, `stage ${s}'s ${object.name}`);
     }
   }
+});
+
+test('every fighter of the board\'s data reads and resolves, its seams\' weights summing to one', { skip }, () => {
+  const fighters = arcadeFighters(new Uint8Array(readFileSync(path.join(arcade, 'data.bin'))));
+  assert.equal(fighters.length, 32);
+  fighters.forEach(({ model }, k) => {
+    const { polygons, problems } = resolveArcadeFighter(readArcadeFighter(model));
+    assert.deepEqual(problems, [], `fighter ${k}`);
+    assert.ok(polygons.length > 400, `fighter ${k}'s polygons`);
+  });
 });

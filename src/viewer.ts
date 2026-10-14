@@ -2,7 +2,8 @@
  * A viewer for every fighter and every move, decoded from the disc (`?viewer` in the address).
  *
  * ← → fighter · ↑ ↓ move (hold shift for ten) · A S stage · space pause · , . step a frame ·
- * drag to orbit, wheel to zoom. The address bar takes `fighter`, `move` and `stage`.
+ * drag to orbit, wheel to zoom. The address bar takes `fighter`, `move` and `stage`, and
+ * `fighters=arcade` for the arcade board's models where it was read.
  */
 import { Camera, MeshBuilder, createEnvironment, createRenderer, startLoop } from '@driftengine/core';
 import type { SurfaceTextureHandle } from '@driftengine/core';
@@ -71,7 +72,9 @@ const tables: MotionTables = {
   fixup: Int16Array.from(raw.fixup),
   offsets: Int32Array.from(raw.offsets),
 };
-const manifest = await fetchJson<{ fighters: { pack: number; moveset: number }[]; stages: { stage: number }[]; arcadeStages?: number[] }>('manifest.json');
+const manifest = await fetchJson<{ fighters: { pack: number; moveset: number }[]; stages: { stage: number }[]; arcadeStages?: number[]; arcadeFighters?: number[] }>('manifest.json');
+/** The packs drawn with the arcade board's models (`?fighters=arcade`), where it was read. */
+const boardFighters = new Set(new URLSearchParams(location.search).get('fighters') === 'arcade' ? (manifest.arcadeFighters ?? []) : []);
 const common = readMoveset(await fetchBytes('moves/common.bin'));
 
 interface Joint {
@@ -93,10 +96,11 @@ async function loadFighter(pack: number): Promise<Loaded> {
   const id = String(pack).padStart(2, '0');
   /* Mokujin (30, 31) has no moveset of his own; the viewer shows Paul's. */
   const moveset = String(Math.max(0, manifest.fighters.find((f) => f.pack === pack)?.moveset ?? 0)).padStart(2, '0');
+  const dir = boardFighters.has(pack) ? 'arcade/fighters' : 'fighters';
   const [mesh, json, png, moves] = await Promise.all([
-    fetchBytes(`fighters/${id}.ftr`),
-    fetchJson<{ skeleton: Joint[] }>(`fighters/${id}.json`),
-    fetchBytes(`fighters/${id}.png`),
+    fetchBytes(`${dir}/${id}.ftr`),
+    fetchJson<{ skeleton: Joint[] }>(`${dir}/${id}.json`),
+    fetchBytes(`${dir}/${id}.png`),
     fetchBytes(`moves/${moveset}.bin`),
   ]);
   const bitmap = await createImageBitmap(new Blob([png], { type: 'image/png' }), { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });

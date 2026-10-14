@@ -1,0 +1,57 @@
+/**
+ * The remake's own settings, a page of the Options as the game's own lists are (up and down to
+ * pick, left and right to change, wrapping; the default in its own colour; select or EXIT back to
+ * the first page, which lists it before its own EXIT): how the fighters and stages are drawn (and
+ * whether from the arcade's data), the
+ * picture's quality, the frame rate shown and the touch pad. Where they are kept, and what they do,
+ * is the page's: those that change what is loaded take effect on a restart, which the page makes
+ * when the player leaves this page, and the page says so under its list while one differs from the
+ * start's.
+ */
+import type { OptionsItem, OptionsPage } from '../data/scenes.ts';
+import type { GameState, RemakeSettings } from './state.ts';
+
+/** The page's number, past the game's own pages and the one past them that leaves the Options. */
+export const REMAKE_PAGE = 0x10;
+
+/** Each setting's values: 0 is the default. */
+export const REMAKE_DEFAULTS: Readonly<RemakeSettings> = { textures: 0, models: 0, stages: 0, fighters: 0, picture: 0, frameRate: 0, touchPad: 0 };
+
+/** The settings a restart applies: all but the frame rate's. */
+export const RESTARTED: readonly (keyof RemakeSettings)[] = ['textures', 'models', 'stages', 'fighters', 'picture', 'touchPad'];
+
+const setting = (value: keyof RemakeSettings, label: string, names: readonly string[]): OptionsItem => ({ value, label, names, sideways: 1, count: names.length, button: 0, set: 0, draw: 2, modes: 0 });
+
+/** The first page's line that opens this one. */
+export const REMAKE_ITEM: OptionsItem = { value: 'page', label: 'REMAKE OPTION', names: [], sideways: 0, count: 0, button: 1, set: REMAKE_PAGE, draw: 1, modes: 0 };
+
+/** The page: its title on the screen's middle, its list as GAME OPTION's is laid, back to the first page. */
+export const REMAKE_OPTIONS: OptionsPage = {
+  title: 'REMAKE OPTION',
+  titleX: 100,
+  titleY: 40,
+  listX: 20,
+  listY: 100,
+  step: 32,
+  width: 324,
+  cancel: 0,
+  items: [
+    setting('textures', 'TEXTURES', ['SMOOTH', 'ORIGINAL']),
+    setting('models', 'MODELS', ['AUTO', 'ROUNDED', 'ORIGINAL']),
+    setting('stages', 'STAGES', ['ARCADE', 'CONSOLE']),
+    setting('fighters', 'FIGHTERS', ['ARCADE', 'CONSOLE']),
+    setting('picture', 'PICTURE', ['AUTO', 'HIGH', 'LOW', 'VERY LOW']),
+    setting('frameRate', 'FRAME RATE', ['OFF', 'ON']),
+    setting('touchPad', 'TOUCH PAD', ['AUTO', 'ON', 'OFF']),
+    { value: 'page', label: 'EXIT', names: [], sideways: 0, count: 0, button: 1, set: 0, draw: 1, modes: 0 },
+  ],
+};
+
+/** The line under the list while a setting a restart applies differs from the start's. */
+export const RESTART_LINE = 'LEAVING RESTARTS THE GAME';
+
+/** Whether an Options value is one of the remake's settings. */
+export const isRemakeSetting = (value: string): value is keyof RemakeSettings => Object.hasOwn(REMAKE_DEFAULTS, value);
+
+/** Whether a setting a restart applies differs from the one the page started with. */
+export const restartWanted = (game: GameState): boolean => RESTARTED.some((key) => game.remake.settings[key] !== game.remake.started[key]);

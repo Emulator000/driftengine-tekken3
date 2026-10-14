@@ -421,7 +421,27 @@ export interface TheaterTables {
 }
 
 /** What an Options list's item changes: the page shown, one of the options, or nothing. */
-export type OptionValue = 'none' | 'page' | 'stereo' | 'musicSet' | 'difficulty' | 'rounds' | 'roundTime' | 'alwaysChip' | 'continueChooses' | 'modeSetting' | 'autoSave' | 'keepChoices';
+export type OptionValue =
+  | 'none'
+  | 'page'
+  | 'stereo'
+  | 'musicSet'
+  | 'difficulty'
+  | 'rounds'
+  | 'roundTime'
+  | 'alwaysChip'
+  | 'continueChooses'
+  | 'modeSetting'
+  | 'autoSave'
+  | 'keepChoices'
+  /* The remake's own settings, on its page. */
+  | 'textures'
+  | 'models'
+  | 'stages'
+  | 'fighters'
+  | 'picture'
+  | 'frameRate'
+  | 'touchPad';
 
 /**
  * An item of an Options list: what it changes, its label and its values' names, how left and

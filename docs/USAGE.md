@@ -33,7 +33,10 @@ which is the system's own.
 
 ## The page's options
 
-Add them to the address, for example `http://localhost:5190/?quick&p1=9&p2=13&stage=3`.
+Add them to the address, for example `http://localhost:5190/?quick&p1=9&p2=13&stage=3`. The
+textures, the models, the stages, the fighters, the picture and the touch pad are also set in
+the game ([REMAKE OPTION](#remake-option)); a page started with one of them in its address takes the
+address's.
 
 | Option | Effect |
 | --- | --- |
@@ -52,6 +55,7 @@ Add them to the address, for example `http://localhost:5190/?quick&p1=9&p2=13&st
 | `record=force,ROSTER` or `record=force,ROSTER,FLAGS` | Goes to Tekken Force's results for that character on the first side, a run cleared with a new best score, then the records; `FLAGS` 1 a copper key (the default), 8 Dr. B saved, 0x10 the bosses beaten shown |
 | `textures=psx` | Draws the fighters' and stages' textures as the console did, each texel sharp, instead of enlarged and smoothed |
 | `stages=psx` | Draws the disc's stages where the arcade board's data has the arcade's (by default the arcade's, once `npm run arcade` has read it) |
+| `fighters=psx` | Draws the disc's fighters where the arcade board's data has the arcade's models (by default the arcade's, once `npm run arcade` has read it) |
 | `models=psx`, `models=rounded` | Draws the fighters with the console's meshes, or the rounded ones (by default the rounded ones, but at `quality=verylow`) |
 | `quality=high` | The whole picture: ambient occlusion and bloom over the multisampled HDR scene; the default but on a phone |
 | `quality=low` | Leaves out the ambient occlusion and the bloom; a phone's default |
@@ -117,7 +121,35 @@ which goes on from the field it stopped at.
 ## The frame rate
 
 `F` shows and hides the frame rate in the top right corner: the frames shown over the last second,
-their mean time and the longest of them. Whether it shows is kept in the browser for next time.
+their mean time and the longest of them. Whether it shows is kept with REMAKE OPTION's settings
+(its FRAME RATE) for next time.
+
+## REMAKE OPTION
+
+The Options' first page lists REMAKE OPTION before its EXIT: the remake's own settings, changed as
+GAME OPTION's are (up and down to pick, left and right to change), kept on the device (the browser,
+or the app) for every start after.
+
+| Setting | Values |
+| --- | --- |
+| TEXTURES | SMOOTH (enlarged and smoothed), ORIGINAL (each texel sharp, as `textures=psx`) |
+| MODELS | AUTO (rounded, but on an entry-level phone), ROUNDED, ORIGINAL (the console's meshes) |
+| STAGES | ARCADE (the arcade board's, where `npm run arcade` has read them), CONSOLE |
+| FIGHTERS | ARCADE (the arcade board's models, where it has read them), CONSOLE |
+| PICTURE | AUTO (by the device), HIGH, LOW, VERY LOW (as `quality=`) |
+| FRAME RATE | OFF, ON (as `F`) |
+| TOUCH PAD | AUTO (on a touch screen or a phone), ON, OFF |
+
+The frame rate shows or hides at once. The others change what the game loads: while one differs
+from the start's, the page says LEAVING RESTARTS THE GAME, and leaving it starts the game again
+(with auto save on, the progress is saved first).
+
+## When the game stops
+
+Should the game stop on an error, it says so in a window over the picture: what went wrong and
+where, and what was playing (the version, the scene, the fighters, the stage, the renderer). A
+screenshot of it, or its details (Copy details), is what an issue needs; Start again reloads the
+page.
 
 ## As an app
 
@@ -141,6 +173,10 @@ it.
 | Windows | `out/win-x64/`: an installer (`Tekken 3 Setup <version>.exe`) and a zip of the app |
 | macOS | `out/mac-arm64/` (Apple silicon) or `out/mac-x64/` (Intel): a `.dmg` and a zip |
 | Linux (x64) | `out/linux-x64/`: `Tekken 3-<version>.AppImage` and `tekken3-<version>.tar.gz` |
+
+Should a build end without these files, it keeps the unpacked app it made (on Linux
+`out/linux-x64/linux-unpacked/`, which runs as it is), says so, and stops with an error; run it again
+with `DEBUG=electron-builder` set to see where it stopped.
 
 Each is some 900 MB. `npm run desktop -- mac-arm64` (or `mac-x64`) builds a Mac's app on Linux, as a
 zip signed ad hoc; a Windows app is built on Windows, and a Linux app on Linux. The first build

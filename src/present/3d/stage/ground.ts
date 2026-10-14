@@ -21,7 +21,12 @@ export interface GroundState {
   readonly x: Int32Array;
   readonly z: Int32Array;
   readonly shade: Uint8Array;
+  /** The tiles shaded as the fight goes, the first ones; those past them lie farther, under the floor (`UNDER`), shaded once. */
+  readonly near: number;
 }
+
+/** How far under the floor a far tile is laid (metres): below an arcade stage's own floors, which show over it. */
+const UNDER = 0.04;
 
 /** A square the patch is cut to, in the scenery's frame: the scenery's place (mm) and turn (4096ths), and the square's half-width (mm). */
 export interface GroundClip {
@@ -53,6 +58,9 @@ function cut(outline: readonly Corner[], axis: 0 | 1, sign: number, limit: numbe
 
 export class Ground {
   mesh: MeshHandle | null = null;
+  /** The tiles past the near ones, an arcade stage's floor to its far end: made again only as they move. */
+  farMesh: MeshHandle | null = null;
+  private lastFar = { count: 0, x: new Int32Array(0), z: new Int32Array(0), cell: new Int16Array(0) };
   readonly material: SurfaceMaterial<SurfaceTextureHandle>;
   private readonly uvs: Float32Array;
   private readonly renderer: RendererApi;
@@ -97,13 +105,16 @@ export class Ground {
   update(state: GroundState, clip: GroundClip | null = null): void {
     if (!state.drawn) {
       this.drop();
+      this.dropFar();
+      this.lastFar = { count: 0, x: new Int32Array(0), z: new Int32Array(0), cell: new Int16Array(0) };
       return;
     }
     if (clip !== null) {
       this.cutTo(state, clip);
       return;
     }
-    const n = state.count;
+    this.layFar(state);
+    const n = state.near;
     const placed =
       this.mesh !== null &&
       n === this.last.count &&
@@ -160,7 +171,7 @@ export class Ground {
     const indices: number[] = [];
     /* A quad's corners in order round its outline. */
     const round = [0, 1, 3, 2];
-    for (let q = 0; q < state.count; q += 1) {
+    for (let q = 0; q < state.near; q += 1) {
       const cell = state.cell[q]!;
       let outline: Corner[] = round.map((k) => {
         const v = q * 4 + k;
@@ -203,8 +214,48 @@ export class Ground {
     }
   }
 
+  /** The far tiles, made again only when they move: laid under the floor, each corner its shade as laid. */
+  private layFar(state: GroundState): void {
+    const from = state.near;
+    const n = state.count - from;
+    const last = this.lastFar;
+    const same =
+      n === last.count &&
+      last.x.every((v, i) => v === state.x[from * 4 + i]) &&
+      last.z.every((v, i) => v === state.z[from * 4 + i]) &&
+      last.cell.every((v, i) => v === state.cell[from + i]);
+    if (same) return;
+    this.lastFar = { count: n, x: state.x.slice(from * 4, state.count * 4), z: state.z.slice(from * 4, state.count * 4), cell: state.cell.slice(from, state.count) };
+    this.dropFar();
+    if (n === 0) return;
+    const [r, g, b] = this.tint;
+    const positions = new Float32Array(n * 12);
+    const colors = new Float32Array(n * 12);
+    const uvs = new Float32Array(n * 8);
+    const indices = new Uint32Array(n * 6);
+    const normals = new Float32Array(n * 12);
+    for (let q = 0; q < n; q += 1) {
+      indices.set([q * 4, q * 4 + 1, q * 4 + 2, q * 4 + 1, q * 4 + 3, q * 4 + 2], q * 6);
+      const cell = state.cell[from + q]!;
+      for (let k = 0; k < 4; k += 1) {
+        const v = q * 4 + k;
+        positions.set([state.x[from * 4 + v]! / 1000, -UNDER, -state.z[from * 4 + v]! / 1000], v * 3);
+        uvs.set([this.uvs[(cell * 4 + k) * 2]!, this.uvs[(cell * 4 + k) * 2 + 1]!], v * 2);
+        const shade = (state.shade[from * 4 + v]! / 128) ** DISPLAY_GAMMA;
+        colors.set([shade * r, shade * g, shade * b], v * 3);
+        normals[v * 3 + 1] = 1;
+      }
+    }
+    this.farMesh = this.renderer.createMesh({ positions, normals, colors, emissive: new Float32Array(n * 4), uvs, indices });
+  }
+
   private drop(): void {
     if (this.mesh !== null) this.renderer.disposeMesh(this.mesh);
     this.mesh = null;
+  }
+
+  private dropFar(): void {
+    if (this.farMesh !== null) this.renderer.disposeMesh(this.farMesh);
+    this.farMesh = null;
   }
 }

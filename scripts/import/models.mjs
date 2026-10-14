@@ -3,7 +3,7 @@
  * models the remake draws by default: `models/fighters/NN.ftr` and `models/intro/I-PP.ftr`, from
  * `public/data/`. A mesh of another version (Kazuya's, from Tekken 4) is copied as it is.
  */
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { roundFighter } from '../lib/round.mjs';
@@ -11,8 +11,9 @@ import { roundFighter } from '../lib/round.mjs';
 /** Writes every mesh into `output`; returns how many were rounded. */
 export function roundModels(root, output) {
   let rounded = 0;
-  for (const kind of ['fighters', 'intro']) {
+  for (const kind of ['fighters', 'intro', 'arcade/fighters']) {
     const dir = path.join(root, 'public/data', kind);
+    if (!existsSync(dir)) continue;
     for (const name of readdirSync(dir).filter((n) => n.endsWith('.ftr')).sort()) {
       const bytes = new Uint8Array(readFileSync(path.join(dir, name)));
       const target = `models/${kind}/${name}`;
