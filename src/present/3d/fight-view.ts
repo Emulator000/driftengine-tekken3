@@ -11,6 +11,7 @@
  */
 import { Camera, computeLightMatrix, createEnvironment, type RendererApi, type ShadowCasters, type SurfaceTextureHandle } from '@driftengine/core';
 import type { ArenaTables } from '../../assets/arena.ts';
+import { FIRST_ACCESSORY } from '../../sim/fight/accessories.ts';
 import { handPart, wingsPart } from '../../sim/fight/hands.ts';
 import type { FightData, FightState, Fighter as FighterState } from '../../sim/fight/state.ts';
 import { Fighter, readFighterMesh, type JointTransform } from './fighter/fighter.ts';
@@ -98,9 +99,14 @@ const FIGHTER_DEPTH = 0.01;
  * A fighter near the floor is drawn resting on it, its posed skin's lowest point set on the floor
  * (the game's poses stand a little above it or sink a little, and lie in it): fully up to `GROUNDED`
  * metres above the floor, then less and less up to `AIRBORNE`, past which it is drawn where it is.
+ * Its accessories (hair, King's tail, a sash), which swing through the floor, are not counted.
  */
 const GROUNDED = 0.02;
 const AIRBORNE = 0.06;
+/** The most a fighter is lifted, so a pose that reaches through the floor (a throw's) stays near its partner's. */
+const MOST_LIFT = 0.12;
+/** The joints the accessories swing on, the four from the first. */
+const ACCESSORIES = new Set([0, 1, 2, 3].map((k) => FIRST_ACCESSORY + k));
 /** The picture's half-height in the game's pixels, which its projection distance is against. */
 const HALF_HEIGHT = 240;
 /** Stage 11's sky behind its clouds, unless True Ogre plays there (8-bit sRGB). */
@@ -149,7 +155,7 @@ export function eyeOf(view: ArrayLike<number>, out: { [index: number]: number })
 
 /** How far a fighter whose lowest point stands `low` metres above the floor is lifted onto it (less than 0, lowered). */
 function liftOnto(low: number): number {
-  if (low <= GROUNDED) return -low;
+  if (low <= GROUNDED) return Math.min(-low, MOST_LIFT);
   if (low >= AIRBORNE) return 0;
   return (-GROUNDED * (AIRBORNE - low)) / (AIRBORNE - GROUNDED);
 }
@@ -486,7 +492,7 @@ export class FightView {
       fighter.face(f.eyesShut !== 0 ? 1 : 0);
       fighter.pose(this.jointsOf(f));
       this.light(state, fighter, f);
-      this.lifts[this.casting.length] = liftOnto(fighter.lowest());
+      this.lifts[this.casting.length] = liftOnto(fighter.lowest(ACCESSORIES));
       this.casting.push(fighter);
     }
     this.castShadows(state, posed);

@@ -350,17 +350,21 @@ export class Fighter {
     this.renderer.posePointSkin(this.skin, f);
   }
 
-  /** The posed skin's lowest point: metres above the floor, or below it where less than 0. */
-  lowest(): number {
+  /**
+   * The posed skin's lowest point: metres above the floor, or below it where less than 0. A vertex
+   * hanging on one of `leftOut` (an accessory: hair, a tail, a sash) is not counted.
+   */
+  lowest(leftOut: ReadonlySet<number>): number {
     const { joints, weights, points } = this.data;
     const f = this.matrices;
     let low = Infinity;
-    for (let at = 0; at < weights.length; at += INFLUENCES) {
+    vertices: for (let at = 0; at < weights.length; at += INFLUENCES) {
       let y = 0;
       let sum = 0;
       for (let k = at; k < at + INFLUENCES; k += 1) {
         const w = weights[k]!;
         if (w === 0) continue;
+        if (leftOut.has(joints[k]!)) continue vertices;
         const o = joints[k]! * 16;
         y += w * (f[o + 1]! * points[k * 3]! + f[o + 5]! * points[k * 3 + 1]! + f[o + 9]! * points[k * 3 + 2]! + f[o + 13]!);
         sum += w;
