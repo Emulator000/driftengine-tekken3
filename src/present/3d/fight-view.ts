@@ -11,13 +11,12 @@
  */
 import { Camera, computeLightMatrix, createEnvironment, type RendererApi, type ShadowCasters, type SurfaceTextureHandle } from '@driftengine/core';
 import type { ArenaTables } from '../../assets/arena.ts';
-import { FIRST_ACCESSORY } from '../../sim/fight/accessories.ts';
 import { handPart, wingsPart } from '../../sim/fight/hands.ts';
 import type { FightData, FightState, Fighter as FighterState } from '../../sim/fight/state.ts';
 import { Fighter, readFighterMesh, type JointTransform } from './fighter/fighter.ts';
 import { Ground } from './stage/ground.ts';
 import { createStage, stageAtlasSize, type Stage } from './stage/stage.ts';
-import { layGround, layScenery, newGround, newHeldScenery, newScenery } from './layout.ts';
+import { ACCESSORIES, FEET, layGround, layScenery, liftOnto, newGround, newHeldScenery, newScenery } from './layout.ts';
 import { Effects } from './effects/effects.ts';
 import { BallView } from './ball.ts';
 import { Beach, BEACH_STAGE, beachClear } from './stage/beach.ts';
@@ -64,13 +63,12 @@ export interface ArcadeStageFiles {
   readonly objects?: readonly ArcadePieceFiles[];
 }
 
-/** A moving piece: its mesh (a cell a part, or a frame) and atlas, how it moves, its frames and the fields each shows, and whether it waits for the fight. */
+/** A moving piece: its mesh (a cell a part, or a frame) and atlas, how it moves, its frames and the fields each shows. */
 export interface ArcadePieceFiles extends PieceMotion {
   readonly mesh: ArrayBuffer;
   readonly texture: ImageBitmap;
   readonly frames: number;
   readonly fields: number;
-  readonly shown: 'always' | 'fighting';
 }
 
 /** A stage as drawn: its scenery and ground, Tekken Ball's beach, a Tekken Force backdrop, an arcade stage's sky and moving pieces. */
@@ -95,18 +93,6 @@ const EDGED = new Map([[11, 1068]]);
 const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 /** How much nearer the fighters' depth lies than the fighters (a share of their distance from the eye): a few centimetres at the fight's distances. */
 const FIGHTER_DEPTH = 0.01;
-/**
- * A fighter near the floor is drawn resting on it, its posed skin's lowest point set on the floor
- * (the game's poses stand a little above it or sink a little, and lie in it): fully up to `GROUNDED`
- * metres above the floor, then less and less up to `AIRBORNE`, past which it is drawn where it is.
- * Its accessories (hair, King's tail, a sash), which swing through the floor, are not counted.
- */
-const GROUNDED = 0.02;
-const AIRBORNE = 0.06;
-/** The most a fighter is lifted, so a pose that reaches through the floor (a throw's) stays near its partner's. */
-const MOST_LIFT = 0.12;
-/** The joints the accessories swing on, the four from the first. */
-const ACCESSORIES = new Set([0, 1, 2, 3].map((k) => FIRST_ACCESSORY + k));
 /** The picture's half-height in the game's pixels, which its projection distance is against. */
 const HALF_HEIGHT = 240;
 /** Stage 11's sky behind its clouds, unless True Ogre plays there (8-bit sRGB). */
@@ -153,13 +139,6 @@ export function eyeOf(view: ArrayLike<number>, out: { [index: number]: number })
   }
 }
 
-/** How far a fighter whose lowest point stands `low` metres above the floor is lifted onto it (less than 0, lowered). */
-function liftOnto(low: number): number {
-  if (low <= GROUNDED) return Math.min(-low, MOST_LIFT);
-  if (low >= AIRBORNE) return 0;
-  return (-GROUNDED * (AIRBORNE - low)) / (AIRBORNE - GROUNDED);
-}
-
 export class FightView {
   private readonly renderer: RendererApi;
   /** The match's data (a new match's replaces it). */
@@ -201,6 +180,7 @@ export class FightView {
   private readonly casting: Fighter[] = [];
   /** Per fighter cast, how far it is lifted onto the floor (metres), and its shadow's model. */
   private readonly lifts: number[] = [];
+  private readonly low = { body: 0, feet: 0 };
   private readonly casterModels: Float32Array[] = [];
   private readonly effects: Effects;
   /** The fighters' packs and stage `prepare` found ready, and those it waits on the compiles of. */
@@ -307,8 +287,9 @@ export class FightView {
   /**
    * Whether the drawing of `state` is ready, what it lacks asked for now: its two fighters' models
    * (none with `stageAlone`, as the records draw it) and its stage loaded, and every pipeline their
-   * draws take compiled off the frame. A fight's models are otherwise asked for by its first frame,
-   * which then draws it without them, and the frames after wait on their pipelines.
+   * draws take compiled off the frame: the fighters', the scenery's, its moving pieces' and the
+   * floor's. A fight's models are otherwise asked for by its first frame, which then draws it
+   * without them, and the frames after wait on their pipelines, so a piece would show late.
    */
   prepare(state: FightState, stageAlone = false): boolean {
     const sides = stageAlone ? [] : Array.from({ length: this.sidesOf(state) }, (_, i) => ({ pack: state.fighters[i]!.costume, ahead: this.packsAhead(state, i) }));
@@ -322,6 +303,8 @@ export class FightView {
     this.preparing = key;
     for (const fighter of fighters) this.renderer.prepareMesh(fighter!.handle, fighter!.material);
     for (const cell of drawn.stage.cells) for (const piece of cell) this.renderer.prepareMesh(piece.mesh, piece.oneSided ? drawn.stage.oneSidedMaterial : drawn.stage.material, { translucent: true });
+    for (const object of drawn.objects) for (const cell of object.stage.cells) for (const piece of cell) this.renderer.prepareMesh(piece.mesh, object.stage.material, { translucent: true });
+    drawn.ground.prepare();
     void this.renderer.ready().then(() => {
       if (this.preparing === key) this.prepared = key;
     });
@@ -356,7 +339,6 @@ export class FightView {
     }
     for (const object of drawn.objects) {
       const motion = object.motion;
-      if (motion.shown === 'fighting' && state.round.flow === 0) continue;
       const cells = motion.frames > 1 ? [[Math.floor(state.frameCount / motion.fields) % motion.frames, 0]] : motion.parts.map((_, i) => [i, i]);
       /* Drawn from both sides: a piece is closed, and its own polygons face as the game's moving pieces do, not as its scenery's. */
       renderer.setMaterial(object.stage.material);
@@ -492,7 +474,8 @@ export class FightView {
       fighter.face(f.eyesShut !== 0 ? 1 : 0);
       fighter.pose(this.jointsOf(f));
       this.light(state, fighter, f);
-      this.lifts[this.casting.length] = liftOnto(fighter.lowest(ACCESSORIES));
+      fighter.lowest(FEET, ACCESSORIES, this.low);
+      this.lifts[this.casting.length] = liftOnto(this.low);
       this.casting.push(fighter);
     }
     this.castShadows(state, posed);

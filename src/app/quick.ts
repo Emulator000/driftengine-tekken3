@@ -137,13 +137,21 @@ export async function playQuickMatch(): Promise<void> {
   const view = new FightView(renderer, data, arena, drawingFiles);
   const hud = new Hud(renderer, data, fight.state);
   const pause = new PauseScreen(renderer, data, commands);
+  /* Nothing steps, sounds or shows until every model the fight draws is loaded and every pipeline compiled. */
+  let ready = false;
   play(
     {
       field: (pads) => {
+        if (!ready) {
+          ready = view.prepare(fight.state);
+          status.textContent = ready ? '' : 'loading';
+          return false;
+        }
         fight.field(pads);
         sound?.field(fight.state, fight.state.vsyncSeen);
       },
       render(width, height) {
+        if (!ready) return;
         hud.prepare(fight.state, width, height);
         pause.prepare(fight.state, width, height);
         view.render(

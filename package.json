@@ -1,6 +1,6 @@
 {
   "name": "driftengine-tekken3",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Unofficial: Tekken 3 rebuilt on DriftEngine from the data of a user's own disc. No game files included.",
   "license": "UNLICENSED",
   "type": "module",

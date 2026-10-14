@@ -48,15 +48,13 @@ export interface PieceMotion {
 
 /**
  * A stage's moving piece: its number among the stage's, how it stands and moves, its
- * frames (its mesh's cells, drawn in turn) and the fields each shows, and whether it waits for the
- * round's fight to begin.
+ * frames (its mesh's cells, drawn in turn) and the fields each shows.
  */
 export interface ArcadeObject extends PieceMotion {
   readonly stage: number;
   readonly piece: number;
   readonly frames: number;
   readonly fields: number;
-  readonly shown: 'always' | 'fighting';
 }
 
 /** A panorama: the colours of its top and bottom rows (8-bit sRGB), and how far down it its horizon lies (a share of its height). */
@@ -107,7 +105,6 @@ export function parseManifest(json: unknown, where = 'manifest.json'): Manifest 
         const spin = expectObject(part.spin, `${at}.parts[${k}].spin`);
         return { at: three(part.at, `parts[${k}].at`), angles: three(part.angles, `parts[${k}].angles`), spin: { axis: expectInt(spin.axis, `${at}.parts[${k}].spin.axis`, 0, 2), rate: number(spin.rate, `parts[${k}].spin.rate`) } };
       });
-      if (object.shown !== 'always' && object.shown !== 'fighting') throw new AssetError(`${at}.shown`, 'is not always or fighting');
       return {
         stage: expectInt(object.stage, `${at}.stage`, 0, 0x13),
         piece: expectInt(object.piece, `${at}.piece`, 0, 0xff),
@@ -119,7 +116,6 @@ export function parseManifest(json: unknown, where = 'manifest.json'): Manifest 
         parts,
         frames: expectInt(object.frames, `${at}.frames`, 1, 0x100),
         fields: expectInt(object.fields, `${at}.fields`, 1, 0x100),
-        shown: object.shown,
       };
     }),
   };

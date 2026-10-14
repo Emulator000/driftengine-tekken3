@@ -351,28 +351,35 @@ export class Fighter {
   }
 
   /**
-   * The posed skin's lowest point: metres above the floor, or below it where less than 0. A vertex
-   * hanging on one of `leftOut` (an accessory: hair, a tail, a sash) is not counted.
+   * The posed skin's lowest points into `out`, metres above the floor (below it where less than 0):
+   * the body's, and its feet's (the vertices the joints in `feet` weigh most in). A vertex hanging on
+   * one of `leftOut` (an accessory: hair, a tail) is not counted.
    */
-  lowest(leftOut: ReadonlySet<number>): number {
+  lowest(feet: ReadonlySet<number>, leftOut: ReadonlySet<number>, out: { body: number; feet: number }): void {
     const { joints, weights, points } = this.data;
     const f = this.matrices;
-    let low = Infinity;
+    out.body = Infinity;
+    out.feet = Infinity;
     vertices: for (let at = 0; at < weights.length; at += INFLUENCES) {
       let y = 0;
       let sum = 0;
+      let heaviest = 0;
+      let on = -1;
       for (let k = at; k < at + INFLUENCES; k += 1) {
         const w = weights[k]!;
         if (w === 0) continue;
-        if (leftOut.has(joints[k]!)) continue vertices;
-        const o = joints[k]! * 16;
+        const joint = joints[k]!;
+        if (leftOut.has(joint)) continue vertices;
+        if (w > heaviest) [heaviest, on] = [w, joint];
+        const o = joint * 16;
         y += w * (f[o + 1]! * points[k * 3]! + f[o + 5]! * points[k * 3 + 1]! + f[o + 9]! * points[k * 3 + 2]! + f[o + 13]!);
         sum += w;
       }
       /* A vertex weighing nothing (a picture the face does not show) is drawn nowhere. */
-      if (sum > 0 && y < low) low = y;
+      if (sum === 0) continue;
+      if (y < out.body) out.body = y;
+      if (feet.has(on) && y < out.feet) out.feet = y;
     }
-    return low;
   }
 
   /**

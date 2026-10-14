@@ -17,6 +17,7 @@
  */
 import type { ArenaTables, GroundTemplate, StageLayout } from '../../assets/arena.ts';
 import { libraryRoot, tableRoot } from '../../sim/math/roots.ts';
+import { FIRST_ACCESSORY } from '../../sim/fight/accessories.ts';
 import { fighterLockedOn } from '../../sim/fight/camera.ts';
 import type { FightData, FightState } from '../../sim/fight/state.ts';
 import { GroundLight, groundLighting, litShade } from './ground-light.ts';
@@ -467,4 +468,32 @@ export function layGround(state: FightState, data: FightData, arena: ArenaTables
     }
   }
   out.count = quad;
+}
+
+/**
+ * A fighter standing on its feet (its feet its lowest point, within `STANDING`, less and less to
+ * `NOT_STANDING`) is set on them on the floor, where the game's poses stand a little above it or
+ * sink a little into it: lowered onto it from up to `GROUNDED` metres above it (less and less up to
+ * `AIRBORNE`, past which it is drawn where it is), lifted onto it from `MOST_LIFT` below at most. A
+ * fighter lying, rolling or thrown is drawn as the game poses it. Its accessories (hair, King's
+ * tail), which swing through the floor, are not counted.
+ */
+const GROUNDED = 0.02;
+const AIRBORNE = 0.06;
+const MOST_LIFT = 0.03;
+const STANDING = 0.02;
+const NOT_STANDING = 0.06;
+/** The joints the feet hang on. */
+export const FEET = new Set([14, 17]);
+/** The joints the accessories swing on, the four from the first. */
+export const ACCESSORIES = new Set([0, 1, 2, 3].map((k) => FIRST_ACCESSORY + k));
+
+/** How far a fighter whose body's and feet's lowest points stand `low` above the floor is lifted onto it (less than 0, lowered). */
+export function liftOnto(low: { body: number; feet: number }): number {
+  const above = low.feet - low.body;
+  if (!(above < NOT_STANDING)) return 0;
+  const standing = above <= STANDING ? 1 : (NOT_STANDING - above) / (NOT_STANDING - STANDING);
+  const feet = low.feet;
+  const lift = feet <= GROUNDED ? Math.min(-feet, MOST_LIFT) : feet >= AIRBORNE ? 0 : (-GROUNDED * (AIRBORNE - feet)) / (AIRBORNE - GROUNDED);
+  return standing * lift;
 }

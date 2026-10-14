@@ -60,6 +60,8 @@ export class Ground {
   /** The patch's colours, rewritten when its shades change. */
   private colors = new Float32Array(0);
   private readonly tint: readonly [number, number, number];
+  /** The tiles `prepare` compiles the patch's pipelines with. */
+  private warm: MeshHandle[] | null = null;
 
   constructor(renderer: RendererApi, buffer: ArrayBuffer, atlasWidth: number, atlasHeight: number, texture: SurfaceTextureHandle, tint: readonly [number, number, number] = [1, 1, 1]) {
     this.renderer = renderer;
@@ -72,6 +74,23 @@ export class Ground {
       this.uvs[i * 2 + 1] = view.getUint16(8 + i * 4 + 2, true) / atlasHeight;
     }
     this.material = { albedo: texture, cutout: 0.5, doubleSided: true };
+  }
+
+  /**
+   * Has the pipelines a patch is drawn with compiled before the fight shows: a tile made the two
+   * ways a patch is (its colours rewritten in place, and cut to a square), never drawn.
+   */
+  prepare(): void {
+    const tile = (): Parameters<RendererApi['createMesh']>[0] => ({
+      positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 1]),
+      normals: new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0]),
+      colors: new Float32Array(12).fill(1),
+      emissive: new Float32Array(4),
+      uvs: new Float32Array(8),
+      indices: new Uint32Array([0, 1, 2, 1, 3, 2]),
+    });
+    this.warm ??= [this.renderer.createMesh(tile(), { dynamicColors: true }), this.renderer.createMesh(tile())];
+    for (const mesh of this.warm) this.renderer.prepareMesh(mesh, this.material);
   }
 
   /** Lays the patch the fight placed this frame, cut to `clip` where there is one; drops it when the fight draws no ground. */

@@ -59,7 +59,7 @@ export const STAGE_PANORAMAS = new Map([
  * 4096ths), its yaw turning `spin` a field (back where it began every `wrap` fields, where it has one); each of its `sway` moves one of its height, pitch, yaw
  * or roll `step` a field, the other way every `period` fields (the first time after `start`). A
  * part stands at `at` in the piece, turned by `angles`, and turns `spin` a field about one axis
- * (0 x, 1 y, 2 z). `shown` 'fighting' keeps a piece away until the round's fight begins.
+ * (0 x, 1 y, 2 z).
  */
 export const STAGE_OBJECTS = new Map([
   [
@@ -85,7 +85,6 @@ export const STAGE_OBJECTS = new Map([
           { channel: 'yaw', step: -0.5, period: 256, start: 128 },
           { channel: 'roll', step: -1, period: 64, start: 32 },
         ],
-        shown: 'fighting',
       },
     ],
   ],

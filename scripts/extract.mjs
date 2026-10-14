@@ -355,7 +355,6 @@ if (existsSync(arcadePath)) {
         parts: (object.parts ?? [{}]).map((part) => ({ at: part.at ?? [0, 0, 0], angles: part.angles ?? [0, 0, 0], spin: part.spin ?? { axis: 1, rate: 0 } })),
         frames,
         fields: object.fields ?? 1,
-        shown: object.shown ?? 'always',
       });
     });
     const layout = STAGE_PANORAMAS.get(s);
