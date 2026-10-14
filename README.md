@@ -295,9 +295,9 @@ field. What is done and what is not yet:
 | An iPhone app built from your disc | Partly | `npm run ios`, on a Mac with Xcode; not yet built or played |
 | Windows, macOS, Linux | Done | Developed and tested on Linux |
 | Kazuya from Tekken 4 | Done | Optional, from your own Tekken 4 disc |
-| The arcade release's stages | Done | Optional, from a dump of your own arcade board: the 14 stages it has, their backgrounds as the board lays them, the carousel, the helicopter and the torches; `?stages=psx` draws the disc's |
-| The arcade release's fighters | Done | Optional, from the same dump: the 32 models it has, their seams' own weights, their accessories as the board hangs them (on the game's swinging joints where they match); `?fighters=psx` draws the disc's. They do not close their eyes, as the board has no closed eyes to draw |
-| The remake's settings in the game | Done | REMAKE OPTION in the Options: the textures, the models, the arcade's stages and fighters, the picture, the frame rate and the touch pad, kept on the device |
+| The arcade release's stages | Done | Optional, from a dump of your own arcade board: the 14 stages it has, their backgrounds as the board lays them (met by the floor, and their sky going on above, where the console's camera sees past what the board shows), the carousel, the helicopter and the torches; `?stages=psx` draws the disc's |
+| The arcade release's fighters | Done | Optional, from the same dump: the 32 models it has, their seams' own weights, their accessories each on its own joint and swung on the board's own springs; `?fighters=psx` draws the disc's. Their coats' panels and the tails they hang from the hips are kept clear of the legs (`?cloth=original` draws them as the board does). They do not close their eyes, as the board has no closed eyes to draw |
+| The remake's settings in the game | Done | REMAKE OPTION in the Options: the textures, the models, the arcade's stages and fighters, the cloth, the picture, the frame rate and the touch pad, kept on the device |
 | A stop shown as the game's own | Done | A window with what went wrong and what was playing, its details to copy into an issue |
 | A free camera and a frame-rate meter | Done | `P` holds a fight and flies a camera through it; `F` shows the frame rate |
 | Discs of other regions (PAL, Japanese) | Not yet | The USA disc (SLUS-00402) alone is read |

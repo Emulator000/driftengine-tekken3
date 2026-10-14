@@ -32,8 +32,6 @@ export interface Stage {
   readonly cellSize: number;
   /** The grid's cells each way. */
   readonly grid: number;
-  /** How far its polygons reach across the floor from its middle, metres. */
-  readonly reach: number;
   readonly atlasWidth: number;
   readonly atlasHeight: number;
   /** Drawn from both sides, and from the front only. */
@@ -66,8 +64,6 @@ export function createStage(renderer: RendererApi, buffer: ArrayBuffer, texture:
     uvs[i * 2 + 1] = view.getUint16(at + 12, true) / height;
     at += 20;
   }
-  let reach = 0;
-  for (let i = 0; i < n; i += 1) reach = Math.max(reach, Math.hypot(positions[i * 3]!, positions[i * 3 + 2]!));
   const indices = new Uint32Array(indexCount);
   for (let i = 0; i < indexCount; i += 1) indices[i] = view.getUint32(at + i * 4, true);
   /* A triangle's kind, by its first vertex: its layer, whether its back is drawn and whether it is cut out. */
@@ -106,7 +102,6 @@ export function createStage(renderer: RendererApi, buffer: ArrayBuffer, texture:
     cells,
     cellSize,
     grid,
-    reach,
     atlasWidth: width,
     atlasHeight: height,
     material: { albedo: texture, cutout: 0.5, doubleSided: true },

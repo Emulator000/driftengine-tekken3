@@ -14,6 +14,8 @@ import type { ArenaTables } from '../../assets/arena.ts';
 import { handPart, wingsPart } from '../../sim/fight/hands.ts';
 import type { FightData, FightState, Fighter as FighterState } from '../../sim/fight/state.ts';
 import { Fighter, readFighterMesh, type JointTransform } from './fighter/fighter.ts';
+import { HIPS } from './fighter/garment.ts';
+import { FIRST_ACCESSORY } from '../../sim/fight/accessories.ts';
 import { Ground } from './stage/ground.ts';
 import { createStage, stageAtlasSize, type Stage } from './stage/stage.ts';
 import { ACCESSORIES, FEET, layGround, layScenery, liftOnto, newGround, newHeldScenery, newScenery } from './layout.ts';
@@ -43,6 +45,8 @@ export interface DrawingFiles {
   /** One of the original pictures by name (Tekken Force's item and its shadow). */
   picture?(name: string): Promise<ImageBitmap>;
   readonly smooth: boolean;
+  /** Whether a board's model's cloth is kept clear of the legs (its garment and the accessories it hangs from the hips). */
+  readonly cloth: boolean;
 }
 
 /** An arcade stage's background: its picture (its panorama's tiles over a few white rows) and how the stage lays it out. */
@@ -95,6 +99,8 @@ const lookOf = (camera: Camera): { pitch: number; yaw: number } => {
   const turn = 4096 / (2 * Math.PI);
   return { pitch: Math.round(Math.asin(Math.max(-1, Math.min(1, -y))) * turn) & 0xfff, yaw: Math.round(Math.atan2(-x, -z) * turn) & 0xfff };
 };
+/** How far off the floor ends ahead (metres): an arcade stage's floor's rings reach a little farther every way. */
+const FLOOR_END = 90;
 /** The picture's half-height in the game's pixels, which its projection distance is against. */
 const HALF_HEIGHT = 240;
 /** Stage 11's sky behind its clouds, unless True Ogre plays there (8-bit sRGB). */
@@ -222,7 +228,9 @@ export class FightView {
     models.set(pack, next);
     void this.files.fighter(pack).then(({ mesh, texture }) => {
       const handle = this.renderer.createSurfaceTexture(texture, this.textureOptions(false));
-      const fighter = new Fighter(this.renderer, readFighterMesh(mesh), handle, this.white);
+      /* A board's model's accessories hung from the hips are kept clear of the legs, as its garment is. */
+      const tails = this.files.cloth ? (this.data.models[pack]?.accessories ?? []).flatMap((a, k) => (a !== null && a.parent === HIPS ? [FIRST_ACCESSORY + k] : [])) : null;
+      const fighter = new Fighter(this.renderer, readFighterMesh(mesh), handle, this.white, tails);
       if (models.get(pack) === next) next.fighter = fighter;
       else fighter.dispose();
     });
@@ -318,7 +326,8 @@ export class FightView {
     const joints: (JointTransform | undefined)[] = [];
     f.parts.forEach((part, i) => {
       if (part.hung === 0) return;
-      const j = this.data.skeleton.partJoints[i]!;
+      /* The parts past the game's table are a model's own accessories, each its own joint. */
+      const j = this.data.skeleton.partJoints[i] ?? i;
       const world = f.skeleton.joints[j]!.world;
       joints[j] = { r: Float64Array.from(world.rotation, (v) => v / 4096), t: Float64Array.from(world.translation) };
     });
@@ -349,6 +358,22 @@ export class FightView {
       }
     }
     renderer.setMaterial(null);
+  }
+
+  /**
+   * Where the floor ends ahead, as the picture's line (of 480): a point on it as far off as its
+   * rings reach, straight ahead of the camera; null where it lies behind the camera.
+   */
+  private floorEnd(): number | null {
+    const camera = this.camera;
+    const [fx, , fz] = camera.forward as unknown as [number, number, number];
+    const across = Math.hypot(fx, fz);
+    if (across === 0) return null;
+    const p = [camera.position[0]! + (fx / across) * FLOOR_END, 0, camera.position[2]! + (fz / across) * FLOOR_END, 1];
+    const m = camera.viewProjection as unknown as ArrayLike<number>;
+    const clip = [1, 3].map((r) => m[r]! * p[0]! + m[4 + r]! * p[1]! + m[8 + r]! * p[2]! + m[12 + r]! * p[3]!) as [number, number];
+    if (!(clip[1] > 0)) return null;
+    return ((1 - clip[0] / clip[1]) / 2) * 480;
   }
 
   /** The game's view in the engine's axes, and its projection over the picture's half-height. */
@@ -494,7 +519,7 @@ export class FightView {
     /* The free camera sees every cell: the game's culling is its own camera's. */
     if (scenery && freeView.active) this.scenery.cells.fill(1);
     /* An arcade stage's background, behind everything drawn after it. */
-    if (drawn?.background != null && only.scenery && state.match.trueOgres === 0) drawn.background.draw(lookOf(this.camera), aspect, this.scenery.yaw);
+    if (drawn?.background != null && only.scenery && state.match.trueOgres === 0) drawn.background.draw(lookOf(this.camera), aspect, this.scenery.yaw, this.floorEnd(), sky);
     const ball = state.mode === TEKKEN_BALL && !stageAlone;
     /* Tekken Force's backdrop is the farthest thing drawn: everything after it lies over it. */
     if (drawn?.force != null && state.mode === TEKKEN_FORCE) drawn.force.draw(state, this.data, aspect);
@@ -510,8 +535,7 @@ export class FightView {
        * sinks into it stays in sight as the game, drawing the floor first and everything over it,
        * keeps it.
        */
-      const reach = drawn.stage.grid === ARCADE_GRID ? drawn.stage.reach * 1000 + HELD.arcade.radius : 0;
-      layGround(state, this.data, this.arena, layout, { widening }, this.ground, reach);
+      layGround(state, this.data, this.arena, layout, { widening }, this.ground, drawn.stage.grid === ARCADE_GRID);
       const edge = drawn.stage.grid === ARCADE_GRID ? EDGED.get(state.stage) : undefined;
       drawn.ground.update(this.ground, edge === undefined ? null : { x: this.scenery.x, z: this.scenery.z, yaw: this.scenery.yaw, half: edge * 8 });
       if (drawn.ground.mesh !== null || drawn.ground.farMesh !== null) {

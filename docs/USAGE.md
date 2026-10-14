@@ -34,8 +34,8 @@ which is the system's own.
 ## The page's options
 
 Add them to the address, for example `http://localhost:5190/?quick&p1=9&p2=13&stage=3`. The
-textures, the models, the stages, the fighters, the picture and the touch pad are also set in
-the game ([REMAKE OPTION](#remake-option)); a page started with one of them in its address takes the
+textures, the models, the stages, the fighters, the cloth, the picture and the touch pad are also
+set in the game ([REMAKE OPTION](#remake-option)); a page started with one of them in its address takes the
 address's.
 
 | Option | Effect |
@@ -56,6 +56,7 @@ address's.
 | `textures=psx` | Draws the fighters' and stages' textures as the console did, each texel sharp, instead of enlarged and smoothed |
 | `stages=psx` | Draws the disc's stages where the arcade board's data has the arcade's (by default the arcade's, once `npm run arcade` has read it) |
 | `fighters=psx` | Draws the disc's fighters where the arcade board's data has the arcade's models (by default the arcade's, once `npm run arcade` has read it) |
+| `cloth=original` | Draws the arcade board's fighters' cloth as the board does, a leg passing through a coat's panel or a tail where it swings into it (by default each is kept clear of the legs) |
 | `models=psx`, `models=rounded` | Draws the fighters with the console's meshes, or the rounded ones (by default the rounded ones, but at `quality=verylow`) |
 | `quality=high` | The whole picture: ambient occlusion and bloom over the multisampled HDR scene; the default but on a phone |
 | `quality=low` | Leaves out the ambient occlusion and the bloom; a phone's default |
@@ -136,6 +137,7 @@ or the app) for every start after.
 | MODELS | AUTO (rounded, but on an entry-level phone), ROUNDED, ORIGINAL (the console's meshes) |
 | STAGES | ARCADE (the arcade board's, where `npm run arcade` has read them), CONSOLE |
 | FIGHTERS | ARCADE (the arcade board's models, where it has read them), CONSOLE |
+| CLOTH | CLEAR OF LEGS (a board's fighter's coat panels and the tails it hangs from the hips kept clear of the legs: a panel carried over a raised thigh, a tail put out where a leg swings into it), ORIGINAL (as the board draws them, as `cloth=original`) |
 | PICTURE | AUTO (by the device), HIGH, LOW, VERY LOW (as `quality=`) |
 | FRAME RATE | OFF, ON (as `F`) |
 | TOUCH PAD | AUTO (on a touch screen or a phone), ON, OFF |

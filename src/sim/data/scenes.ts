@@ -439,6 +439,7 @@ export type OptionValue =
   | 'models'
   | 'stages'
   | 'fighters'
+  | 'cloth'
   | 'picture'
   | 'frameRate'
   | 'touchPad';

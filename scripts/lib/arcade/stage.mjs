@@ -15,9 +15,16 @@ const MODEL_MAGIC = 0x41;
 const LAYERS = 3;
 const PLANE = { distance: 1.5, cosine: 0.999 };
 const OVERLAP = 0.5;
-/** A panorama's tiles, texels each way; the white rows under them that its filled cells are drawn from. */
+/**
+ * A panorama's tiles, texels each way; rows under them repeating their last, so the white below is
+ * not blended into them as the atlas is enlarged; the white rows under those, that its filled cells
+ * are drawn from.
+ */
 const TILE = 64;
+const EDGE = 4;
 const WHITE = 4;
+/** The panorama's top texel rows its sky's colour is the mean of. */
+const SKY_ROWS = 8;
 /** A background's mask cells: its panorama's tile, the colour below it, a filled tile's colour; any other value draws nothing. */
 const MASK = new Map([
   [0x31, 'p'],
@@ -319,12 +326,14 @@ function stageTims(archive) {
 /**
  * A stage's background from the game's code (`code`, the program's code unpacked): its panorama,
  * `columns` × `rows` tiles of 64 texels, each from the stage's textures where its tile word and its
- * palette word say (its page, the VRAM's half, its place in the page), with white rows under them;
+ * palette word say (its page, the VRAM's half, its place in the page), with its last row repeated
+ * under them and white rows under that;
  * its mask, per row a cell for each tile's width round a whole turn (`perTurn` of them): the
  * panorama's tile (`p`), the colour below (`b`), a filled tile's colour (`t`) or nothing (`.`); how
  * its top stands (`offset` lines, and `pitch` 256ths of a line for each 4096th the camera pitches);
- * its colours (a filled tile's, the one above the panorama, the one below it and its `b` cells), and
- * whether the colours above and below it are drawn.
+ * its colours (a filled tile's, the one above the panorama, the one below it and its `b` cells, and
+ * its sky's: the mean of its first row's top texels), and whether the colours above and below it
+ * are drawn.
  */
 export function exportArcadeBackground(code, stage, archive, encodePng) {
   const view = new DataView(code.buffer, code.byteOffset, code.byteLength);
@@ -346,7 +355,7 @@ export function exportArcadeBackground(code, stage, archive, encodePng) {
   const vram = absoluteVram(stageTims(archive), VRAM_ROWS);
   const pages = new Map();
   const width = columns * TILE;
-  const height = rows * TILE + WHITE;
+  const height = rows * TILE + EDGE + WHITE;
   const pixels = new Uint8Array(width * height * 4);
   for (let r = 0; r < rows; r += 1) {
     for (let c = 0; c < columns; c += 1) {
@@ -360,8 +369,15 @@ export function exportArcadeBackground(code, stage, archive, encodePng) {
       for (let y = 0; y < TILE; y += 1) pixels.set(texels.subarray(((v0 + y) * 256 + u0) * 4, ((v0 + y) * 256 + u0 + TILE) * 4), ((r * TILE + y) * width + c * TILE) * 4);
     }
   }
-  pixels.fill(255, rows * TILE * width * 4);
+  const last = pixels.subarray((rows * TILE - 1) * width * 4, rows * TILE * width * 4);
+  for (let y = 0; y < EDGE; y += 1) pixels.set(last, (rows * TILE + y) * width * 4);
+  pixels.fill(255, (rows * TILE + EDGE) * width * 4);
   const cells = Array.from({ length: rows }, (_, r) => Array.from(code.subarray(mask + r * perTurn, mask + (r + 1) * perTurn), (v) => MASK.get(v) ?? '.').join(''));
+  const sky = [0, 1, 2].map((c) => {
+    let sum = 0;
+    for (let y = 0; y < SKY_ROWS; y += 1) for (let x = 0; x < width; x += 1) sum += pixels[(y * width + x) * 4 + c];
+    return Math.round(sum / (SKY_ROWS * width));
+  });
   return {
     atlas: encodePng(width, height, pixels),
     columns,
@@ -371,7 +387,7 @@ export function exportArcadeBackground(code, stage, archive, encodePng) {
     mask: cells,
     offset,
     pitch,
-    colours: { cell: cell.rgb, above: above.rgb, below: below.rgb },
+    colours: { cell: cell.rgb, above: above.rgb, below: below.rgb, sky },
     drawn: { above: above.drawn, below: below.drawn },
   };
 }

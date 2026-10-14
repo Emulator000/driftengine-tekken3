@@ -7,6 +7,9 @@
 import type { LoadedMoveset, FightData, FightState, Fighter, MoveRef } from './state.ts';
 import { Mode } from './state.ts';
 import { restHands } from './hands.ts';
+import { FIRST_ACCESSORY } from './accessories.ts';
+import type { OwnAccessory } from '../data/models.ts';
+import { s16 } from '../math/integers.ts';
 import { keyOffVoices, reverbOff } from './voices.ts';
 
 /** One side of a match: who plays, in what costume, and whether the computer does. */
@@ -189,7 +192,15 @@ export function setUpModel(state: FightState, data: FightTables, f: Fighter): vo
   f.size = model.size;
   f.currentSize = model.size;
   const skeleton = data.skeleton;
-  for (let part = 0; part < 22; part += 1) {
+  /* A model with its own accessories takes the tables' parts up to the accessories. */
+  const own = model.accessories;
+  const tableParts = own === undefined ? 22 : FIRST_ACCESSORY;
+  for (let part = tableParts; part < f.parts.length; part += 1) {
+    f.parts[part]!.drawn = 0;
+    f.parts[part]!.hung = 0;
+  }
+  if (own !== undefined) hangOwn(f, own);
+  for (let part = 0; part < tableParts; part += 1) {
     const joint = skeleton.partJoints[part]!;
     const record = model.records[skeleton.partRecords[part]!]!;
     const accessory = part - 0x12;
@@ -223,6 +234,25 @@ export function setUpModel(state: FightState, data: FightTables, f: Fighter): vo
   f.hands.drawn.fill(0);
   f.trueOgre.wingDrawn = 0;
   restHands(state, data, f);
+}
+
+/**
+ * A model's own accessories, each on its own joint and part (18 on): hung on its parent joint at its
+ * offset, drawn where it is shown, at rest until it swings, its tip not yet followed.
+ */
+function hangOwn(f: Fighter, own: readonly (OwnAccessory | null)[]): void {
+  own.forEach((accessory, k) => {
+    if (accessory === null) return;
+    const joint = FIRST_ACCESSORY + k;
+    f.parts[joint]!.drawn = accessory.shown ? 1 : 0;
+    f.parts[joint]!.hung = 1;
+    f.skeleton.joints[joint]!.parent = accessory.parent;
+    const local = f.skeleton.locals[joint]!.translation;
+    for (let i = 0; i < 3; i += 1) local[i] = accessory.offset[i]!;
+    for (let i = 0; i < 3; i += 1) f.accessoryRest[k]![i] = s16(accessory.rest[i]!);
+    f.accessoryHung[k] = 0;
+    f.accessoryTips[k]!.fill(0);
+  });
 }
 
 /** A fighter's full health for the mode. */

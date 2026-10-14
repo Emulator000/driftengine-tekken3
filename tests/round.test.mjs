@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { readFighterMesh } from '../src/present/3d/fighter/fighter.ts';
-import { readFtr, weightBytes, writeFtr3 } from '../scripts/lib/ftr.mjs';
+import { readFtr, weightBytes, writeFtr3, writeFtr5 } from '../scripts/lib/ftr.mjs';
 
 /** A version 1 mesh: each vertex one point (`at` of one) or a seam of two, its normal a unit vector. */
 function ftr1(vertices, triangles) {
@@ -312,6 +312,12 @@ function rounded(bytes, skeleton = ROOT) {
 const ICOSAHEDRON_POINTS = [[-53, 85, 0], [53, 85, 0], [-53, -85, 0], [53, -85, 0], [0, -53, 85], [0, 53, 85], [0, -53, -85], [0, 53, -85], [85, 0, -53], [85, 0, 53], [-85, 0, -53], [-85, 0, 53]];
 const ICOSAHEDRON = [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8], [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]];
 const icosahedron = () => ftr1(ICOSAHEDRON_POINTS.map((p, i) => ({ at: [{ joint: 0, point: p }], normal: p.map((x) => x / Math.hypot(...p)), uv: [i, i] })), ICOSAHEDRON);
+
+test('a mesh\'s garment joint, in its header, is kept as it is rounded', () => {
+  const mesh = readFtr(icosahedron());
+  assert.equal(mesh.garment, 0, 'version 1 has none');
+  assert.equal(readFtr(roundFighter(writeFtr5({ ...mesh, garment: 24 }), ROOT)).garment, 24);
+});
 
 test('a smooth closed mesh comes out rounder, never past its corners, closed, with nine times its triangles', () => {
   const { mesh, at, triangles } = rounded(icosahedron());

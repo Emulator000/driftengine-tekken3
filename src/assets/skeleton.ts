@@ -1,5 +1,5 @@
 /** The skeleton's tables (`tables/skeleton.json`), validated. */
-import type { SkeletonTables, Spring, SpringAim } from '../sim/data/skeleton.ts';
+import type { SkeletonTables, Spring, SpringAim, SpringClear } from '../sim/data/skeleton.ts';
 import { AssetError, expectArray, expectBoolean, expectInt, expectInts, expectObject } from './validate.ts';
 
 /** The game's model packs, which the springs table has a row for. */
@@ -22,7 +22,7 @@ function parseAim(value: unknown, where: string): SpringAim {
 }
 
 /** A spring; its reach is a length, so its tip lies along its x. */
-function parseSpring(value: unknown, where: string): Spring {
+export function parseSpring(value: unknown, where: string): Spring {
   const o = expectObject(value, where);
   const short = (key: string, min = -0x8000): number => expectInt(o[key], `${where} ${key}`, min, 0x7fff);
   let limits: Spring['limits'] = null;
@@ -41,7 +41,17 @@ function parseSpring(value: unknown, where: string): Spring {
     yawHeld: expectBoolean(o.yawHeld, `${where} yawHeld`),
     pitchAtLeast: o.pitchAtLeast === null ? null : expectInt(o.pitchAtLeast, `${where} pitchAtLeast`, -0x80000000, 0x7fffffff),
     limits,
+    /* The console's springs follow their tip at once and lean with their slant. */
+    smoothing: o.smoothing === undefined ? 1 : expectInt(o.smoothing, `${where} smoothing`, 1, 0x7fff),
+    lean: o.lean === undefined ? true : expectBoolean(o.lean, `${where} lean`),
+    clear: o.clear === undefined || o.clear === null ? null : parseClear(o.clear, `${where} clear`),
   };
+}
+
+function parseClear(value: unknown, where: string): SpringClear {
+  const o = expectObject(value, where);
+  const along = shorts(o.along, `${where} along`, 2);
+  return { joint: expectInt(o.joint, `${where} joint`, 0, JOINTS - 1), along: [along[0]!, along[1]!], radius: expectInt(o.radius, `${where} radius`, 0, 0x7fff) };
 }
 
 export function parseSkeletonTables(json: unknown, where = 'tables/skeleton.json'): SkeletonTables {

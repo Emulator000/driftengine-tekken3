@@ -26,6 +26,7 @@
  *   tables/commands.json each model pack's command list, as text and tokens
  *   tables/scenes.json the values the scenes' state starts with
  *   tables/intro-models.json the attract intros' models, by the pack each stands for
+ *   tables/arcade-fighters.json the arcade board's fighters' own accessories and springs, by pack
  *   pictures/*.png     the original pictures shown as they are: the title's, the select's
  *   textures/{fighters,stages}/NN.png the texture atlases enlarged, for the smooth textures
  *                      (and textures/arcade/{stages,fighters}/NN.png, the arcade's)
@@ -119,5 +120,10 @@ const enlarged = await upscaleTextures(root, output);
 if (enlarged > 0) console.log(`enlarged ${enlarged} texture atlases`);
 console.log(`rounded ${roundModels(root, output)} fighter meshes`);
 const { arcadeStages = [], arcadePanoramas = [], arcadeObjects = [], arcadeFighters = [] } = JSON.parse(readFileSync(dataManifest, 'utf8'));
+/* The arcade board's fighters' own accessories, which the fight hangs and swings in place of the game's tables' where the board's fighters are drawn. */
+output.json(
+  'tables/arcade-fighters.json',
+  Object.fromEntries(arcadeFighters.map((pack) => [pack, JSON.parse(readFileSync(path.join(root, `public/data/arcade/fighters/${String(pack).padStart(2, '0')}.json`), 'utf8')).accessories])),
+);
 output.finish({ format: ASSET_FORMAT, movesets: files.filter((f) => !f.common && f.id !== INTRO_ID).map((f) => f.id), kazuya, arcadeStages, arcadePanoramas, arcadeObjects, arcadeFighters });
 console.log('imported to public/assets/');

@@ -2,7 +2,7 @@
 import { AssetError, expectArray, expectBoolean, expectInt, expectObject } from './validate.ts';
 
 /** The format the importer writes and the loaders read. Raised when an asset's shape changes. */
-export const ASSET_FORMAT = 47;
+export const ASSET_FORMAT = 51;
 
 /** How many times their size the original pictures are written (`pictures/*.png`), enlarged by edge-directed interpolation. */
 export const PICTURE_SCALE = 4;
@@ -59,7 +59,6 @@ export interface ArcadeObject extends PieceMotion {
   readonly fields: number;
 }
 
-/** A panorama: the colours of its top and bottom rows (8-bit sRGB), and how far down it its horizon lies (a share of its height). */
 /** An 8-bit sRGB colour. */
 export type Rgb = readonly [number, number, number];
 
@@ -69,8 +68,9 @@ export type Rgb = readonly [number, number, number];
  * each tile's width round a whole turn (`perTurn` of them), its tile (`p`), the colour below (`b`),
  * the filled tile's colour (`t`) or nothing (`.`); its top `offset`
  * lines down the picture's 480, moving `pitch` 256ths of a line for each 4096th the camera
- * pitches, kept between `least` and `most` where it has them; its colours, and whether the one
- * above the panorama and the one below it are drawn; stage 3's gradient in place of its tiles,
+ * pitches, kept between `least` and `most` where it has them; its colours (its sky's the mean of
+ * its first row's top texels), and whether the one above the panorama and the one below it are
+ * drawn; stage 3's gradient in place of its tiles,
  * stage 6's colour over the whole picture, and the row stage 5 draws upside down.
  */
 export interface ArcadePanorama {
@@ -84,7 +84,7 @@ export interface ArcadePanorama {
   readonly pitch: number;
   readonly most: number | null;
   readonly least: number | null;
-  readonly colours: { readonly cell: Rgb; readonly above: Rgb; readonly below: Rgb };
+  readonly colours: { readonly cell: Rgb; readonly above: Rgb; readonly below: Rgb; readonly sky: Rgb };
   readonly drawn: { readonly above: boolean; readonly below: boolean };
   readonly gradient: { readonly from: Rgb; readonly to: Rgb; readonly lines: number } | null;
   readonly whole: boolean;
@@ -133,7 +133,7 @@ export function parseManifest(json: unknown, where = 'manifest.json'): Manifest 
         pitch: expectInt(panorama.pitch, `${at}.pitch`, -0x8000, 0x7fff),
         most: panorama.most === undefined ? null : expectInt(panorama.most, `${at}.most`, -0x8000, 0x7fff),
         least: panorama.least === undefined ? null : expectInt(panorama.least, `${at}.least`, -0x8000, 0x7fff),
-        colours: { cell: rgb(colours.cell, 'colours.cell'), above: rgb(colours.above, 'colours.above'), below: rgb(colours.below, 'colours.below') },
+        colours: { cell: rgb(colours.cell, 'colours.cell'), above: rgb(colours.above, 'colours.above'), below: rgb(colours.below, 'colours.below'), sky: rgb(colours.sky, 'colours.sky') },
         drawn: { above: flag(drawn.above, 'drawn.above'), below: flag(drawn.below, 'drawn.below') },
         gradient: gradient === null ? null : { from: rgb(gradient.from, 'gradient.from'), to: rgb(gradient.to, 'gradient.to'), lines: expectInt(gradient.lines, `${at}.gradient.lines`, 1, 480) },
         whole: panorama.whole === undefined ? false : flag(panorama.whole, 'whole'),

@@ -437,7 +437,7 @@ function buildSkeleton(state: FightState, data: FightData, f: Fighter): void {
   const lean = trueOgre ? s16(angle4096(elbow[0]!, elbow[1]!, data.math) * -4) : 0;
   let beat: Beat | null = null;
   f.trailCount = 0;
-  for (let j = 0; j < 0x16; j += 1) {
+  for (let j = 0; j < f.parts.length; j += 1) {
     if (f.parts[j]!.hung === 0) continue;
     const joint = sk.joints[j]!;
     if (joint.parent === null) throw new Error(`joint ${j} hangs on no parent`);

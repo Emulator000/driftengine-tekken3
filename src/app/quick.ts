@@ -9,6 +9,8 @@ import { Fight } from '../sim/fight/fight.ts';
 import { fightDataFor, matchMovesets, type MatchSetup } from '../sim/fight/match.ts';
 import { FightView, type ArcadeStageFiles, type DrawingFiles } from '../present/3d/fight-view.ts';
 import { parseManifest, type ArcadeObject, type ArcadePanorama } from '../assets/manifest.ts';
+import { parseArcadeFighters, withOwnAccessories } from '../assets/models.ts';
+import type { FightTables } from '../sim/fight/match.ts';
 import { Hud } from '../present/hud/hud.ts';
 import { PauseScreen } from '../present/hud/pause.ts';
 import { loadTypefaces } from '../present/2d/typefaces.ts';
@@ -31,6 +33,8 @@ const smooth = asked(params, 'textures', settings.textures, [null, 'psx']) !== '
 const arcadeScenery = asked(params, 'stages', settings.stages, [null, 'psx']) !== 'psx';
 /** Whether a fighter the board's data has a model of is drawn with it, the default, or with the disc's (`?fighters=psx`). */
 const arcadeModels = asked(params, 'fighters', settings.fighters, [null, 'psx']) !== 'psx';
+/** Whether the cloth is kept clear of the legs, the default, or drawn as the original draws it (`?cloth=original`). */
+const cloth = asked(params, 'cloth', settings.cloth, [null, 'original']) !== 'original';
 interface ArcadeList {
   readonly stages: ReadonlySet<number>;
   readonly panoramas: readonly ArcadePanorama[];
@@ -52,6 +56,17 @@ const arcadeStagesOf = (): Promise<ArcadeList> =>
           };
         })
       : Promise.resolve({ stages: new Set(), panoramas: [], objects: [], fighters: new Set() }));
+/**
+ * The fight's tables with the arcade board's fighters' own accessories, for the packs drawn with
+ * the board's models: the fight hangs and swings each on its own joint and the board's spring.
+ */
+export async function withArcadeFighters<T extends { readonly tables: FightTables }>(loaded: T): Promise<T> {
+  const { fighters } = await arcadeStagesOf();
+  if (fighters.size === 0) return loaded;
+  const own = parseArcadeFighters(await json('tables/arcade-fighters.json'));
+  for (const pack of [...own.keys()]) if (!fighters.has(pack)) own.delete(pack);
+  return { ...loaded, tables: { ...loaded.tables, models: withOwnAccessories(loaded.tables.models, own) } };
+}
 /** A fighter's, an intro model's or a stage's texture atlas by its file's name: the enlarged one, or the original. */
 const atlas = (kind: string, name: string): Promise<ImageBitmap> => (smooth ? assetImage(`textures/${kind}/${name}.png`) : image(`${kind}/${name}.png`));
 /**
@@ -108,6 +123,7 @@ export const drawingFiles: DrawingFiles = {
   stage,
   picture: (name) => assetImage(`pictures/${name}.png`),
   smooth,
+  cloth,
 };
 
 /** An attract intro's drawing data: for each pack, the model its archive holds in the pair its table names; the stages as the fight's. */
@@ -119,12 +135,13 @@ export const introFiles = (intro: number, pairs: readonly number[]): DrawingFile
   },
   stage,
   smooth,
+  cloth,
 });
 
 export async function playQuickMatch(): Promise<void> {
   const { renderer, backend } = await pageRenderer();
   status.textContent = 'loading';
-  const [{ tables, arena, commands }] = await Promise.all([loadFightTables(json), loadTypefaces()]);
+  const [{ tables, arena, commands }] = await Promise.all([loadFightTables(json).then(withArcadeFighters), loadTypefaces()]);
   const manifest = (await json('manifest.json')) as { kazuya?: boolean };
   const pick = (key: string, fallback: number): number => {
     const v = Number(params.get(key) ?? NaN);

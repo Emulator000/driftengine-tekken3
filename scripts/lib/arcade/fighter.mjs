@@ -1,9 +1,10 @@
 /**
  * A fighter from the arcade board's data, in the form the player draws (`FTR` version 5,
  * `scripts/lib/ftr.mjs`): each vertex a joint-space point or a seam blended between two joints by
- * its own weights, with the board's textures; its accessories (hair, a tail, a sash) as the board
- * hangs them at rest, each on the game's accessory joint that hangs there (which the game swings)
- * or on the joint its parent hangs on.
+ * its own weights, with the board's textures; its accessories (hair, a tail, a sash) each on its
+ * own joint, which the fight swings on the board's spring; and its garment (a coat's panels: the
+ * hips' polygons drawn both faces and hung on the hips alone) on a joint of its own, `GARMENT`,
+ * which the player poses as the hips and keeps off the thighs.
  *
  * A board's model has the disc's header and part records, one record a joint (0 to 17 the body,
  * 18 to 23 accessories), its points in the joint's frame as the game's are but for the feet's, a
@@ -33,6 +34,9 @@ const RECORD = 0x38;
 /** The body's joints; the first of the accessories; the accessories' records. */
 const BODY = 18;
 const ACCESSORIES = 6;
+/** The hips' joint; the joint a garment hung on the hips is put on. */
+const HIPS = 11;
+export const GARMENT = 24;
 /** A whole weight; how far the board's two weights of a seam may sum from it (its rounding). */
 const WHOLE = 0x1000;
 const ROUNDING = 2 / WHOLE;
@@ -177,15 +181,40 @@ export function readArcadeFighter(bytes) {
 /**
  * A fighter's accessories as the board's tables give them (`code`, the program's code unpacked;
  * `tables`, where the tables lie): per record from 18, whether it is drawn, the turn its points are
- * given as the fighter loads (or null), and its spring's angles added to its rest.
+ * given as the fighter loads (or null), the angles its spring adds to its rest, and its spring as the
+ * fight swings it (null where it does not swing).
  */
 export function boardAccessories(code, base, tables, fighter) {
   const view = new DataView(code.buffer, code.byteOffset, code.byteLength);
   const at = (address) => address - base;
-  const angles = (address) => (0 <= at(address) && at(address) + 6 <= code.length ? [0, 1, 2].map((c) => view.getInt16(at(address) + c * 2, true)) : [0, 0, 0]);
+  const half = (address) => view.getInt16(at(address), true);
+  const angles = (address) => [0, 1, 2].map((c) => half(address + c * 2));
+  const row = (r) => Array.from({ length: 6 }, (_, c) => view.getInt8(at(tables.axes) + r * 6 + c));
+  const limits = tables.limits.get(fighter);
   return Array.from({ length: ACCESSORIES }, (_, k) => {
     const shown = code[at(tables.shown) + fighter * ACCESSORIES + BODY + k];
-    return { shown: shown !== 0, turn: shown > 1 ? angles(tables.turns + shown * 8) : null, spring: angles(view.getUint32(at(tables.springs) + (fighter * ACCESSORIES + k) * 4, true)) };
+    const block = view.getUint32(at(tables.springs) + (fighter * ACCESSORIES + k) * 4, true);
+    const s = (n) => half(block + n * 2);
+    const kind = s(9);
+    const spring =
+      block === tables.none
+        ? null
+        : {
+            reach: s(7),
+            keep: s(5),
+            pull: s(6),
+            slant: s(8),
+            axes: row(s(3)),
+            aim: kind === 1 ? { joint: s(10), point: [s(11), s(12), s(13)], weights: [row(s(14))[5], row(s(14))[4]], behind: null } : null,
+            knees: false,
+            yawHeld: false,
+            pitchAtLeast: null,
+            limits: limits === undefined ? null : [half(limits), half(limits + 2)],
+            smoothing: s(4),
+            lean: false,
+            clear: kind === 2 ? { joint: s(10), along: [s(12), s(13)], radius: s(14) } : null,
+          };
+    return { shown: shown !== 0, turn: shown > 1 ? angles(tables.turns + shown * 8) : null, rest: angles(block), spring };
   });
 }
 
@@ -200,13 +229,7 @@ function euler([rx, ry, rz]) {
   ];
 }
 const apply = (m, p) => m.map((r) => r[0] * p[0] + r[1] * p[1] + r[2] * p[2]);
-const transposed = (m) => m[0].map((_, i) => m.map((r) => r[i]));
-const times = (a, b) => a.map((r) => b[0].map((_, j) => r[0] * b[0][j] + r[1] * b[1][j] + r[2] * b[2][j]));
-/** A joint's place on its parent: its offset (z negated, as the game reads it) and its rest. */
-const placeOn = (offset, rest) => ({ r: euler(rest), t: [offset[0], offset[1], -offset[2]] });
-/** `outer` then `inner`: a joint's place on its parent's place. */
-const compose = (outer, inner) => ({ r: times(outer.r, inner.r), t: apply(outer.r, inner.t).map((v, i) => v + outer.t[i]) });
-const IDENTITY = { r: euler([0, 0, 0]), t: [0, 0, 0] };
+const s16 = (v) => (v << 16) >> 16;
 
 /** A block's points and normals turned, as the board turns an accessory's as the fighter loads. */
 function turned(block, turn) {
@@ -214,19 +237,14 @@ function turned(block, turn) {
   return { ...block, points: block.points.map((p) => apply(m, p).map(Math.round)) };
 }
 
-/** How near one of the game's accessory joints hangs to a board's accessory for the board's to ride on it (mm). */
-const NEAR = 60;
-const s16 = (v) => (v << 16) >> 16;
-
 /**
  * The board's accessories as it draws them: those its tables leave out gone, the rest turned as the
- * fighter loads, and each placed on a joint (`resolveArcadeFighter`'s `accessories`). Each hangs as
- * the board hangs it at rest, its offset and its rest (with its spring's angles) on its parent's,
- * and rides on one of the game's accessory joints where the disc's model (`disc`: its parsed model
- * and part table) hangs one at rest on the same body joint (and the same accessory, for one on an
- * accessory) within `NEAR` of it, which the game then swings; else on the joint its parent rides on.
+ * fighter loads, each on its own joint (18 on), the fight swinging it on its spring
+ * (`resolveArcadeFighter`'s `accessories`); and each as the fight hangs it (`OwnAccessory`): drawn,
+ * its parent joint, its offset (z negated, as the game reads it), its rest with its spring's angles,
+ * and its spring.
  */
-export function placeAccessories(model, board, disc) {
+export function placeAccessories(model, board) {
   const records = model.records.map((r, i) => {
     if (r === null || i < BODY) return r;
     const { shown, turn } = board[i - BODY];
@@ -234,52 +252,20 @@ export function placeAccessories(model, board, disc) {
     if (turn === null) return r;
     return { ...r, vertices: turned(r.vertices, turn), normals: turned(r.normals, turn), shapes: r.shapes && { ...r.shapes, steps: r.shapes.steps.map((b) => b && turned(b, turn)) } };
   });
-
-  /* The board's accessories at rest, each on its body joint. */
-  const hung = new Map();
-  for (let i = BODY; i < records.length; i += 1) {
-    const r = records[i];
-    if (r === null) continue;
-    const own = placeOn(r.offset, r.rest.map((v, k) => s16(v + board[i - BODY].spring[k])));
-    if (r.parent < BODY) hung.set(i, { body: r.parent, parent: null, place: own });
-    else if (hung.has(r.parent)) hung.set(i, { body: hung.get(r.parent).body, parent: r.parent, place: compose(hung.get(r.parent).place, own) });
-  }
-  /* The game's accessory joints at rest, each on its body joint. */
-  const joints = new Map();
-  for (const part of disc.parts.filter((p) => p.joint >= BODY && p.drawn).sort((a, b) => a.joint - b.joint)) {
-    const r = disc.model.records[part.record];
-    if (!r) continue;
-    const up = disc.parts.find((p) => p.index === r.parent)?.joint;
-    if (up === undefined) continue;
-    const own = placeOn(r.offset, r.rest.map(s16));
-    if (up < BODY) joints.set(part.joint, { body: up, parent: null, place: own });
-    else if (joints.has(up)) joints.set(part.joint, { body: joints.get(up).body, parent: up, place: compose(joints.get(up).place, own) });
-  }
-
-  const rides = new Map();
   const accessories = new Map();
-  for (const [i, a] of hung) {
-    const parentJoint = a.parent === null ? null : rides.get(a.parent);
-    let best = null;
-    for (const [j, d] of joints) {
-      if (d.body !== a.body || d.parent !== (parentJoint !== null && parentJoint >= BODY ? parentJoint : null)) continue;
-      if (a.parent !== null && (parentJoint === null || parentJoint < BODY)) continue;
-      const far = Math.hypot(...d.place.t.map((v, k) => v - a.place.t[k]));
-      if (far < NEAR && (best === null || far < best.far)) best = { j, far };
+  const hung = [];
+  for (let k = 0; k < ACCESSORIES; k += 1) {
+    const r = model.records[BODY + k];
+    if (r === null || r.parent < 0) {
+      hung.push(null);
+      continue;
     }
-    const joint = best?.j ?? parentJoint ?? a.body;
-    rides.set(i, joint);
-    const on = joint >= BODY ? joints.get(joint).place : IDENTITY;
-    const back = transposed(on.r);
-    accessories.set(i, {
-      joint,
-      point: (p) => apply(back, apply(a.place.r, p).map((v, k) => v + a.place.t[k] - on.t[k])).map(Math.round),
-      normal: (n) => apply(back, apply(a.place.r, n)).map(Math.round),
-    });
+    const { shown, rest, spring } = board[k];
+    if (shown) accessories.set(BODY + k, { joint: BODY + k, point: (p) => p, normal: (n) => n });
+    hung.push({ shown, parent: r.parent, offset: [r.offset[0], r.offset[1], -r.offset[2] | 0], rest: r.rest.map((v, c) => s16(v + rest[c])), spring });
   }
-  return { model: { records }, accessories };
+  return { model: { records }, accessories, hung };
 }
-
 const scaled = (terms, s) => terms.map((t) => ({ ...t, w: t.w * s }));
 
 /** The feet's joints, whose points the board keeps a quarter turn about the up axis from the game's: (x, y, z) is the game's (-z, y, x). */
@@ -444,12 +430,12 @@ function handShapes(model, handParts, accessories) {
 
 /**
  * The fighter's mesh and atlas from the board (`model` and `textures`, its archive's two members;
- * `board`, its accessories as the board's tables give them), its accessories on the game's joints
- * where the disc's model of the same pack (`disc`: its parsed model and part table) hangs them.
- * `handParts` gives the part each hand's joint is drawn as.
+ * `board`, its accessories as the board's tables give them), each accessory on its own joint; and
+ * its accessories as the fight hangs and swings them. `handParts` gives the part each hand's joint
+ * is drawn as.
  */
-export function exportArcadeFighter({ model: modelBytes, textures }, board, disc, handParts, encodePng) {
-  const { model, accessories } = placeAccessories(readArcadeFighter(modelBytes), board, disc);
+export function exportArcadeFighter({ model: modelBytes, textures }, board, handParts, encodePng) {
+  const { model, accessories, hung } = placeAccessories(readArcadeFighter(modelBytes), board);
   const body = resolveArcadeFighter(model, new Map(), accessories);
   if (body.problems.length) throw new Error(`the board's model does not resolve: ${body.problems[0]}`);
   const groups = handShapes(model, handParts, accessories);
@@ -468,13 +454,15 @@ export function exportArcadeFighter({ model: modelBytes, textures }, board, disc
   const shapesOf = [];
   const lookup = new Map();
   const indices = [];
+  /* A garment's corner: on the hips' record, drawn both faces, hung on the hips alone. */
+  const worn = (p, position) => (p.record === HIPS && p.doubleSided && position.every((t) => t.joint === HIPS) ? position.map((t) => ({ ...t, joint: GARMENT })) : position);
   const vertexOf = (i, k) => {
     const p = polygons[i];
     const corner = p.corners[k];
-    const influences = influencesOf(corner.position);
+    const influences = influencesOf(worn(p, corner.position));
     let shaped = null;
     groups.forEach((group, g) => {
-      const forms = group.shapes.map((shape) => influencesOf(shape[i].corners[k].position));
+      const forms = group.shapes.map((shape) => influencesOf(worn(p, shape[i].corners[k].position)));
       for (const form of forms) {
         if (form.length !== influences.length || form.some((f, n) => f.joint !== influences[n].joint)) throw new Error('a hand shape moves a corner onto other joints');
       }
@@ -513,10 +501,13 @@ export function exportArcadeFighter({ model: modelBytes, textures }, board, disc
       shapes: group.shapes.map((_, s) => members.map((v) => ({ points: shapesOf[v].points[s], normal: vertices[v].normal }))),
     };
   });
-  const mesh = writeFtr5({ width, height, vertices, indices, shapes, pictures: [] });
+  const garment = vertices.filter((v) => v.influences.some((f) => f.joint === GARMENT)).length;
+  const mesh = writeFtr5({ width, height, vertices, indices, shapes, pictures: [], garment: garment > 0 ? GARMENT : 0 });
   return {
     mesh,
     atlas: encodePng(width, height, atlas),
-    stats: { polygons: polygons.length, accessories: [...accessories].map(([record, a]) => [record, a.joint]), vertices: vertices.length, triangles: indices.length / 3, atlas: [width, height], shapes: shapes.map((s) => [s.part, s.shapes.length, s.vertices.length]) },
+    accessories: hung,
+    garment: garment > 0,
+    stats: { polygons: polygons.length, accessories: [...accessories.keys()], garment, vertices: vertices.length, triangles: indices.length / 3, atlas: [width, height], shapes: shapes.map((s) => [s.part, s.shapes.length, s.vertices.length]) },
   };
 }

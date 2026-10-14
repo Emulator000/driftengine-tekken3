@@ -28,7 +28,7 @@ const MAP = 10;
 /** Tekken Force's patch: its tiles, its map's rows, the depth it is laid at, and where its final stage's light stands in depth. */
 const FORCE = { tile: 2500, rows: 3, z: 0x145, lightZ: -2000 } as const;
 const TEKKEN_FORCE = 8;
-/** Rings of tiles past the patch: at most on a wide picture, and the most an arcade stage's floor takes to reach its scenery's far end. */
+/** Rings of tiles past the patch: at most on a wide picture, and an arcade stage's floor's, out toward the horizon. */
 const WIDE_RINGS = 10;
 /**
  * The darkest an arcade stage's floor is shaded, by distance or away from its lights: the disc's
@@ -72,7 +72,8 @@ export interface SceneryGrid {
  * A scenery held still on the floor: it stays where it stands while the place the game gives it
  * is within `radius` (mm) and its turn within `slack` (4096ths), and moves only by as far as that
  * place goes past them, so walls stand on the floor rather than sliding over it as the fighters
- * move; it goes straight to the game's place when that jumps (a new round, a replay's cut).
+ * move; it stands at the game's place before a round starts and as it starts, and goes straight
+ * to it when that jumps (a replay's cut).
  */
 export interface HeldScenery {
   readonly radius: number;
@@ -81,9 +82,11 @@ export interface HeldScenery {
   z: number;
   yaw: number;
   last: { x: number; z: number; yaw: number } | null;
+  /** The round's step the scenery was last laid at. */
+  flow: number;
 }
 
-export const newHeldScenery = (radius: number, slack: number): HeldScenery => ({ radius, slack, x: 0, z: 0, yaw: 0, last: null });
+export const newHeldScenery = (radius: number, slack: number): HeldScenery => ({ radius, slack, x: 0, z: 0, yaw: 0, last: null, flow: -1 });
 
 /** How far under the fight's floor an arcade stage's own floors lie (mm), so the fight's floor shows over them where both are. */
 const ARCADE_DEPTH = 20;
@@ -94,9 +97,10 @@ const JUMP_YAW = 0x200;
 
 const turnOf = (a: number): number => ((a + 0x800) & 0xfff) - 0x800;
 
-function hold(out: SceneryLayout, held: HeldScenery): void {
+/** The scenery held (`reset`: taken to the game's place, as before a round starts and as it starts). */
+function hold(out: SceneryLayout, held: HeldScenery, reset: boolean): void {
   const last = held.last;
-  const jumped = last === null || Math.hypot(out.x - last.x, out.z - last.z) > JUMP || Math.abs(turnOf(out.yaw - last.yaw)) > JUMP_YAW;
+  const jumped = reset || last === null || Math.hypot(out.x - last.x, out.z - last.z) > JUMP || Math.abs(turnOf(out.yaw - last.yaw)) > JUMP_YAW;
   held.last = { x: out.x, z: out.z, yaw: out.yaw };
   if (jumped) {
     held.x = out.x;
@@ -268,7 +272,11 @@ export function layScenery(state: FightState, data: FightData, arena: ArenaTable
   out.yaw = state.scenery.yaw;
   const eye = state.camera.drawn.eye;
   const [camX, camY, camZ] = [eye[0]!, eye[1]!, eye[2]!];
-  if (held !== undefined) hold(out, held);
+  /* Before a round starts (the fighters set at their places) and as it starts, the scenery stands where the game puts it. */
+  if (held !== undefined) {
+    hold(out, held, state.round.flow === 0 || held.flow === 0);
+    held.flow = state.round.flow;
+  }
   /* The camera from the scenery's middle: the fighters' midpoint, or where a held scenery stands. */
   const offX = held !== undefined ? camX - out.x : s16(camX - (s16(rootA[0]!) + s16((rootB[0]! - rootA[0]!) >> 1)));
   const offZ = held !== undefined ? camZ - out.z : s16(camZ - (s16(rootA[2]!) + s16((rootB[2]! - rootA[2]!) >> 1)));
@@ -397,8 +405,8 @@ function lightsOf(state: FightState, kind: number): readonly [readonly number[],
   return [a.skeleton.base.translation, b.skeleton.base.translation];
 }
 
-/** The ground's patch this frame: each quad's map cell, its corners (mm) and their shades (128 unchanged). */
-export function layGround(state: FightState, data: FightData, arena: ArenaTables, stage: StageLayout, view: View, out: ReturnType<typeof newGround>, reach = 0): void {
+/** The ground's patch this frame: each quad's map cell, its corners (mm) and their shades (128 unchanged); `arcade` for an arcade stage's floor. */
+export function layGround(state: FightState, data: FightData, arena: ArenaTables, stage: StageLayout, view: View, out: ReturnType<typeof newGround>, arcade = false): void {
   const trig = new Trig(data.math.sine);
   const patch = patchOf(state, arena);
   const { tile, columns, rows, template } = patch;
@@ -436,7 +444,7 @@ export function layGround(state: FightState, data: FightData, arena: ArenaTables
   const [lightA, lightB] = lightsOf(state, lighting.kind);
   /* A corner's shade: by its depth, or by the light where it lies. */
   const shadeOf = (x: number, z: number): number => (lit ? litShade(lighting.kind, lighting.brightest, lightA, lightB, x, z) : shadeAt(depthOf(state, ox, oz, x - ox, z - oz)));
-  const cornerShade = (x: number, z: number): number => (reach > 0 ? Math.max(shadeOf(x, z), ARCADE_LEAST_SHADE) : shadeOf(x, z));
+  const cornerShade = (x: number, z: number): number => (arcade ? Math.max(shadeOf(x, z), ARCADE_LEAST_SHADE) : shadeOf(x, z));
   const shades = template.vertices.map(([x, z]) => cornerShade(x + ox, z + oz));
   let mapRow = row;
   for (let r = 0; r < rows; r += 1) {
@@ -457,9 +465,12 @@ export function layGround(state: FightState, data: FightData, arena: ArenaTables
   }
   out.count = columns * rows;
   /* Tekken Force's patch already reaches past the widest view, at a fixed depth. */
-  /* An arcade stage's floor reaches `reach` (mm) out, as far as its scenery stands, much farther off than the disc's. */
-  const along = reach > 0 ? Math.min(MAX_RINGS, Math.max(WIDE_RINGS, Math.ceil((reach - (MAP * TILE) / 2) / TILE) + 1)) : 0;
-  const rings = force ? 0 : reach > 0 ? along : view.widening <= 1 ? 0 : Math.min(WIDE_RINGS, Math.ceil(5 * (view.widening - 1)) + 1);
+  /*
+   * An arcade stage's floor reaches as far as the rings go, past its scenery's far end: where the
+   * scenery opens, it runs on toward the horizon, over the colour its background lays below its
+   * panorama.
+   */
+  const rings = force ? 0 : arcade ? MAX_RINGS : view.widening <= 1 ? 0 : Math.min(WIDE_RINGS, Math.ceil(5 * (view.widening - 1)) + 1);
   const wrap = (v: number, n: number): number => ((v % n) + n) % n;
   let quad = out.count;
   /* The rings a wide picture takes first, shaded as the fight goes; then those past them, under an arcade stage's own floors, at its least shade. */
@@ -500,8 +511,8 @@ const STANDING = 0.02;
 const NOT_STANDING = 0.06;
 /** The joints the feet hang on. */
 export const FEET = new Set([14, 17]);
-/** The joints the accessories swing on, the four from the first. */
-export const ACCESSORIES = new Set([0, 1, 2, 3].map((k) => FIRST_ACCESSORY + k));
+/** The joints the accessories swing on, the six from the first. */
+export const ACCESSORIES = new Set([0, 1, 2, 3, 4, 5].map((k) => FIRST_ACCESSORY + k));
 
 /** How far a fighter whose body's and feet's lowest points stand `low` above the floor is lifted onto it (less than 0, lowered). */
 export function liftOnto(low: { body: number; feet: number }): number {

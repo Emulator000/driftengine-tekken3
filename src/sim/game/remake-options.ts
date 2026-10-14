@@ -2,8 +2,8 @@
  * The remake's own settings, a page of the Options as the game's own lists are (up and down to
  * pick, left and right to change, wrapping; the default in its own colour; select or EXIT back to
  * the first page, which lists it before its own EXIT): how the fighters and stages are drawn (and
- * whether from the arcade's data), the
- * picture's quality, the frame rate shown and the touch pad. Where they are kept, and what they do,
+ * whether from the arcade's data), whether the cloth is kept clear of the legs, the picture's
+ * quality, the frame rate shown and the touch pad. Where they are kept, and what they do,
  * is the page's: those that change what is loaded take effect on a restart, which the page makes
  * when the player leaves this page, and the page says so under its list while one differs from the
  * start's.
@@ -15,10 +15,10 @@ import type { GameState, RemakeSettings } from './state.ts';
 export const REMAKE_PAGE = 0x10;
 
 /** Each setting's values: 0 is the default. */
-export const REMAKE_DEFAULTS: Readonly<RemakeSettings> = { textures: 0, models: 0, stages: 0, fighters: 0, picture: 0, frameRate: 0, touchPad: 0 };
+export const REMAKE_DEFAULTS: Readonly<RemakeSettings> = { textures: 0, models: 0, stages: 0, fighters: 0, cloth: 0, picture: 0, frameRate: 0, touchPad: 0 };
 
 /** The settings a restart applies: all but the frame rate's. */
-export const RESTARTED: readonly (keyof RemakeSettings)[] = ['textures', 'models', 'stages', 'fighters', 'picture', 'touchPad'];
+export const RESTARTED: readonly (keyof RemakeSettings)[] = ['textures', 'models', 'stages', 'fighters', 'cloth', 'picture', 'touchPad'];
 
 const setting = (value: keyof RemakeSettings, label: string, names: readonly string[]): OptionsItem => ({ value, label, names, sideways: 1, count: names.length, button: 0, set: 0, draw: 2, modes: 0 });
 
@@ -32,7 +32,7 @@ export const REMAKE_OPTIONS: OptionsPage = {
   titleY: 40,
   listX: 20,
   listY: 100,
-  step: 32,
+  step: 28,
   width: 324,
   cancel: 0,
   items: [
@@ -40,6 +40,7 @@ export const REMAKE_OPTIONS: OptionsPage = {
     setting('models', 'MODELS', ['AUTO', 'ROUNDED', 'ORIGINAL']),
     setting('stages', 'STAGES', ['ARCADE', 'CONSOLE']),
     setting('fighters', 'FIGHTERS', ['ARCADE', 'CONSOLE']),
+    setting('cloth', 'CLOTH', ['CLEAR OF LEGS', 'ORIGINAL']),
     setting('picture', 'PICTURE', ['AUTO', 'HIGH', 'LOW', 'VERY LOW']),
     setting('frameRate', 'FRAME RATE', ['OFF', 'ON']),
     setting('touchPad', 'TOUCH PAD', ['AUTO', 'ON', 'OFF']),

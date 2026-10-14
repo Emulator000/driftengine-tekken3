@@ -154,7 +154,7 @@ function resetInputs(state: FightState, source: number): void {
 }
 
 /**
- * A round starts (in the attract's intro the replay does not record). A Tekken Force stage's: the
+ * A round starts (in the attract's intro the replay does not record), the scenery unturned. A Tekken Force stage's: the
  * timer set only on the first stage (later ones go on with what is left), all three fighters at
  * the middle facing on (on the final stage the player and Dr. B apart), the enemies out of play,
  * its three gauges cleared.
@@ -210,6 +210,8 @@ export function startRoundOfMatch(state: FightState, data: FightData): void {
   state.hitFlash.fill(0);
   clearInput(state, a);
   clearInput(state, b);
+  /* Every round starts with the scenery unturned. */
+  state.scenery.yaw = 0;
   if (force) {
     clearInput(state, c);
     const apart = FORCE_FINAL_STAGE <= state.match.stage ? FORCE_APART : 0;

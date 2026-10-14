@@ -106,3 +106,4 @@ test('a streak, stretched as the batch stretches a particle, runs from its start
   ends[0].forEach((v, k) => assert.ok(Math.abs(v - from[k]) < 1e-9, `it starts at ${ends[0]}`));
   ends[1].forEach((v, k) => assert.ok(Math.abs(v - to[k]) < 1e-9, `it ends at ${ends[1]}`));
 });
+

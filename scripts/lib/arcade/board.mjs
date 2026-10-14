@@ -53,9 +53,15 @@ export const PROGRAM_CODE = { at: 0x45df8, base: 0x8007e684 };
  * The fighters' accessories in the code (records 18 to 23 of a fighter's model): a byte each, six a
  * fighter from `shown` + 18 (0 not drawn, 1 drawn as stored, more the index of the turn its points
  * are given as the fighter loads, three 16-bit angles 8 bytes apart from `turns`), and a word each,
- * six a fighter from `springs`, its spring's halfwords (the first three added to its rest).
+ * six a fighter from `springs`, its spring's halfwords: the three angles added to its rest, the row
+ * of `axes` (six signed bytes a row) its angles are taken with, the frames its tip is followed over,
+ * how much of its last direction it keeps, gravity's pull, its reach, gravity's slant, its kind
+ * (1: held off a point on another joint, its joint, the point, and the row whose last two bytes
+ * weigh the point's aim; 2: its tip kept out of a round about a line along another joint's x, its
+ * joint, the line's place and the radius). `none` is the spring of one that does not swing; fighter
+ * 26's swings are held within `limits`' two halfwords (the most, the least).
  */
-export const ACCESSORY_TABLES = { shown: 0x801fd2e6, turns: 0x801fd3e4, springs: 0x801fdc88 };
+export const ACCESSORY_TABLES = { shown: 0x801fd2e6, turns: 0x801fd3e4, springs: 0x801fdc88, axes: 0x801fd170, none: 0x801fd4d4, limits: new Map([[26, 0x801fd2f0]]) };
 
 /**
  * Where the code keeps each stage's background, in its running addresses: per stage, 20 bytes of

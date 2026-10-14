@@ -426,7 +426,8 @@ export interface CreditsState {
 /**
  * The remake's own settings, each 0 by default: the textures (smooth, or the console's), the
  * fighters' models (by the picture's quality, rounded, or the console's), the stages and the
- * fighters (the arcade's where they were read, or the console's), the picture's quality (by the device, high, low or very
+ * fighters (the arcade's where they were read, or the console's), the cloth (kept clear of the
+ * legs, or as the original draws it), the picture's quality (by the device, high, low or very
  * low), the frame rate shown (off, on) and the touch pad (on a touch screen, on, off).
  */
 export interface RemakeSettings {
@@ -434,6 +435,7 @@ export interface RemakeSettings {
   models: number;
   stages: number;
   fighters: number;
+  cloth: number;
   picture: number;
   frameRate: number;
   touchPad: number;

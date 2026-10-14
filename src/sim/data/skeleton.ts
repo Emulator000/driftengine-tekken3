@@ -29,6 +29,22 @@ export interface Spring {
   readonly pitchAtLeast: number | null;
   /** The most and the least its yaw and its pitch take, or null. */
   readonly limits: readonly [number, number] | null;
+  /** The frames its tip is followed over: where it was taken as `smoothing - 1` parts the last and one part now (1, at once). */
+  readonly smoothing: number;
+  /** Gravity's pull slanted across by `slant` too (the console's); else straight down (the arcade's). */
+  readonly lean: boolean;
+  /** Its tip kept out of a round about another joint's line, or null. */
+  readonly clear: SpringClear | null;
+}
+
+/**
+ * A tip kept at least `radius` from a line on another joint (an arcade's braid off a shoulder): the
+ * line along the joint's x through (0, `along[0]`, `along[1]`) on it.
+ */
+export interface SpringClear {
+  readonly joint: number;
+  readonly along: readonly [number, number];
+  readonly radius: number;
 }
 
 /**

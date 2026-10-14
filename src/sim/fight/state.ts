@@ -345,14 +345,16 @@ export interface Fighter {
   readonly next: { id: number; move: MoveRef | null; startFrame: number; type: number; noBlend: number; turnAround: number };
   readonly blend: MoveBlend;
   readonly skeleton: Skeleton;
-  /** The 22 drawn parts: drawn or not, and hung on a joint or not. */
+  /** The 22 drawn parts, and two past them for a model's own accessories: drawn or not, and hung on a joint or not. */
   readonly parts: readonly { drawn: number; hung: number }[];
   /**
-   * The four accessories' rest angles, and whether each has hung at rest: from the frame after, it
-   * swings on its spring from where its joint was last placed (`skeleton.joints`).
+   * The six accessories' rest angles (the game's tables give four), and whether each has hung at
+   * rest: from the frame after, it swings on its spring from where its joint was last placed
+   * (`skeleton.joints`); and where each spring that follows its tip over frames took it last.
    */
   readonly accessoryRest: readonly number[][];
   readonly accessoryHung: number[];
+  readonly accessoryTips: readonly number[][];
   /** Named from the readers: set when the move's attack has landed. */
   hitLanded: number;
   /** Read by the head's turn (not remade): set while the head keeps the motion's angle. */

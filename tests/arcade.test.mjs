@@ -11,9 +11,10 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { archiveAt, BACKGROUND_TABLES, identifyChips, joinData, joinPair, PROGRAM_CODE, PROGRAM_STAGES, sha256, STAGE_ARCHIVES, STAGE_OBJECTS } from '../scripts/lib/arcade/board.mjs';
+import { ACCESSORY_TABLES, archiveAt, BACKGROUND_TABLES, identifyChips, joinData, joinPair, PROGRAM_CODE, PROGRAM_STAGES, sha256, STAGE_ARCHIVES, STAGE_OBJECTS } from '../scripts/lib/arcade/board.mjs';
 import { exportArcadeBackground, exportArcadeObject, exportArcadeStage, readArcadeModel } from '../scripts/lib/arcade/stage.mjs';
-import { arcadeFighters, placeAccessories, readArcadeFighter, resolveArcadeFighter } from '../scripts/lib/arcade/fighter.mjs';
+import { arcadeFighters, boardAccessories, exportArcadeFighter, GARMENT, placeAccessories, readArcadeFighter, resolveArcadeFighter } from '../scripts/lib/arcade/fighter.mjs';
+import { readFtr } from '../scripts/lib/ftr.mjs';
 import { decompress } from '../scripts/lib/lz.mjs';
 import { decodePng, encodePng } from '../scripts/lib/png.mjs';
 
@@ -159,15 +160,16 @@ test('a background takes its tiles, mask and colours from the game\'s tables', (
     mask: ['ppbt' + '.'.repeat(12)],
     offset: -16,
     pitch: 288,
-    colours: { cell: [1, 2, 3], above: [4, 5, 6], below: [7, 8, 9] },
+    colours: { cell: [1, 2, 3], above: [4, 5, 6], below: [7, 8, 9], sky: [128, 0, 128] },
     drawn: { above: true, below: false },
   });
   const png = decodePng(atlas);
-  assert.deepEqual([png.width, png.height], [128, 68]);
+  assert.deepEqual([png.width, png.height], [128, 72]);
   const texel = (x, y) => [...png.rgba.subarray((y * 128 + x) * 4, (y * 128 + x) * 4 + 4)];
   assert.deepEqual(texel(10, 10), [255, 0, 0, 255]);
   assert.deepEqual(texel(100, 63), [0, 0, 255, 255]);
-  assert.deepEqual(texel(64, 66), [255, 255, 255, 255]);
+  assert.deepEqual(texel(100, 67), [0, 0, 255, 255], 'its last row repeated under it, so the white is not blended into it');
+  assert.deepEqual(texel(64, 70), [255, 255, 255, 255]);
 });
 
 test('a board\'s fighter reads its blocks and blends a seam between two joints by its weights', () => {
@@ -231,32 +233,27 @@ test('a board\'s fighter reads its blocks and blends a seam between two joints b
   assert.equal(polygons[1].target.page.mode, 1, 'its page word an 8-bit one');
 });
 
-test('a board\'s accessory is turned as it loads, and rides on the game\'s accessory joint that hangs where it does, else on its body joint', () => {
+test('a board\'s accessory is turned as it loads and hangs on its own joint, at its rest with its spring\'s angles', () => {
   const block = (points) => ({ points, copied: [], left: [], added: [] });
   const records = Array(24).fill(null);
-  records[18] = { index: 18, vertices: block([[10, 0, 0]]), normals: block([[4096, 0, 0]]), shapes: null, offset: [20, 0, -121], parent: 11, rest: [0, 0, 0] };
-  const board = Array.from({ length: 6 }, (_, k) => ({ shown: k === 0, turn: k === 0 ? [0, -0x8000, 0] : null, spring: [0, 0, 0] }));
-  const disc = (hangs) => ({
-    model: { records: Object.assign(Array(22).fill(null), { 21: { offset: hangs, rest: [0, 0, 0], parent: 2 } }) },
-    parts: [
-      { index: 2, joint: 11, record: 3, drawn: true },
-      { index: 18, joint: 18, record: 21, drawn: true },
-    ],
-  });
-  /* Half a turn about the up axis as it loads; the game's joint hangs where it does, so it rides on it as it is. */
-  const on = placeAccessories({ records }, board, disc([20, 0, -121]));
-  assert.deepEqual(on.model.records[18].vertices.points, [[-10, 0, 0]]);
-  assert.equal(on.accessories.get(18).joint, 18);
-  assert.deepEqual(on.accessories.get(18).point([-10, 0, 0]), [-10, 0, 0]);
-  /* The game's joint a long way off: held on the body joint, at its offset (z negated, as the game reads it). */
-  const held = placeAccessories({ records }, board, disc([400, 0, 0]));
-  assert.equal(held.accessories.get(18).joint, 11);
-  assert.deepEqual(held.accessories.get(18).point([-10, 0, 0]), [10, 0, 121]);
-  assert.deepEqual(held.accessories.get(18).normal([-4096, 0, 0]), [-4096, 0, 0]);
-  /* One the board's tables leave out is gone. */
-  const none = placeAccessories({ records }, board.map((b) => ({ ...b, shown: false })), disc([20, 0, -121]));
-  assert.equal(none.model.records[18], null);
-  assert.equal(none.accessories.size, 0);
+  records[18] = { index: 18, vertices: block([[10, 0, 0]]), normals: block([[4096, 0, 0]]), shapes: null, offset: [20, 0, -121], parent: 11, rest: [0, 0x4000, 0] };
+  records[19] = { index: 19, vertices: block([[5, 0, 0]]), normals: block([[4096, 0, 0]]), shapes: null, offset: [100, 0, 0], parent: 18, rest: [0, 0, 0] };
+  const spring = { reach: 128, keep: 128, pull: 64, slant: 192, axes: [1, 1, 1, 1, 1, 1], aim: null, knees: false, yawHeld: false, pitchAtLeast: null, limits: null, smoothing: 2, lean: false, clear: null };
+  const board = Array.from({ length: 6 }, (_, k) => ({ shown: k < 2, turn: k === 0 ? [0, -0x8000, 0] : null, rest: k === 0 ? [0, 0x2000, 0] : [0, 0, 0], spring: k === 0 ? spring : null }));
+  const { model, accessories, hung } = placeAccessories({ records }, board);
+  /* Half a turn about the up axis as it loads, its points then on its own joint as they are. */
+  assert.deepEqual(model.records[18].vertices.points, [[-10, 0, 0]]);
+  assert.equal(accessories.get(18).joint, 18);
+  assert.deepEqual(accessories.get(18).point([-10, 0, 0]), [-10, 0, 0]);
+  assert.equal(accessories.get(19).joint, 19);
+  assert.deepEqual(hung[0], { shown: true, parent: 11, offset: [20, 0, 121], rest: [0, 0x6000, 0], spring });
+  assert.deepEqual(hung[1], { shown: true, parent: 18, offset: [100, 0, 0], rest: [0, 0, 0], spring: null });
+  assert.deepEqual(hung.slice(2), [null, null, null, null]);
+  /* One the board's tables leave out is not drawn, but still hangs for those on it. */
+  const hidden = placeAccessories({ records }, board.map((b, k) => ({ ...b, shown: k === 1 })));
+  assert.equal(hidden.model.records[18], null);
+  assert.equal(hidden.accessories.has(18), false);
+  assert.equal(hidden.hung[0].shown, false);
 });
 
 const arcade = path.join(root, '.cache/arcade');
@@ -277,7 +274,7 @@ test('every arcade stage, background and moving piece reads from the board\'s da
     if (s < BACKGROUND_TABLES.stages) {
       const { atlas, columns, rows, perTurn, mask } = exportArcadeBackground(code, s, archive, encodePng);
       const png = decodePng(atlas);
-      assert.deepEqual([png.width, png.height], [columns * 64, rows * 64 + 4], `stage ${s}'s panorama`);
+      assert.deepEqual([png.width, png.height], [columns * 64, rows * 64 + 8], `stage ${s}'s panorama`);
       assert.ok(mask.length === rows && mask.every((row) => row.length === perTurn), `stage ${s}'s mask`);
     }
     for (const object of STAGE_OBJECTS.get(s) ?? []) {
@@ -285,6 +282,23 @@ test('every arcade stage, background and moving piece reads from the board\'s da
       assert.ok(exportArcadeObject(program, object, encodePng).stats.polygons > 0, `stage ${s}'s ${object.name}`);
     }
   }
+});
+
+test('every fighter\'s accessories read from the board\'s tables: a spring\'s reach, its weights and its kinds', { skip }, () => {
+  const program = new Uint8Array(readFileSync(path.join(arcade, 'program.bin')));
+  const code = decompress(program, PROGRAM_CODE.at);
+  let springs = 0;
+  for (let fighter = 0; fighter < 32; fighter += 1) {
+    for (const { spring } of boardAccessories(code, PROGRAM_CODE.base, ACCESSORY_TABLES, fighter)) {
+      if (spring === null) continue;
+      springs += 1;
+      assert.ok(0 < spring.reach && spring.reach < 1024, `fighter ${fighter}'s reach ${spring.reach}`);
+      assert.ok(0 <= spring.keep + spring.pull && spring.keep + spring.pull <= 256, `fighter ${fighter}'s weights`);
+      assert.ok(1 <= spring.smoothing && spring.smoothing <= 4, `fighter ${fighter}'s smoothing ${spring.smoothing}`);
+      if (spring.clear !== null) assert.ok(spring.clear.radius > 0 && spring.clear.joint < 18, `fighter ${fighter}'s clear`);
+    }
+  }
+  assert.ok(springs > 40, `springs read: ${springs}`);
 });
 
 test('every fighter of the board\'s data reads and resolves, its seams\' weights summing to one', { skip }, () => {
@@ -295,4 +309,20 @@ test('every fighter of the board\'s data reads and resolves, its seams\' weights
     assert.deepEqual(problems, [], `fighter ${k}`);
     assert.ok(polygons.length > 400, `fighter ${k}'s polygons`);
   });
+});
+
+test('a board\'s fighter\'s coat hung on the hips alone is put on a joint of its own, a fighter with none has none', { skip }, () => {
+  const program = new Uint8Array(readFileSync(path.join(arcade, 'program.bin')));
+  const code = decompress(program, PROGRAM_CODE.at);
+  const fighters = arcadeFighters(new Uint8Array(readFileSync(path.join(arcade, 'data.bin'))));
+  const garmentOf = (pack) => {
+    const result = exportArcadeFighter(fighters[pack], boardAccessories(code, PROGRAM_CODE.base, ACCESSORY_TABLES, pack), new Map(), encodePng);
+    const mesh = readFtr(result.mesh);
+    return { flagged: result.garment, header: mesh.garment, on: mesh.vertices.filter((v) => v.influences.every((f) => f.joint === GARMENT)).length };
+  };
+  const coat = garmentOf(15);
+  assert.equal(coat.flagged, true);
+  assert.equal(coat.header, GARMENT);
+  assert.ok(coat.on > 20, `the coat's vertices on its joint: ${coat.on}`);
+  assert.deepEqual(garmentOf(0), { flagged: false, header: 0, on: 0 });
 });

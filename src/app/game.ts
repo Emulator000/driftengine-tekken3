@@ -29,8 +29,9 @@ import { ScenePresenter } from '../present/scenes/scenes.ts';
 import { SCREEN } from '../present/scenes/screen.ts';
 import { assetImage, canvas, controllers, dataUrl, json, pageRenderer, params, play, status, two } from './page.ts';
 import { controlWords } from '../present/2d/controls.ts';
-import { drawingFiles, introFiles } from './quick.ts';
+import { drawingFiles, introFiles, withArcadeFighters } from './quick.ts';
 import { readProgress, writeProgress } from './save.ts';
+import { holdSongs } from './hold-song.ts';
 import { settings, writeSettings } from './settings.ts';
 import { frameRateShown, showFrameRate } from './fps-meter.ts';
 import { startSound } from './sound.ts';
@@ -57,7 +58,7 @@ export async function playGame(): Promise<void> {
   const picture = (name: string): Promise<ImageBitmap> => assetImage(`pictures/${name}.png`);
   const names = ['title', 'namco', 'portraits', 'select-icons-big', 'select-icons-small', 'captions', 'credits-mark', 'results', 'force-results', 'options', 'options-pads', 'options-labels', 'options-arrows', 'options-buttons', 'theater-thumbs', 'theater-cover', 'theater-caption', 'theater-disc'] as const;
   const [[{ tables, arena, commands, scenes }, common, , introSet, introModels], pictures, sound] = await Promise.all([
-    Promise.all([loadFightTables(json), loadMoveset(json, 'common'), loadTypefaces(), loadMoveset(json, 'intro'), loadIntroModels(json)]),
+    Promise.all([loadFightTables(json).then(withArcadeFighters), loadMoveset(json, 'common'), loadTypefaces(), loadMoveset(json, 'intro'), loadIntroModels(json)]),
     Promise.all(names.map(picture)),
     startSound(),
   ]);
@@ -326,6 +327,17 @@ export async function playGame(): Promise<void> {
   let named = '';
   let shown: string | null = null;
   /*
+   * The stage's song waits for the fight to show: a fight's first round starts it while the
+   * versus screen it loaded under still shows, or dissolves into the fight's first frame, and it
+   * plays once that is over, as the original starts it with the fight on screen.
+   */
+  const heldSongs: (typeof game.state.world.sound.commands)[number][] = [];
+  const holdSong = (): void => {
+    const state = game.state;
+    const fight = state.scene === Scene.FIGHT;
+    holdSongs(state.world.sound.commands, heldSongs, { waiting: fight && (shown === null || shown.startsWith('scene') || (shown === 'fight' && presenter.moving)), fight });
+  };
+  /*
    * The display's place (DISPLAY ADJUST): the whole picture moved as the console moves its
    * display, from where the place it powers on with leaves it (the canvas's 4:3 middle is 368
    * units across and 480 lines down).
@@ -352,6 +364,7 @@ export async function playGame(): Promise<void> {
         if (saves && game.state.saving !== 0 && game.state.kept !== null) writeProgress(game.state.kept);
         settle();
         rumble.field(game.state.rumble.out, performance.now());
+        holdSong();
         sound?.field(game.state.world, game.state.vblanks);
         movie.audible = sound?.running ?? false;
         movie.field(game.state);

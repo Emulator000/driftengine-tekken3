@@ -217,7 +217,7 @@ test('REMAKE OPTION changes the remake\'s settings, says a restart applies one, 
   for (let i = 0; i < 5; i += 1) press(DOWN);
   press(CROSS);
   assert.equal(state.optionsScreen.page, REMAKE_PAGE);
-  for (const label of ['REMAKE OPTION', 'TEXTURES', 'MODELS', 'STAGES', 'FIGHTERS', 'PICTURE', 'FRAME RATE', 'TOUCH PAD', 'EXIT']) assert.ok(texts(state).includes(label), label);
+  for (const label of ['REMAKE OPTION', 'TEXTURES', 'MODELS', 'STAGES', 'FIGHTERS', 'CLOTH', 'PICTURE', 'FRAME RATE', 'TOUCH PAD', 'EXIT']) assert.ok(texts(state).includes(label), label);
   assert.equal(printed(state, 'SMOOTH').colour, 1, 'the default value');
   assert.ok(!texts(state).includes(RESTART_LINE));
   press(RIGHT);
@@ -226,7 +226,12 @@ test('REMAKE OPTION changes the remake\'s settings, says a restart applies one, 
   assert.ok(texts(state).includes(RESTART_LINE), 'a change a restart applies');
   press(LEFT);
   assert.ok(!texts(state).includes(RESTART_LINE), 'back as it started');
-  for (let i = 0; i < 5; i += 1) press(DOWN);
+  for (let i = 0; i < 4; i += 1) press(DOWN);
+  press(RIGHT);
+  assert.equal(state.remake.settings.cloth, 1);
+  assert.ok(texts(state).includes(RESTART_LINE), 'the cloth is kept clear as a fight loads');
+  press(LEFT);
+  for (let i = 0; i < 2; i += 1) press(DOWN);
   press(RIGHT);
   assert.equal(state.remake.settings.frameRate, 1);
   assert.ok(!texts(state).includes(RESTART_LINE), 'the frame rate is shown at once');

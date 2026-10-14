@@ -91,7 +91,7 @@ export function effectBuffers(): EffectBuffers {
   const lights = 8;
   return {
     streaks: particleSet(4096),
-    glows: particleSet(1024),
+    glows: particleSet(2048),
     shapes: particleSet(1024),
     puffs: particleSet(256),
     bolts: boltSegments(512),
@@ -300,13 +300,21 @@ function chain(out: EffectBuffers, nodes: readonly Vec3[], width: number, colour
 
 /**
  * The Mishimas' lightning in the colours the console shows it in (its bolts measured on screen: a
- * deep blue, 20 80 225, round a pale periwinkle, 150 170 250; never white or cyan), linear.
+ * deep blue, 20 80 225, round a pale periwinkle, 150 170 250; never white or cyan), drawn a little
+ * deeper (12 60 225 round 110 137 250) as the bloom pales them, linear.
  */
-const ELECTRIC: Vec3 = [0.007, 0.08, 0.753];
-const ELECTRIC_CORE: Vec3 = [0.305, 0.402, 0.956];
-/** The lightning's bolts: the filament's colour and the glow's (blue past white, for the bloom, the other channels kept under it so the middle stays blue), the arcs' half-width in metres (the sheet's strokes, two or three texels with their fringe, over a 0.75 m sprite), the filament's gain, and the least half-width a metre away. */
-export const LIGHTNING = { core: scaled(ELECTRIC_CORE, 0.75), edge: scaled(ELECTRIC, 1.8), width: 0.046, coreGain: 2.5, leastWidth: 0.0015 } as const;
+const ELECTRIC: Vec3 = [0.004, 0.045, 0.753];
+const ELECTRIC_CORE: Vec3 = [0.16, 0.25, 0.956];
+/** The lightning's bolts: the filament's colour and its edge's (blue past white, for the bloom, the other channels kept under it so the middle stays blue), the filament's half-width in metres (its glow is `HALO`'s), its gain, and the least half-width a metre away. */
+export const LIGHTNING = { core: scaled(ELECTRIC_CORE, 0.75), edge: scaled(ELECTRIC, 1.8), width: 0.032, coreGain: 3.2, leastWidth: 0.0015 } as const;
 
+/**
+ * The lightning's glow, round its filament: soft points of light along each bolt, their size (as a
+ * share of the sprite's), how close together (as a share of their size) and how bright. The
+ * engine's bolts end square, so a wide glow of their own shows each segment's ends and a notch at
+ * every bend; a narrow filament hides them, and the points' glow rounds the ends and the bends.
+ */
+const HALO = { size: 0.065, spacing: 0.4, gain: 0.3 } as const;
 /** The sheet's brightest texels' brightness, which a bolt's full brightness stands for. */
 const SHEET_BRIGHTEST = 0.67;
 /** How far (texels) a bolt's straightened path may stray from the traced texels: under a texel's diagonal half. */
@@ -415,8 +423,8 @@ const pathsOfFrame = new WeakMap<readonly LightningStroke[], BoltPath[]>();
  * the sheet, laid over the sprite's square facing the view (mirrored as the game mirrors it) and as
  * large as the game makes it against the world, so a bolt runs the whole height of the square when
  * the sheet's does. Each traced stroke is an arc of the engine's bolts (a saturated glow round a
- * white-hot filament), as bright as the sheet is along it, all of them darkening over the sheet's
- * last frames as its shade does.
+ * white-hot filament) in a glow of soft points along it (`HALO`), as bright as the sheet is along
+ * it, all of them darkening over the sheet's last frames as its shade does.
  */
 function lightning(out: EffectBuffers, p: EffectPiece, view: ViewBasis): void {
   const sheet = p.sheet;
@@ -443,6 +451,20 @@ function lightning(out: EffectBuffers, p: EffectPiece, view: ViewBasis): void {
       bolts.seed[i] = seed;
       bolts.brightness[i] = 0.25 + Math.min(1, (stroke.brightness[n - 1]! + stroke.brightness[n]!) / 2 / SHEET_BRIGHTEST);
       bolts.count += 1;
+    }
+    /* The glow: a soft point every so far along the bolt, as bright as the sheet is there. */
+    const size = HALO.size * sheet.size;
+    const step = (HALO.spacing * size * 32) / Math.max(1e-6, sheet.size);
+    const dots = Math.max(1, Math.round(length / step));
+    for (let j = 0, n = 1; j <= dots; j += 1) {
+      const at = (length * j) / dots;
+      while (n < points - 1 && reach[n]! < at) n += 1;
+      const span = Math.max(1e-6, reach[n]! - reach[n - 1]!);
+      const t = Math.min(1, Math.max(0, (at - reach[n - 1]!) / span));
+      const x = stroke.points[n * 2 - 2]! + (stroke.points[n * 2]! - stroke.points[n * 2 - 2]!) * t;
+      const y = stroke.points[n * 2 - 1]! + (stroke.points[n * 2 + 1]! - stroke.points[n * 2 - 1]!) * t;
+      const bright = Math.min(1, (stroke.brightness[n - 1]! + (stroke.brightness[n]! - stroke.brightness[n - 1]!) * t) / SHEET_BRIGHTEST);
+      put(out.glows, place(x, y), [0, 0, 0], size, scaled(ELECTRIC, HALO.gain * (0.3 + bright) * sheet.shade), 1, 0, seed * 1000 + j);
     }
   });
 }

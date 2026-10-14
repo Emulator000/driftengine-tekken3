@@ -3,8 +3,9 @@
  * `src/present/3d/fighter/fighter.ts` reads every version.
  *
  * A header of 24 bytes: u32 magic, u32 version, u32 vertex count, u32 index count, u16 atlas width
- * and height in texels, u32 reserved. Then the vertices, the u16 indices (three a triangle), and
- * what the version adds.
+ * and height in texels, u32 reserved (from version 5, the joint a garment hangs on, posed as the
+ * hips and kept off the thighs; 0 where there is none). Then the vertices, the u16 indices (three a
+ * triangle), and what the version adds.
  *
  * - Version 1: 28 bytes a vertex: u8 joint A, u8 joint B, u8 weight of B in 256ths, u8 normal's
  *   joint, i16 point in A's space ×3, i16 point in B's ×3, i16 normal ×3 (1/4096), u16 u and v in
@@ -38,6 +39,7 @@ export function readFtr(bytes) {
   const indexCount = view.getUint32(12, true);
   const width = view.getUint16(16, true);
   const height = view.getUint16(18, true);
+  const garment = version === 5 ? view.getUint32(20, true) : 0;
   const vertices = [];
   let at = 24;
   const triple = (offset) => [0, 1, 2].map((c) => view.getInt16(offset + c * 2, true));
@@ -103,7 +105,7 @@ export function readFtr(bytes) {
       at += n * 4;
     }
   }
-  return { version, width, height, vertices, indices, shapes, pictures };
+  return { version, width, height, garment, vertices, indices, shapes, pictures };
 }
 
 /** Weights as 255ths that sum to 255: each rounded down, the largest remainders rounded up. */
@@ -168,7 +170,7 @@ function writer(size) {
   };
 }
 
-function writeMesh(version, { width, height, vertices, indices }, out, weightsOf) {
+function writeMesh(version, { width, height, vertices, indices, garment = 0 }, out, weightsOf) {
   if (vertices.length > 0xffff) throw new Error(`${vertices.length} vertices do not fit u16 indices`);
   out.u32(FTR_MAGIC);
   out.u32(version);
@@ -176,7 +178,7 @@ function writeMesh(version, { width, height, vertices, indices }, out, weightsOf
   out.u32(indices.length);
   out.u16(width);
   out.u16(height);
-  out.u32(0);
+  out.u32(version === 5 ? garment : 0);
   for (const v of vertices) {
     if (v.influences.length < 1 || v.influences.length > 4) throw new Error(`a vertex with ${v.influences.length} influences`);
     out.u8(v.influences.length);
@@ -206,8 +208,9 @@ export function writeFtr3(mesh) {
 
 /**
  * A mesh as FTR version 5, with its shapes (`[{ part, steps, vertices, shapes }]`, each shape a
- * `{ points, normal }` per vertex) and pictures (triangle numbers per picture). A shape's vertex
- * must have as many points as influences, and a picture's triangles vertices of their own.
+ * `{ points, normal }` per vertex), pictures (triangle numbers per picture) and the joint its
+ * garment hangs on (`garment`, 0 for none). A shape's vertex must have as many points as
+ * influences, and a picture's triangles vertices of their own.
  */
 export function writeFtr5(mesh) {
   const { vertices, indices, shapes = [], pictures = [] } = mesh;

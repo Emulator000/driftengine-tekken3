@@ -245,7 +245,7 @@ export function blankFighter(): Fighter {
     },
     size: 0,
     currentSize: 0,
-    parts: Array.from({ length: 22 }, () => ({
+    parts: Array.from({ length: 24 }, () => ({
       drawn: 0,
       hung: 0,
     })),
@@ -269,7 +269,7 @@ export function blankFighter(): Fighter {
         rotation: new Array<number>(9).fill(0),
         translation: new Array<number>(3).fill(0),
       },
-      locals: Array.from({ length: 22 }, () => ({
+      locals: Array.from({ length: 24 }, () => ({
         rotation: new Array<number>(9).fill(0),
         translation: new Array<number>(3).fill(0),
       })),
@@ -301,9 +301,10 @@ export function blankFighter(): Fighter {
     blinkWait: 0,
     eyesShut: 0,
     hurtFace: 0,
-    accessoryRest: Array.from({ length: 4 }, () => (new Array<number>(3).fill(0))),
+    accessoryRest: Array.from({ length: 6 }, () => (new Array<number>(3).fill(0))),
     trailCount: 0,
-    accessoryHung: new Array<number>(4).fill(0),
+    accessoryHung: new Array<number>(6).fill(0),
+    accessoryTips: Array.from({ length: 6 }, () => (new Array<number>(3).fill(0))),
     unlit: 0,
     sound: 0,
     landedLightly: 0,

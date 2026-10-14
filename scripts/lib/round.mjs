@@ -277,6 +277,7 @@ export function roundMesh(mesh, skeleton, steps = STEPS) {
   return {
     width: mesh.width,
     height: mesh.height,
+    garment: mesh.garment ?? 0,
     vertices: kept,
     indices: indices.map((i) => keep[i]),
     shapes: groups.map((group, g) => {
