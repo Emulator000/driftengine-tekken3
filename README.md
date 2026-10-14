@@ -3,7 +3,8 @@
 Tekken 3, rebuilt as a modern browser game on [DriftEngine](https://driftengine.dev) from the data
 of your own disc: the fighters, their moves, the stages, the music, the voices and the movies are
 read from the image you make of your Tekken 3 disc, on your machine, and played in the browser at
-the display's resolution.
+the display's resolution. Optionally, a dump of your own Tekken 3 arcade board adds the arcade
+release's stages.
 
 ## Project Status and Disclaimer
 
@@ -21,6 +22,13 @@ executables, game assets, music, movies or other copyrighted game content.
 
 A disc of the game is required. Game content is read locally from an image of your own disc.
 
+Optional Tekken 3 Arcade support operates on data supplied locally by the user from original
+arcade hardware. No Tekken 3 Arcade ROMs, board dumps, extracted files or converted assets are
+included or distributed by this repository. Users are responsible for ensuring that their
+possession, dumping and use of arcade software is permitted under the laws applicable to them.
+
+Nothing in this repository is legal advice.
+
 Nothing in this repository grants any rights to Tekken, Tekken 3, Tekken 4, Bandai Namco
 Entertainment, Sony Interactive Entertainment, or any third-party intellectual property.
 
@@ -29,6 +37,8 @@ Entertainment, Sony Interactive Entertainment, or any third-party intellectual p
 This repository intentionally does not contain or provide:
 
 - disc images, or links to them
+- Tekken 3 Arcade ROM images or Namco System 12 board dumps, or links to them or to arcade ROM sets
+- files extracted from arcade ROMs, or arcade assets converted from them
 - the game's executable or any of its files
 - characters, models, textures or animations
 - stages
@@ -36,7 +46,7 @@ This repository intentionally does not contain or provide:
 - movies
 - converted, extracted or decoded game content
 - builds of the game, apps for a computer or a phone: each is built on your machine, from your own disc
-- copy protection or region lock bypasses
+- copy protection, region lock or arcade security hardware bypasses
 - downloads of original game content
 
 ## Requirements
@@ -165,11 +175,12 @@ The game starts as the console does: the logo, the opening movie, the title (Ent
 
 | | Move | Left punch | Right punch | Left kick | Right kick | L2, L1 | R1, R2 | Start | Select |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Player 1 | W A S D | U | I | J | K | Q, E | R, F | Enter | Backspace |
+| Player 1 | W A S D | U | I | J | K | Q, E | R, T | Enter | Backspace |
 | Player 2 | arrows | numpad 4 | numpad 5 | numpad 1 | numpad 2 | numpad 7, 9 | numpad 6, 3 | numpad Enter | numpad . |
 
 A gamepad drives the player of its index, and on a touch screen the pad over the picture drives
-the first. Alt+Enter takes the game to full screen and back. `?quick` in the address skips the menus for a match at
+the first. Alt+Enter takes the game to full screen and back; `F` shows and hides the frame rate;
+`P` holds a fight and flies a free camera through it ([docs/USAGE.md](docs/USAGE.md#the-free-camera)). `?quick` in the address skips the menus for a match at
 once; [docs/USAGE.md](docs/USAGE.md) lists every option (fighters, stage, the computer's sides,
 the endings, the original textures, the viewer) and every command.
 
@@ -185,6 +196,47 @@ npm run extract
 ```
 
 He brings his Tekken 4 model, moves and voice, and meets Jin first in Arcade.
+
+### Tekken 3 Arcade assets (optional)
+
+The arcade release of Tekken 3 ran on Namco System 12 hardware, and its stages are full 3D
+scenes: the buildings, temples and towers that the PlayStation draws as flat pictures are
+modelled, with their own skies and their moving pieces (the funfair's carousel, the helicopter
+over the helipad, the temples' torches). When you own an original Tekken 3 arcade board and have
+made a dump of it yourself, the game draws the arcade's stages in place of the disc's.
+
+- The arcade version is not needed: the PlayStation disc remains the game's source, and everything
+  else (the fighters, their moves, the sound, the menus) still comes from it.
+- This repository contains no arcade ROMs, board dumps, or anything extracted or converted from
+  them, and does not say where to obtain any.
+- Everything happens on your machine: the importer reads your dump and converts the stages
+  locally, into ignored folders (`.cache/arcade/`, `public/data/arcade/`,
+  `public/assets/textures/arcade/`).
+- Never commit, upload or share the converted content, or an app built with it: like an app built
+  from your disc, it is for your own devices.
+
+Use this feature only with data dumped from original Tekken 3 arcade hardware that you lawfully
+own and are permitted to use under the laws applicable to you.
+
+1. Own an original Tekken 3 board (Namco System 12).
+2. Dump its program and data chips yourself, with appropriate hardware and procedures, into one
+   folder on your machine.
+3. Read the dump and convert its stages:
+
+   ```sh
+   npm run arcade -- "path/to/your-own-tekken3-arcade-dump"
+   npm run extract
+   ```
+
+   The importer recognises each chip by its SHA-256 checksum, whatever its file is called, and
+   stops if one is missing or is not from the revision it supports. The checksums are in
+   `scripts/lib/arcade/board.mjs`, for identification and validation only.
+4. It joins the chips' data into `.cache/arcade/`; `npm run extract` converts the stages the arcade
+   has into `public/data/arcade/`.
+5. Start or build the game as usual. `?stages=psx` in the address draws the disc's stages instead.
+
+The importer parses the dump's data as it is stored: it does not run the board's program, and it
+reads, bypasses and emulates no security hardware.
 
 ## Where It Stands
 
@@ -240,13 +292,15 @@ field. What is done and what is not yet:
 | An iPhone app built from your disc | Partly | `npm run ios`, on a Mac with Xcode; not yet built or played |
 | Windows, macOS, Linux | Done | Developed and tested on Linux |
 | Kazuya from Tekken 4 | Done | Optional, from your own Tekken 4 disc |
+| The arcade release's stages | Done | Optional, from a dump of your own arcade board: the 14 stages it has, their skies, the carousel, the helicopter and the torches; `?stages=psx` draws the disc's |
+| A free camera and a frame-rate meter | Done | `P` holds a fight and flies a camera through it; `F` shows the frame rate |
 | Discs of other regions (PAL, Japanese) | Not yet | The USA disc (SLUS-00402) alone is read |
 
 ## Repository Layout
 
 | Path | What |
 | --- | --- |
-| `scripts/` | Reading the disc image and importing its data, the only code that knows the disc's formats; and building the apps (`app.mjs`) |
+| `scripts/` | Reading the disc image (and, optionally, an arcade board's dump) and importing their data, the only code that knows their formats; and building the apps (`app.mjs`) |
 | `src/sim/` | The game: a typed, deterministic simulation, with no engine, browser or I/O in it |
 | `src/assets/` | The imported assets' types and validating loaders |
 | `src/present/` | The presentation on DriftEngine: the 3D, the 2D, the effects, the sound |
@@ -264,8 +318,9 @@ material and that it does not contain proprietary game code, game assets, confid
 information, unlawfully obtained material, or other third-party content that cannot legally be
 redistributed.
 
-Contributors must not submit disc images, executables, files from the discs, anything converted
-from them, screenshots or recordings of game content, or decompiled code.
+Contributors must not submit disc images, arcade ROMs or board dumps, executables, files from the
+discs or the board, anything converted from them, screenshots or recordings of game content, or
+decompiled code.
 
 Acceptance of a contribution does not change ownership of third-party intellectual property.
 
@@ -299,4 +354,4 @@ This project is unofficial and independently developed. It is not affiliated wit
 sponsored by, authorized by, or approved by Bandai Namco Entertainment or Sony Interactive
 Entertainment.
 
-No Tekken 3 or Tekken 4 game files are distributed with this repository.
+No Tekken 3 (PlayStation or arcade) or Tekken 4 game files are distributed with this repository.

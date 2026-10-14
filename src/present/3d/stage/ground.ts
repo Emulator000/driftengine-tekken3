@@ -23,6 +23,34 @@ export interface GroundState {
   readonly shade: Uint8Array;
 }
 
+/** A square the patch is cut to, in the scenery's frame: the scenery's place (mm) and turn (4096ths), and the square's half-width (mm). */
+export interface GroundClip {
+  readonly x: number;
+  readonly z: number;
+  readonly yaw: number;
+  readonly half: number;
+}
+
+/** A corner as it is cut: its place in the square's frame and on the floor (mm), its texel and its shade. */
+type Corner = readonly [number, number, number, number, number, number, number];
+
+/** The part of a convex outline on the inner side of `limit` along axis `axis` (0 or 1) of its corners, `sign` its direction. */
+function cut(outline: readonly Corner[], axis: 0 | 1, sign: number, limit: number): Corner[] {
+  const out: Corner[] = [];
+  for (let i = 0; i < outline.length; i += 1) {
+    const a = outline[i]!;
+    const b = outline[(i + 1) % outline.length]!;
+    const da = limit - sign * a[axis];
+    const db = limit - sign * b[axis];
+    if (da >= 0) out.push(a);
+    if (da >= 0 !== db >= 0) {
+      const t = da / (da - db);
+      out.push(a.map((v, k) => v + (b[k]! - v) * t) as unknown as Corner);
+    }
+  }
+  return out;
+}
+
 export class Ground {
   mesh: MeshHandle | null = null;
   readonly material: SurfaceMaterial<SurfaceTextureHandle>;
@@ -46,10 +74,14 @@ export class Ground {
     this.material = { albedo: texture, cutout: 0.5, doubleSided: true };
   }
 
-  /** Lays the patch the fight placed this frame; drops it when the fight draws no ground. */
-  update(state: GroundState): void {
+  /** Lays the patch the fight placed this frame, cut to `clip` where there is one; drops it when the fight draws no ground. */
+  update(state: GroundState, clip: GroundClip | null = null): void {
     if (!state.drawn) {
       this.drop();
+      return;
+    }
+    if (clip !== null) {
+      this.cutTo(state, clip);
       return;
     }
     const n = state.count;
@@ -95,6 +127,48 @@ export class Ground {
     for (let v = 0; v < n * 4; v += 1) normals[v * 3 + 1] = 1;
     this.drop();
     this.mesh = this.renderer.createMesh({ positions, normals, colors: this.colors, emissive: new Float32Array(n * 4), uvs, indices }, { dynamicColors: true });
+  }
+
+  /** The patch made again, every tile cut to the square: what lies outside it is not drawn. */
+  private cutTo(state: GroundState, clip: GroundClip): void {
+    const angle = (-clip.yaw * 2 * Math.PI) / 4096;
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    const [r, g, b] = this.tint;
+    const positions: number[] = [];
+    const uvs: number[] = [];
+    const colors: number[] = [];
+    const indices: number[] = [];
+    /* A quad's corners in order round its outline. */
+    const round = [0, 1, 3, 2];
+    for (let q = 0; q < state.count; q += 1) {
+      const cell = state.cell[q]!;
+      let outline: Corner[] = round.map((k) => {
+        const v = q * 4 + k;
+        const x = state.x[v]!;
+        const z = state.z[v]!;
+        const dx = x - clip.x;
+        const dz = z - clip.z;
+        return [c * dx - s * dz, s * dx + c * dz, x, z, this.uvs[(cell * 4 + k) * 2]!, this.uvs[(cell * 4 + k) * 2 + 1]!, state.shade[v]!];
+      });
+      for (const [axis, sign] of [[0, 1], [0, -1], [1, 1], [1, -1]] as const) outline = cut(outline, axis, sign, clip.half);
+      if (outline.length < 3) continue;
+      const base = positions.length / 3;
+      for (const corner of outline) {
+        positions.push(corner[2] / 1000, 0, -corner[3] / 1000);
+        uvs.push(corner[4], corner[5]);
+        const k = (corner[6] / 128) ** DISPLAY_GAMMA;
+        colors.push(k * r, k * g, k * b);
+      }
+      for (let i = 1; i + 1 < outline.length; i += 1) indices.push(base, base + i, base + i + 1);
+    }
+    this.drop();
+    this.last = { count: 0, x: new Int32Array(0), z: new Int32Array(0), shade: new Uint8Array(0), cell: new Int16Array(0) };
+    if (indices.length === 0) return;
+    const n = positions.length / 3;
+    const normals = new Float32Array(n * 3);
+    for (let v = 0; v < n; v += 1) normals[v * 3 + 1] = 1;
+    this.mesh = this.renderer.createMesh({ positions: new Float32Array(positions), normals, colors: new Float32Array(colors), emissive: new Float32Array(n), uvs: new Float32Array(uvs), indices: new Uint32Array(indices) });
   }
 
   /**

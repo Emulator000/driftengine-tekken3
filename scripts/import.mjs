@@ -28,6 +28,7 @@
  *   tables/intro-models.json the attract intros' models, by the pack each stands for
  *   pictures/*.png     the original pictures shown as they are: the title's, the select's
  *   textures/{fighters,stages}/NN.png the texture atlases enlarged, for the smooth textures
+ *                      (and textures/arcade/stages/NN.png, the arcade's stages')
  *   models/{fighters,intro}/*.ftr the fighters' meshes rounded, for the smooth models (Kazuya's copied)
  *   movesets/NN.json   each moveset by id, and common.json
  *   motions/NN.json    each moveset's motions as curves, and common.json
@@ -116,5 +117,6 @@ for (const file of files) {
 const enlarged = await upscaleTextures(root, output);
 if (enlarged > 0) console.log(`enlarged ${enlarged} texture atlases`);
 console.log(`rounded ${roundModels(root, output)} fighter meshes`);
-output.finish({ format: ASSET_FORMAT, movesets: files.filter((f) => !f.common && f.id !== INTRO_ID).map((f) => f.id), kazuya });
+const { arcadeStages = [], arcadePanoramas = [], arcadeObjects = [] } = JSON.parse(readFileSync(dataManifest, 'utf8'));
+output.finish({ format: ASSET_FORMAT, movesets: files.filter((f) => !f.common && f.id !== INTRO_ID).map((f) => f.id), kazuya, arcadeStages, arcadePanoramas, arcadeObjects });
 console.log('imported to public/assets/');

@@ -8,6 +8,7 @@
 | `npm run extract` | Turns the disc's files into what the page loads, under `public/data/`; converts the movies when FFmpeg is installed |
 | `npm run import` | Writes the game's typed assets, under `public/assets/` |
 | `npm run t4 -- "<image>"` | Reads your Tekken 4 disc image (`.iso`, or a `.7z` holding one) for Kazuya; then run `npm run extract` again |
+| `npm run arcade -- "<folder>"` | Reads the dump of your own Tekken 3 arcade board (its chips' files, in one folder) for the arcade's stages, into `.cache/arcade/`; then run `npm run extract` again ([Tekken 3 Arcade assets](../README.md#tekken-3-arcade-assets-optional)) |
 | `npm run dev` | Serves the game on `localhost:5190` (or the next free port), running `extract` and `import` first when their output is missing |
 | `npm run dev:lan` | Serves the game to your own devices on your home network, over HTTPS ([In a phone's browser](#in-a-phones-browser)) |
 | `npm run desktop` | Builds the game as an app for this computer (Windows, macOS or Linux), with your disc's data in it, into `out/<target>/`; `-- mac-arm64` or `-- mac-x64` builds a Mac's on Linux ([As an app](#as-an-app)) |
@@ -50,6 +51,7 @@ Add them to the address, for example `http://localhost:5190/?quick&p1=9&p2=13&st
 | `record=time,ROSTER` or `record=survival,ROSTER,WINS` | Goes to the records with a new best time for that character (ten stages of 30 seconds, through Time Attack's results) or a survival record of that many wins (more than the tenth best has, through Survival's results), its name to enter, on the first pad |
 | `record=force,ROSTER` or `record=force,ROSTER,FLAGS` | Goes to Tekken Force's results for that character on the first side, a run cleared with a new best score, then the records; `FLAGS` 1 a copper key (the default), 8 Dr. B saved, 0x10 the bosses beaten shown |
 | `textures=psx` | Draws the fighters' and stages' textures as the console did, each texel sharp, instead of enlarged and smoothed |
+| `stages=psx` | Draws the disc's stages where the arcade board's data has the arcade's (by default the arcade's, once `npm run arcade` has read it) |
 | `models=psx`, `models=rounded` | Draws the fighters with the console's meshes, or the rounded ones (by default the rounded ones, but at `quality=verylow`) |
 | `quality=high` | The whole picture: ambient occlusion and bloom over the multisampled HDR scene; the default but on a phone |
 | `quality=low` | Leaves out the ambient occlusion and the bloom; a phone's default |
@@ -103,6 +105,19 @@ A gamepad with motors vibrates as the console's DualShock does, the small motor 
 playing the game's own patterns while VIBRATION is on in the Options' key configuration (on to
 start, where the console starts it off; YES or NO there for each pad). The browser has to drive
 gamepad motors: Chromium-based browsers and the desktop app do.
+
+## The free camera
+
+`P` holds the fight and flies a free camera through it, from the shot it was in, for looking at a
+stage or a frame up close: a drag with the left mouse button turns it, with the right or middle
+slides it across the view; the wheel moves it along its view; W A S D fly it, Q and E sink and lift
+it; Shift goes four times as fast, Alt a quarter. `P` again gives the camera back to the fight,
+which goes on from the field it stopped at.
+
+## The frame rate
+
+`F` shows and hides the frame rate in the top right corner: the frames shown over the last second,
+their mean time and the longest of them. Whether it shows is kept in the browser for next time.
 
 ## As an app
 

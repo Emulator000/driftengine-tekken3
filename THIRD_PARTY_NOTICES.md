@@ -44,6 +44,14 @@ user has installed them, on the user's own files.
   tools, platform and build tools (the Android Software Development Kit License Agreement), and
   Gradle (Apache-2.0); for an iPhone app, XcodeGen (MIT).
 
+## Game content
+
+Tekken 3 (the PlayStation release and the arcade release on Namco System 12 hardware) and Tekken 4,
+their characters, artwork, audiovisual assets, game software and other proprietary data remain
+the property of their respective rights holders. Drift Technologies does not own or license them,
+and this repository grants no rights in them. Nothing in this repository contains or distributes
+them: they are read on the user's machine from the user's own disc or board.
+
 ## DriftEngine
 
 DriftEngine is a separate, independently developed engine with its own license, declared in its
@@ -91,4 +99,8 @@ its contributors), checked against the data.
   CD-ROM sector and XA audio formats, the sound processor's ADPCM, envelopes and pitch, and the
   reverb presets it lists, as the sound player and the decoders follow them.
 - **ECMA-130** (the CD-ROM format) and the cue sheet format: the disc reader and the image join.
+- **MAME's Namco System 12 driver** (<https://github.com/mamedev/mame>, `src/mame/namco/namcos12.cpp`,
+  BSD-3-Clause, copyright its holders): which of the board's chips hold its program and its data,
+  and that each pair holds the even and the odd bytes of a 16-bit bus, as `npm run arcade` joins
+  them (`scripts/lib/arcade/board.mjs`). No code from it is included.
 - **ISO 9660**: the disc's file system.

@@ -71,7 +71,7 @@ const tables: MotionTables = {
   fixup: Int16Array.from(raw.fixup),
   offsets: Int32Array.from(raw.offsets),
 };
-const manifest = await fetchJson<{ fighters: { pack: number; moveset: number }[]; stages: { stage: number }[] }>('manifest.json');
+const manifest = await fetchJson<{ fighters: { pack: number; moveset: number }[]; stages: { stage: number }[]; arcadeStages?: number[] }>('manifest.json');
 const common = readMoveset(await fetchBytes('moves/common.bin'));
 
 interface Joint {
@@ -112,10 +112,13 @@ async function loadTexture(path: string): Promise<SurfaceTextureHandle> {
   return renderer.createSurfaceTexture(bitmap, { colorSpace: 'srgb', filter: 'nearest', mipmap: false, wrap: 'clamp' });
 }
 
+/** A stage's scenery: the arcade's where its data has the stage, unless `?stages=psx`, else the disc's. */
 async function loadStage(index: number): Promise<Stage> {
   const entry = manifest.stages[index]!;
   const id = String(entry.stage).padStart(2, '0');
-  const [mesh, texture] = await Promise.all([fetchBytes(`stages/${id}.stg`), loadTexture(`stages/${id}.png`)]);
+  const arcade = new URLSearchParams(location.search).get('stages') !== 'psx' && (manifest.arcadeStages ?? []).includes(entry.stage);
+  const dir = arcade ? 'arcade/stages' : 'stages';
+  const [mesh, texture] = await Promise.all([fetchBytes(`${dir}/${id}.stg`), loadTexture(`${dir}/${id}.png`)]);
   return createStage(renderer, mesh, texture);
 }
 
@@ -272,7 +275,7 @@ startLoop({
     renderer.bindMeshPass(camera, ENV);
     if (stage !== null) {
       renderer.setMaterial(stage.material);
-      for (const cell of stage.cells) if (cell !== null) renderer.drawTranslucentMesh(cell, IDENTITY_MODEL, 1, { lit: false, fog: false });
+      for (const cell of stage.cells) for (const piece of cell) if (!piece.cut) renderer.drawTranslucentMesh(piece.mesh, IDENTITY_MODEL, 1, { lit: false, fog: false, depthLayer: piece.layer });
       renderer.setMaterial(null);
     } else {
       renderer.drawMesh(floor, IDENTITY_MODEL);
@@ -280,6 +283,12 @@ startLoop({
     if (current !== null) {
       renderer.setMaterial(current.fighter.material);
       renderer.drawMesh(current.fighter.handle, IDENTITY_MODEL);
+      renderer.setMaterial(null);
+    }
+    /* The cut-out scenery over the solid, its soft edges over what lies behind it. */
+    if (stage !== null) {
+      renderer.setMaterial(stage.material);
+      for (const cell of stage.cells) for (const piece of cell) if (piece.cut) renderer.drawTranslucentMesh(piece.mesh, IDENTITY_MODEL, 1, { lit: false, fog: false, depthLayer: piece.layer });
       renderer.setMaterial(null);
     }
     renderer.endFrame();

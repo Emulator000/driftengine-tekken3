@@ -98,17 +98,18 @@ function rgba(colour) {
 }
 
 /**
- * The 256 × 256 texels a texture page shows through a palette, as RGBA.
+ * The 256 × 256 texels a texture page shows through a palette, as RGBA, from a VRAM of `height`
+ * rows (the PlayStation's 512 unless it says otherwise).
  *
  * `page` is relative to the slot's first page: x in units of 64 VRAM words, and the colour mode
  * (0 four bits, 1 eight, 2 fifteen). `clut` is the palette's VRAM position relative to row 504.
  */
-export function decodePage({ images, palettes }, page, clut) {
+export function decodePage({ images, palettes, height = VRAM_H }, page, clut) {
   const out = new Uint8Array(256 * 256 * 4);
   const baseX = page.x * 64;
   const baseY = page.y * 256;
   for (let v = 0; v < 256; v += 1) {
-    const row = ((baseY + v) % VRAM_H) * VRAM_W;
+    const row = ((baseY + v) % height) * VRAM_W;
     for (let u = 0; u < 256; u += 1) {
       let colour;
       if (page.mode === 0) {
@@ -150,19 +151,22 @@ export function packetTarget(tpage, clut) {
   };
 }
 
-/** One plane of VRAM with TIMs at their absolute coordinates, images and palettes together. */
-export function absoluteVram(tims) {
-  const plane = new Uint16Array(VRAM_W * VRAM_H);
+/**
+ * One plane of VRAM with TIMs at their absolute coordinates, images and palettes together:
+ * 1024 words wide and `height` rows, the PlayStation's 512 or the arcade board's 1024.
+ */
+export function absoluteVram(tims, height = VRAM_H) {
+  const plane = new Uint16Array(VRAM_W * height);
   const put = (rect) => {
     for (let y = 0; y < rect.h; y += 1) {
-      for (let x = 0; x < rect.w; x += 1) plane[((rect.y + y) % VRAM_H) * VRAM_W + ((rect.x + x) % VRAM_W)] = rect.data[y * rect.w + x] ?? 0;
+      for (let x = 0; x < rect.w; x += 1) plane[((rect.y + y) % height) * VRAM_W + ((rect.x + x) % VRAM_W)] = rect.data[y * rect.w + x] ?? 0;
     }
   };
   for (const tim of tims) {
     if (tim.clut) put(tim.clut);
     if (tim.image) put(tim.image);
   }
-  return { images: plane, palettes: plane };
+  return { images: plane, palettes: plane, height };
 }
 
 /**
@@ -180,6 +184,59 @@ export function absoluteVram(tims) {
  * cutout) shows as a crack.
  */
 const GUTTER = 4;
+
+/** How many rings of clear texels round an opaque one take its colour. */
+const BLEED = 4;
+
+/**
+ * The clear texels next to opaque ones given those texels' average colour, ring by ring, still
+ * clear: a texture filtered (or enlarged) across a cutout's edge then blends the edge's own colour
+ * rather than the clear texels' black, which drew a dark or coloured outline round every hole.
+ */
+function bleed(pixels, width, height) {
+  for (let ring = 0; ring < BLEED; ring += 1) {
+    const filled = [];
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const at = (y * width + x) * 4;
+        if (pixels[at + 3] !== 0 || pixels[at] !== 0 || pixels[at + 1] !== 0 || pixels[at + 2] !== 0) continue;
+        let r = 0;
+        let g = 0;
+        let b = 0;
+        let n = 0;
+        for (let dy = -1; dy <= 1; dy += 1) {
+          for (let dx = -1; dx <= 1; dx += 1) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+            const k = (ny * width + nx) * 4;
+            if (pixels[k + 3] === 0 && pixels[k] === 0 && pixels[k + 1] === 0 && pixels[k + 2] === 0) continue;
+            r += pixels[k];
+            g += pixels[k + 1];
+            b += pixels[k + 2];
+            n += 1;
+          }
+        }
+        if (n > 0) filled.push(at, Math.round(r / n), Math.round(g / n), Math.round(b / n));
+      }
+    }
+    if (filled.length === 0) return;
+    for (let i = 0; i < filled.length; i += 4) {
+      const at = filled[i];
+      /* Never black, so the next ring counts it as filled. */
+      pixels[at] = filled[i + 1] || 1;
+      pixels[at + 1] = filled[i + 2];
+      pixels[at + 2] = filled[i + 3];
+    }
+  }
+}
+
+/**
+ * A texel's place under a texture window, as the GPU wraps it: a coordinate keeps its bits under
+ * the window's mask and takes the rest from the window's offset (`window` in texels: `mask`, `offset`
+ * each way, or none).
+ */
+const windowed = (c, mask, offset) => (c & ~mask) | (offset & mask);
 
 export function packAtlas(vram, uses) {
   const rects = new Map();
@@ -223,14 +280,20 @@ export function packAtlas(vram, uses) {
     /* The gutter repeats the edge texels, as a clamp would. */
     for (let dv = -GUTTER; dv <= r.v1 - r.v0 + GUTTER; dv += 1) {
       for (let du = -GUTTER; du <= r.u1 - r.u0 + GUTTER; du += 1) {
-        const u = r.u0 + Math.max(0, Math.min(r.u1 - r.u0, du));
-        const v = r.v0 + Math.max(0, Math.min(r.v1 - r.v0, dv));
+        let u = r.u0 + Math.max(0, Math.min(r.u1 - r.u0, du));
+        let v = r.v0 + Math.max(0, Math.min(r.v1 - r.v0, dv));
+        const w = r.target?.window;
+        if (w) {
+          u = windowed(u, w.maskU, w.offsetU);
+          v = windowed(v, w.maskV, w.offsetV);
+        }
         const to = ((r.y + dv) * width + (r.x + du)) * 4;
         if (texels) atlas.set(texels.subarray((v * 256 + u) * 4, (v * 256 + u) * 4 + 4), to);
         else atlas.set([255, 255, 255, 255], to);
       }
     }
   }
+  bleed(atlas, width, height);
   return {
     width,
     height,
@@ -238,6 +301,15 @@ export function packAtlas(vram, uses) {
     place(target, [u, v]) {
       const r = rects.get(JSON.stringify(target));
       return [r.x + u - r.u0, r.y + v - r.v0];
+    },
+    /** Whether any texel a polygon's texture coordinates span is clear. */
+    clearIn(target, uvs) {
+      if (!target) return false;
+      const placed = uvs.map((uv) => this.place(target, uv));
+      const [x0, x1] = [Math.min(...placed.map((p) => p[0])), Math.max(...placed.map((p) => p[0]))];
+      const [y0, y1] = [Math.min(...placed.map((p) => p[1])), Math.max(...placed.map((p) => p[1]))];
+      for (let y = y0; y <= y1; y += 1) for (let x = x0; x <= x1; x += 1) if (atlas[(y * width + x) * 4 + 3] === 0) return true;
+      return false;
     },
   };
 }

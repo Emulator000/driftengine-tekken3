@@ -1,6 +1,6 @@
 /**
  * Keyboards and gamepads as the console's pad words. Player 1: WASD to move, U I J K for left
- * punch, right punch, left kick, right kick, Q and E the left shoulders (L2, L1), R and F the right
+ * punch, right punch, left kick, right kick, Q and E the left shoulders (L2, L1), R and T the right
  * (R1, R2), Enter start, Backspace select. Player 2: the arrows, numpad 4 5 1 2, numpad 7 and 9,
  * numpad 6 and 3, numpad Enter, numpad's point. A standard gamepad drives the player of its index.
  * Alt+Enter takes the page to full screen and back, pressing no Start. Each player's controller is
@@ -15,7 +15,7 @@ export const DOWN = 0x4000;
 export const LEFT = 0x8000;
 
 const KEYS: readonly Record<string, number>[] = [
-  { KeyW: UP, KeyD: RIGHT, KeyS: DOWN, KeyA: LEFT, KeyU: 0x80, KeyI: 0x10, KeyJ: 0x40, KeyK: 0x20, KeyQ: 0x01, KeyE: 0x04, KeyR: 0x08, KeyF: 0x02, Enter: 0x800, Backspace: 0x100 },
+  { KeyW: UP, KeyD: RIGHT, KeyS: DOWN, KeyA: LEFT, KeyU: 0x80, KeyI: 0x10, KeyJ: 0x40, KeyK: 0x20, KeyQ: 0x01, KeyE: 0x04, KeyR: 0x08, KeyT: 0x02, Enter: 0x800, Backspace: 0x100 },
   { ArrowUp: UP, ArrowRight: RIGHT, ArrowDown: DOWN, ArrowLeft: LEFT, Numpad4: 0x80, Numpad5: 0x10, Numpad1: 0x40, Numpad2: 0x20, Numpad7: 0x01, Numpad9: 0x04, Numpad6: 0x08, Numpad3: 0x02, NumpadEnter: 0x800, NumpadDecimal: 0x100 },
 ];
 /** A standard gamepad's buttons as the pad's bits. */

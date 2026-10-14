@@ -1,6 +1,6 @@
 {
   "name": "driftengine-tekken3",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Unofficial: Tekken 3 rebuilt on DriftEngine from the data of a user's own disc. No game files included.",
   "license": "UNLICENSED",
   "type": "module",
@@ -9,6 +9,7 @@
     "disc": "node scripts/disc.mjs",
     "extract": "node scripts/extract.mjs",
     "t4": "node scripts/t4-data.mjs",
+    "arcade": "node scripts/arcade.mjs",
     "import": "node scripts/import.mjs",
     "predev": "node scripts/extract.mjs --if-missing && node scripts/import.mjs --if-missing",
     "dev": "vite",

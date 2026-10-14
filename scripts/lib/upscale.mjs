@@ -4,8 +4,10 @@
  * whichever diagonal the picture varies least along (a four-tap filter, sharper than a cubic),
  * blended smoothly between the two as their difference shrinks; then each texel between two of
  * them the same way across and down. Every new texel is held within its four neighbours, so edges
- * stay clean and nothing rings. Colours are premultiplied by their opacity throughout (black is
- * transparent in these pictures, and must not darken the edges it meets).
+ * stay clean and nothing rings. Colour and opacity are enlarged apart, the clear texels first taking
+ * the colours of the opaque ones beside them, so a cut-out's edge keeps its own colour (neither
+ * darkened by the clear texels nor brightened by dividing by a small opacity); the smoother
+ * direction is judged on colours weighted by their opacity.
  */
 
 /** The filters' outer taps: along a diagonal, and across or down. */
@@ -13,6 +15,8 @@ const DIAGONAL = 0.129633;
 const ACROSS = 0.0875;
 /** How sharply the blend turns toward the smoother direction. */
 const STEER = 1.4;
+/** Rings of clear texels around the opaque ones that take their colours. */
+const RINGS = 4;
 
 const steer = (along, against) => {
   const s = (against - along) / (along + against + 1e-6);
@@ -20,7 +24,7 @@ const steer = (along, against) => {
   return k * k * (3 - 2 * k);
 };
 
-/** One pass: `src` (premultiplied RGBA floats, `w` by `h`) twice the size. */
+/** One pass: `src` (RGBA floats, colours 0 to 255 and opacity 0 to 1, `w` by `h`) twice the size. */
 function enlarge(src, w, h) {
   const W = w * 2;
   const H = h * 2;
@@ -39,7 +43,7 @@ function enlarge(src, w, h) {
     out[o + 1] = c[1];
     out[o + 2] = c[2];
     out[o + 3] = c[3];
-    Y[y * W + x] = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+    Y[y * W + x] = (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) * c[3];
   };
   const lum = (x, y) => Y[fit(y, H - 1) * W + fit(x, W - 1)];
   for (let y = 0; y < h; y += 1) {
@@ -111,29 +115,48 @@ function enlarge(src, w, h) {
   return out;
 }
 
+/** The clear texels (opacity 0) of `src` near opaque ones given the mean colour of their filled neighbours, a ring at a time. */
+function fillClear(src, w, h) {
+  const filled = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i += 1) filled[i] = src[i * 4 + 3] > 0 ? 1 : 0;
+  for (let ring = 0; ring < RINGS; ring += 1) {
+    const next = [];
+    for (let y = 0; y < h; y += 1) {
+      for (let x = 0; x < w; x += 1) {
+        if (filled[y * w + x]) continue;
+        const sum = [0, 0, 0];
+        let n = 0;
+        for (let dy = -1; dy <= 1; dy += 1) {
+          for (let dx = -1; dx <= 1; dx += 1) {
+            const [nx, ny] = [x + dx, y + dy];
+            if (nx < 0 || ny < 0 || nx >= w || ny >= h || !filled[ny * w + nx]) continue;
+            for (let c = 0; c < 3; c += 1) sum[c] += src[(ny * w + nx) * 4 + c];
+            n += 1;
+          }
+        }
+        if (n > 0) next.push(y * w + x, sum[0] / n, sum[1] / n, sum[2] / n);
+      }
+    }
+    if (next.length === 0) return;
+    for (let k = 0; k < next.length; k += 4) {
+      const i = next[k];
+      filled[i] = 1;
+      src.set([next[k + 1], next[k + 2], next[k + 3]], i * 4);
+    }
+  }
+}
+
 /** `pixels` (RGBA bytes, `w` by `h`) enlarged `scale` times (a power of two). */
 export function upscale(pixels, w, h, scale) {
   let src = new Float32Array(w * h * 4);
-  for (let i = 0; i < w * h; i += 1) {
-    const a = pixels[i * 4 + 3] / 255;
-    src[i * 4] = pixels[i * 4] * a;
-    src[i * 4 + 1] = pixels[i * 4 + 1] * a;
-    src[i * 4 + 2] = pixels[i * 4 + 2] * a;
-    src[i * 4 + 3] = a;
-  }
+  for (let i = 0; i < w * h * 4; i += 1) src[i] = (i & 3) === 3 ? pixels[i] / 255 : pixels[i];
+  fillClear(src, w, h);
   let [cw, ch] = [w, h];
   for (let s = 1; s < scale; s *= 2) {
     src = enlarge(src, cw, ch);
     [cw, ch] = [cw * 2, ch * 2];
   }
   const out = new Uint8Array(cw * ch * 4);
-  for (let i = 0; i < cw * ch; i += 1) {
-    const a = src[i * 4 + 3];
-    if (a <= 1 / 512) continue;
-    out[i * 4] = Math.round(Math.min(255, src[i * 4] / a));
-    out[i * 4 + 1] = Math.round(Math.min(255, src[i * 4 + 1] / a));
-    out[i * 4 + 2] = Math.round(Math.min(255, src[i * 4 + 2] / a));
-    out[i * 4 + 3] = Math.round(Math.min(255, a * 255));
-  }
+  for (let i = 0; i < cw * ch * 4; i += 1) out[i] = Math.round(Math.max(0, Math.min(255, (i & 3) === 3 ? src[i] * 255 : src[i])));
   return { w: cw, h: ch, pixels: out };
 }

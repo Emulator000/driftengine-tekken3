@@ -2,7 +2,7 @@
  * Where the arena's pieces go this frame, worked out from the fight's state as the game lays them
  * for drawing. The scenery stands at the fighters' midpoint (one fighter averaged over four frames
  * while the camera holds on the other's spin), at the stage's height, turned by the yaw the fight
- * keeps; of its 6 × 6 cells only those the view can see past the fighters are drawn. The ground is
+ * keeps; of its 6 × 6 cells (an arcade stage's 16 × 16) only those the view can see past the fighters are drawn. The ground is
  * a 10 × 10 patch of 1800 mm tiles snapped around the fighters (or, under a high camera, where the
  * view's lower edge meets the floor), its tiles taken from the stage's map by position, each corner
  * shaded darker with its depth past the fighters. Some stages light their floor instead: a light
@@ -37,7 +37,12 @@ const ATTRACT_CULLING = 0x30c;
 const q12 = (v: number): number => (v < 0 ? v + 0xfff : v) >> 12;
 const s16 = (v: number): number => (v << 16) >> 16;
 
-/** Where the scenery stands, its yaw (4096ths), and which of its 36 cells are drawn. */
+/** The most cells a scenery's grid has: an arcade stage's 16 × 16. */
+const MAX_CELLS = 256;
+/** The disc's scenery grid, whose cells the game numbers in an order of its own. */
+const DISC_GRID = 6;
+
+/** Where the scenery stands, its yaw (4096ths), and which of its cells are drawn. */
 export interface SceneryLayout {
   x: number;
   y: number;
@@ -46,7 +51,63 @@ export interface SceneryLayout {
   readonly cells: Int8Array;
 }
 
-export const newScenery = (): SceneryLayout => ({ x: 0, y: 0, z: 0, yaw: 0, cells: new Int8Array(36) });
+export const newScenery = (): SceneryLayout => ({ x: 0, y: 0, z: 0, yaw: 0, cells: new Int8Array(MAX_CELLS) });
+
+/** A scenery's grid: its cells' size (the model's units) and how many each way. */
+export interface SceneryGrid {
+  readonly cellSize: number;
+  readonly grid: number;
+}
+
+/**
+ * A scenery held still on the floor: it stays where it stands while the place the game gives it
+ * is within `radius` (mm) and its turn within `slack` (4096ths), and moves only by as far as that
+ * place goes past them, so walls stand on the floor rather than sliding over it as the fighters
+ * move; it goes straight to the game's place when that jumps (a new round, a replay's cut).
+ */
+export interface HeldScenery {
+  readonly radius: number;
+  readonly slack: number;
+  x: number;
+  z: number;
+  yaw: number;
+  last: { x: number; z: number; yaw: number } | null;
+}
+
+export const newHeldScenery = (radius: number, slack: number): HeldScenery => ({ radius, slack, x: 0, z: 0, yaw: 0, last: null });
+
+/** How far under the fight's floor an arcade stage's own floors lie (mm), so the fight's floor shows over them where both are. */
+const ARCADE_DEPTH = 20;
+
+/** How far the game's place moves in a frame, or its turn, past which it has jumped rather than moved (mm, 4096ths). */
+const JUMP = 1500;
+const JUMP_YAW = 0x200;
+
+const turnOf = (a: number): number => ((a + 0x800) & 0xfff) - 0x800;
+
+function hold(out: SceneryLayout, held: HeldScenery): void {
+  const last = held.last;
+  const jumped = last === null || Math.hypot(out.x - last.x, out.z - last.z) > JUMP || Math.abs(turnOf(out.yaw - last.yaw)) > JUMP_YAW;
+  held.last = { x: out.x, z: out.z, yaw: out.yaw };
+  if (jumped) {
+    held.x = out.x;
+    held.z = out.z;
+    held.yaw = out.yaw;
+  } else {
+    const dx = out.x - held.x;
+    const dz = out.z - held.z;
+    const d = Math.hypot(dx, dz);
+    if (d > held.radius) {
+      held.x += dx * (1 - held.radius / d);
+      held.z += dz * (1 - held.radius / d);
+    }
+    const turn = turnOf(out.yaw - held.yaw);
+    if (Math.abs(turn) > held.slack) held.yaw = (held.yaw + turn - Math.sign(turn) * held.slack) & 0xfff;
+  }
+  out.x = Math.round(held.x);
+  out.z = Math.round(held.z);
+  out.yaw = held.yaw;
+}
 
 export const newGround = (): GroundState & { drawn: boolean; count: number } => ({
   drawn: false,
@@ -83,19 +144,25 @@ function cullingAngle(state: FightState, view: View): number {
   return CULLING + Math.round(((wide - game) * 2 * 4096) / (2 * Math.PI));
 }
 
-/** The scenery cells the view can see past the fighters (`yaw` the view's against the scenery's, the camera at `cx`, `cz` in its frame). */
-function cullScenery(trig: Trig, arena: ArenaTables, fov: number, yaw: number, cx: number, cz: number, size: number, out: Int8Array): void {
-  const cell = size * 10;
-  const gridX = size * -0x1e;
-  const gridZ = size * -0x1e;
+/**
+ * The scenery cells the view can see past the fighters (`yaw` the view's against the scenery's, the
+ * camera at `cx`, `cz` in its frame), on a grid of `n` × `n` cells about the fighters.
+ */
+function cullScenery(trig: Trig, arena: ArenaTables, fov: number, yaw: number, cx: number, cz: number, { cellSize: size, grid: n }: SceneryGrid, out: Int8Array): void {
+  const half = n >> 1;
+  const last = n - 1;
+  /* The disc's grid is the game's, ten units a model unit; an arcade grid's cells are the drawn ones, eight. */
+  const cell = size * (n === DISC_GRID ? 10 : 8);
+  const gridX = -cell * half;
+  const gridZ = -cell * half;
   const rayStep = Math.trunc((size * 0x8c) / 0x14);
   out.fill(0);
-  if (cx < cell * -2) cx = cell * -3;
-  if (cell * 2 <= cx) cx = cell * 3 - 1;
-  if (cz < cell * -2) cz = cell * -3;
-  if (cell * 2 <= cz) cz = cell * 3 - 1;
+  if (cx < cell * -(half - 1)) cx = cell * -half;
+  if (cell * (half - 1) <= cx) cx = cell * half - 1;
+  if (cz < cell * -(half - 1)) cz = cell * -half;
+  if (cell * (half - 1) <= cz) cz = cell * half - 1;
   const mark = (row: number, column: number, v: number): void => {
-    out[arena.gridCells[row * 6 + column]!] = v;
+    out[n === DISC_GRID ? arena.gridCells[row * n + column]! : row * n + column] = v;
   };
   const ray = (angle: number): [number, number] => {
     const dx = (rayStep * trig.sin(angle)) >> 15;
@@ -106,55 +173,66 @@ function cullScenery(trig: Trig, arena: ArenaTables, fov: number, yaw: number, c
     for (;;) {
       const column = Math.trunc(x / cell);
       const row = Math.trunc(z / cell);
-      if (!(column >>> 0 < 6)) break;
+      if (!(column >>> 0 < n)) break;
       x += dx;
-      if (!(row >>> 0 < 6)) break;
+      if (!(row >>> 0 < n)) break;
       last = [row, column];
       mark(row, column, 1);
       z += dz;
     }
     return last;
   };
+  if (n !== DISC_GRID) {
+    /* An arcade grid: every cell, which the GPU clips, but those nearer the camera than the fighters. */
+    out.fill(1);
+    hideNear(out, n, half, cell, gridX, gridZ, cx, cz);
+    return;
+  }
   let [row, column] = ray(-yaw - (fov >> 1));
   const [endRow, endColumn] = ray(-yaw + (fov >> 1));
-  for (let guard = 0; guard <= 100; guard += 1) {
-    if (row === 5 && column < 5) {
+  for (let guard = 0; guard <= 100 * (n / DISC_GRID) ** 2; guard += 1) {
+    if (row === last && column < last) {
       column += 1;
-      mark(5, column, 1);
-      if (column === endColumn && endRow === 5) break;
+      mark(last, column, 1);
+      if (column === endColumn && endRow === last) break;
     }
-    if (column === 5 && 0 < row) {
+    if (column === last && 0 < row) {
       row -= 1;
-      mark(row, 5, 1);
-      if (row === endRow && endColumn === 5) break;
+      mark(row, last, 1);
+      if (row === endRow && endColumn === last) break;
     }
     if (row === 0 && 0 < column) {
       column -= 1;
       mark(0, column, 1);
       if (column === endColumn && endRow === 0) break;
     }
-    if (column !== 0 || !(row < 5)) continue;
+    if (column !== 0 || !(row < last)) continue;
     row += 1;
     mark(row, 0, 1);
     if (row === endRow && endColumn === 0) break;
   }
-  for (let r = 0; r < 6; r += 1) {
-    for (let c = 0; c < 5; c += 1) {
-      if (out[r * 6 + c] === 0) continue;
-      for (let far = 5; c < far; far -= 1) if (out[r * 6 + far] !== 0) for (let k = c; k < far; k += 1) out[r * 6 + k] = 1;
+  for (let r = 0; r < n; r += 1) {
+    for (let c = 0; c < last; c += 1) {
+      if (out[r * n + c] === 0) continue;
+      for (let far = last; c < far; far -= 1) if (out[r * n + far] !== 0) for (let k = c; k < far; k += 1) out[r * n + k] = 1;
     }
   }
+  hideNear(out, n, half, cell, gridX, gridZ, cx, cz);
+}
+
+/** The camera's cell left out, and every cell no farther from it than the nearest of the four around the fighters. */
+function hideNear(out: Int8Array, n: number, half: number, cell: number, gridX: number, gridZ: number, cx: number, cz: number): void {
   const camColumn = Math.trunc((cx - gridX) / cell);
   const camRow = Math.trunc((cz - gridZ) / cell);
-  out[camRow * 6 + camColumn] = -2;
-  const distance = (c: number, r: number): number => (out[r * 6 + c] === 0 ? 0x7fff : Math.abs(c - camColumn) + Math.abs(r - camRow));
+  out[camRow * n + camColumn] = -2;
+  const distance = (c: number, r: number): number => (out[r * n + c] === 0 ? 0x7fff : Math.abs(c - camColumn) + Math.abs(r - camRow));
   let nearest = 0x7fff;
-  for (const [c, r] of [[2, 2], [2, 3], [3, 2], [3, 3]] as const) nearest = Math.min(nearest, distance(c, r));
-  for (let r = 0; r < 6; r += 1) for (let c = 0; c < 6; c += 1) if (out[r * 6 + c] !== 0 && distance(c, r) <= nearest) out[r * 6 + c] = 0;
+  for (const [c, r] of [[half - 1, half - 1], [half - 1, half], [half, half - 1], [half, half]] as const) nearest = Math.min(nearest, distance(c, r));
+  for (let r = 0; r < n; r += 1) for (let c = 0; c < n; c += 1) if (out[r * n + c] !== 0 && distance(c, r) <= nearest) out[r * n + c] = 0;
 }
 
 /** The scenery's place this frame and its cells in view. */
-export function layScenery(state: FightState, data: FightData, arena: ArenaTables, stage: StageLayout, view: View, out: SceneryLayout): void {
+export function layScenery(state: FightState, data: FightData, arena: ArenaTables, scenery: SceneryGrid, view: View, out: SceneryLayout, held?: HeldScenery): void {
   if (state.nothingDrawn !== 0) return;
   const trig = new Trig(data.math.sine);
   const [a, b] = state.fighters;
@@ -176,25 +254,31 @@ export function layScenery(state: FightState, data: FightData, arena: ArenaTable
     out.x = (rootB[0]! + rootA[0]!) >> 1;
     out.z = (rootB[2]! + rootA[2]!) >> 1;
   }
-  out.y = arena.stageHeights[state.stage] ?? 0;
+  /* The disc's scenery stands at the stage's height under the floor; an arcade stage's on the floor, its own floors a little under the fight's. */
+  out.y = scenery.grid !== DISC_GRID ? ARCADE_DEPTH : (arena.stageHeights[state.stage] ?? 0);
   out.yaw = state.scenery.yaw;
   const eye = state.camera.drawn.eye;
   const [camX, camY, camZ] = [eye[0]!, eye[1]!, eye[2]!];
-  const offX = s16(camX - (s16(rootA[0]!) + s16((rootB[0]! - rootA[0]!) >> 1)));
-  const offZ = s16(camZ - (s16(rootA[2]!) + s16((rootB[2]! - rootA[2]!) >> 1)));
-  const turn = state.scenery.yaw & 0xfff;
+  if (held !== undefined) hold(out, held);
+  /* The camera from the scenery's middle: the fighters' midpoint, or where a held scenery stands. */
+  const offX = held !== undefined ? camX - out.x : s16(camX - (s16(rootA[0]!) + s16((rootB[0]! - rootA[0]!) >> 1)));
+  const offZ = held !== undefined ? camZ - out.z : s16(camZ - (s16(rootA[2]!) + s16((rootB[2]! - rootA[2]!) >> 1)));
+  const turn = out.yaw & 0xfff;
   const rx = (trig.cos(turn) * offX + trig.sin(turn) * offZ) >> 12;
   const rz = (-trig.sin(turn) * offX + trig.cos(turn) * offZ) >> 12;
-  const yaw = state.camera.drawn.yaw - state.scenery.yaw;
+  const yaw = state.camera.drawn.yaw - out.yaw;
   const cells = out.cells;
+  const disc = scenery.grid === DISC_GRID;
   if (state.attractIntro !== 0) {
-    cullScenery(trig, arena, ATTRACT_CULLING, yaw, rx, rz, stage.cellSize, cells);
+    cullScenery(trig, arena, ATTRACT_CULLING, yaw, rx, rz, scenery, cells);
+    if (!disc) return;
     const low = -0x641 < camY ? 1 : 0;
     for (const k of [28, 22, 16, 10]) cells[k] = low;
     const centre = -0x7d1 < camY ? 1 : 0;
     for (const k of [14, 15, 20, 21]) cells[k] = centre;
   } else {
-    cullScenery(trig, arena, cullingAngle(state, view), yaw, rx, rz, stage.cellSize, cells);
+    cullScenery(trig, arena, cullingAngle(state, view), yaw, rx, rz, scenery, cells);
+    if (!disc) return;
     const far = 9999 < tableRoot((Math.imul(camX, camX) + Math.imul(camZ, camZ)) | 0, data.math);
     const centre = -0x1389 < camY && (-0xaf1 < camY || far) ? 1 : 0;
     for (const k of [14, 15, 20, 21]) cells[k] = centre;
@@ -305,7 +389,7 @@ function lightsOf(state: FightState, kind: number): readonly [readonly number[],
 }
 
 /** The ground's patch this frame: each quad's map cell, its corners (mm) and their shades (128 unchanged). */
-export function layGround(state: FightState, data: FightData, arena: ArenaTables, stage: StageLayout, view: View, out: ReturnType<typeof newGround>): void {
+export function layGround(state: FightState, data: FightData, arena: ArenaTables, stage: StageLayout, view: View, out: ReturnType<typeof newGround>, wide = false): void {
   const trig = new Trig(data.math.sine);
   const patch = patchOf(state, arena);
   const { tile, columns, rows, template } = patch;
@@ -363,7 +447,8 @@ export function layGround(state: FightState, data: FightData, arena: ArenaTables
   }
   out.count = columns * rows;
   /* Tekken Force's patch already reaches past the widest view, at a fixed depth. */
-  const rings = force || view.widening <= 1 ? 0 : Math.min(MAX_RINGS, Math.ceil(5 * (view.widening - 1)) + 1);
+  /* An arcade stage's floor reaches out to its walls, its scenery standing much farther off than the disc's. */
+  const rings = force ? 0 : wide ? MAX_RINGS : view.widening <= 1 ? 0 : Math.min(MAX_RINGS, Math.ceil(5 * (view.widening - 1)) + 1);
   const wrap = (v: number, n: number): number => ((v % n) + n) % n;
   let quad = out.count;
   for (let r = -rings; r < MAP + rings; r += 1) {

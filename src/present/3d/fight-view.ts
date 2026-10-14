@@ -15,12 +15,16 @@ import { handPart, wingsPart } from '../../sim/fight/hands.ts';
 import type { FightData, FightState, Fighter as FighterState } from '../../sim/fight/state.ts';
 import { Fighter, readFighterMesh, type JointTransform } from './fighter/fighter.ts';
 import { Ground } from './stage/ground.ts';
-import { createStage, type Stage } from './stage/stage.ts';
-import { layGround, layScenery, newGround, newScenery } from './layout.ts';
+import { createStage, stageAtlasSize, type Stage } from './stage/stage.ts';
+import { layGround, layScenery, newGround, newHeldScenery, newScenery } from './layout.ts';
 import { Effects } from './effects/effects.ts';
 import { BallView } from './ball.ts';
 import { Beach, BEACH_STAGE, beachClear } from './stage/beach.ts';
 import { FORCE_STAGES, ForceBackdrop } from './stage/force-backdrop.ts';
+import { ArcadeSky, arcadeSkyOver } from './stage/arcade-sky.ts';
+import { placeParts } from './stage/pieces.ts';
+import { freeView } from './free-view.ts';
+import type { PieceMotion } from '../../assets/manifest.ts';
 import { ForceItems } from './effects/force-items.ts';
 import { stageCodes } from '../../sim/fight/force-stage.ts';
 
@@ -30,16 +34,73 @@ import { stageCodes } from '../../sim/fight/force-stage.ts';
  */
 export interface DrawingFiles {
   fighter(pack: number): Promise<{ mesh: ArrayBuffer; texture: ImageBitmap }>;
-  /** A stage's scenery, ground and atlas, and Tekken Ball's beach's panorama or a Tekken Force stage's backdrop with them. */
-  stage(stage: number): Promise<{ mesh: ArrayBuffer; ground: ArrayBuffer; texture: ImageBitmap; backdrop?: ImageBitmap }>;
+  /**
+   * A stage's scenery, ground and atlas, and Tekken Ball's beach's panorama or a Tekken Force
+   * stage's backdrop with them; and the arcade's scenery and its atlas, drawn in place of the
+   * disc's, when the arcade has the stage and it is wanted.
+   */
+  stage(stage: number): Promise<{ mesh: ArrayBuffer; ground: ArrayBuffer; texture: ImageBitmap; backdrop?: ImageBitmap; arcade?: ArcadeStageFiles }>;
   /** One of the original pictures by name (Tekken Force's item and its shadow). */
   picture?(name: string): Promise<ImageBitmap>;
   readonly smooth: boolean;
 }
 
+/** A panorama's picture, its size in the original texels, the colours of its top and bottom rows (8-bit sRGB), and how far down it its horizon lies. */
+export interface ArcadePanoramaFiles {
+  readonly picture: ImageBitmap;
+  readonly width: number;
+  readonly height: number;
+  readonly top: readonly number[];
+  readonly bottom: readonly number[];
+  readonly horizon: number;
+}
+
+/** An arcade stage's scenery and atlas, its panorama where it has one, and its moving pieces (each a mesh and atlas, where its middle stands, how fast it turns). */
+export interface ArcadeStageFiles {
+  readonly mesh: ArrayBuffer;
+  readonly texture: ImageBitmap;
+  readonly panorama?: ArcadePanoramaFiles;
+  readonly objects?: readonly ArcadePieceFiles[];
+}
+
+/** A moving piece: its mesh (a cell a part, or a frame) and atlas, how it moves, its frames and the fields each shows, and whether it waits for the fight. */
+export interface ArcadePieceFiles extends PieceMotion {
+  readonly mesh: ArrayBuffer;
+  readonly texture: ImageBitmap;
+  readonly frames: number;
+  readonly fields: number;
+  readonly shown: 'always' | 'fighting';
+}
+
+/** A stage as drawn: its scenery and ground, Tekken Ball's beach, a Tekken Force backdrop, an arcade stage's sky and moving pieces. */
+interface StageDrawing {
+  readonly stage: Stage;
+  readonly ground: Ground;
+  readonly beach: Beach | null;
+  readonly force: ForceBackdrop | null;
+  readonly sky: ArcadeSky | null;
+  readonly objects: readonly { readonly stage: Stage; readonly motion: ArcadePieceFiles; readonly placed: Float32Array[] }[];
+}
+
+/**
+ * An arcade stage's scenery grid; how far the fighters' midpoint (mm) and the scenery's turn
+ * (4096ths) go before the scenery is moved, an arcade stage's and the disc's, which stands nearer.
+ */
+const ARCADE_GRID = 16;
+const HELD = { arcade: { radius: 3000, slack: 0x155 }, disc: { radius: 1500, slack: 0xaa } } as const;
+/** The arcade stages whose floor ends at their own edge (the helipad's, a square this far from its middle, model units), where the fight's floor is cut off. */
+const EDGED = new Map([[11, 1068]]);
+
 const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
-/** How much deeper the floor's depth lies than the floor (a share of its distance from the eye): a few centimetres at the fight's distances. */
-const FLOOR_DEPTH = 0.003;
+/** How much nearer the fighters' depth lies than the fighters (a share of their distance from the eye): a few centimetres at the fight's distances. */
+const FIGHTER_DEPTH = 0.01;
+/**
+ * A fighter near the floor is drawn resting on it, its posed skin's lowest point set on the floor
+ * (the game's poses stand a little above it or sink a little, and lie in it): fully up to `GROUNDED`
+ * metres above the floor, then less and less up to `AIRBORNE`, past which it is drawn where it is.
+ */
+const GROUNDED = 0.02;
+const AIRBORNE = 0.06;
 /** The picture's half-height in the game's pixels, which its projection distance is against. */
 const HALF_HEIGHT = 240;
 /** Stage 11's sky behind its clouds, unless True Ogre plays there (8-bit sRGB). */
@@ -54,6 +115,15 @@ const FLASH_FRAMES = 0x30;
 const PRACTICE = 5;
 const TINT = 0.9;
 const SHADOW_STRENGTH = 1;
+/**
+ * How far a fighter's shadow caster is pushed away from the light: `OFFSET` metres, and `SHEAR`
+ * more per metre of height above the floor. Along the light, so each point's shadow falls on the
+ * floor where it did, only deeper: a low-polygon body no longer shades its own facets in hard
+ * patches where they turn from the light, while a limb or a chin well in front of the body still
+ * shades it. Small enough that a point a few centimetres up still shades the floor.
+ */
+const OFFSET = 0.05;
+const SHEAR = 0.03;
 /** How far around the fighters the shadow map reaches (metres): a wider square, softer edges. */
 const SHADOW_RADIUS = 4;
 
@@ -61,6 +131,28 @@ const linear = (c: number): number => {
   const v = c / 255;
   return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
 };
+
+/**
+ * The eye of a view matrix (column-major) whose rows may be scaled apart, as the game's stretches
+ * the picture's height, into `out`. The engine reads it as though they were not, which puts the eye
+ * of the fight's view metres too high, and the light then takes a surface turned a little from that
+ * eye for the back of a two-sided one, shading it as though it faced the other way.
+ */
+export function eyeOf(view: ArrayLike<number>, out: { [index: number]: number }): void {
+  const scale = [0, 1, 2].map((i) => Math.hypot(view[i]!, view[4 + i]!, view[8 + i]!) || 1);
+  for (let j = 0; j < 3; j += 1) {
+    let sum = 0;
+    for (let i = 0; i < 3; i += 1) sum += (view[j * 4 + i]! / scale[i]!) * (view[12 + i]! / scale[i]!);
+    out[j] = -sum;
+  }
+}
+
+/** How far a fighter whose lowest point stands `low` metres above the floor is lifted onto it (less than 0, lowered). */
+function liftOnto(low: number): number {
+  if (low <= GROUNDED) return -low;
+  if (low >= AIRBORNE) return 0;
+  return (-GROUNDED * (AIRBORNE - low)) / (AIRBORNE - GROUNDED);
+}
 
 export class FightView {
   private readonly renderer: RendererApi;
@@ -88,16 +180,22 @@ export class FightView {
   private readonly white: SurfaceTextureHandle;
   /** Per side, its models by pack: the one it shows, and in Tekken Force those it may change to. */
   private readonly sides: Map<number, { fighter: Fighter | null }>[] = [new Map(), new Map(), new Map()];
-  private readonly stages = new Map<number, { stage: Stage; ground: Ground; beach: Beach | null; force: ForceBackdrop | null } | null>();
+  private readonly stages = new Map<number, StageDrawing | null>();
   /** Tekken Ball's ball, made for the first match that has one. */
   private ball: BallView | null = null;
   /** Tekken Force's items, made once their pictures are loaded for the first match that has them. */
   private items: ForceItems | null | undefined;
   private readonly ground = newGround();
   private readonly scenery = newScenery();
+  /** The scenery, held still on the floor while the fighters move a little way: an arcade stage's, and the disc's. */
+  private readonly heldArcade = newHeldScenery(HELD.arcade.radius, HELD.arcade.slack);
+  private readonly heldDisc = newHeldScenery(HELD.disc.radius, HELD.disc.slack);
   private readonly sceneryModel = new Float32Array(16);
-  private readonly floorModel = new Float32Array(16);
+  private readonly fighterModel = new Float32Array(16);
   private readonly casting: Fighter[] = [];
+  /** Per fighter cast, how far it is lifted onto the floor (metres), and its shadow's model. */
+  private readonly lifts: number[] = [];
+  private readonly casterModels: Float32Array[] = [];
   private readonly effects: Effects;
   /** The fighters' packs and stage `prepare` found ready, and those it waits on the compiles of. */
   private prepared = '';
@@ -166,16 +264,20 @@ export class FightView {
   }
 
   /** The stage's scenery and ground, loaded the first time it is asked for (null until then). */
-  private stageFor(id: number): { stage: Stage; ground: Ground; beach: Beach | null; force: ForceBackdrop | null } | null {
+  private stageFor(id: number): StageDrawing | null {
     if (!this.stages.has(id)) {
       this.stages.set(id, null);
-      void this.files.stage(id).then(({ mesh, ground, texture, backdrop }) => {
+      void this.files.stage(id).then(({ mesh, ground, texture, backdrop, arcade }) => {
         const handle = this.renderer.createSurfaceTexture(texture, this.textureOptions(true));
-        const stage = createStage(this.renderer, mesh, handle);
+        /* The ground's cells are in the disc's atlas, whichever scenery is drawn. */
+        const atlas = stageAtlasSize(mesh);
+        const stage = arcade === undefined ? createStage(this.renderer, mesh, handle) : createStage(this.renderer, arcade.mesh, this.renderer.createSurfaceTexture(arcade.texture, this.textureOptions(true)));
         const force = backdrop !== undefined && FORCE_STAGES.first <= id && id <= FORCE_STAGES.last;
         const beach = backdrop === undefined || force ? null : new Beach(this.renderer, backdrop, this.white);
         const forceBackdrop = force ? new ForceBackdrop(this.renderer, backdrop) : null;
-        this.stages.set(id, { stage, ground: new Ground(this.renderer, ground, stage.atlasWidth, stage.atlasHeight, handle, this.groundTint), beach, force: forceBackdrop });
+        const sky = arcade !== undefined && arcadeSkyOver(id) ? new ArcadeSky(this.renderer, id, arcade.panorama ?? null) : null;
+        const objects = (arcade?.objects ?? []).map((o) => ({ stage: createStage(this.renderer, o.mesh, this.renderer.createSurfaceTexture(o.texture, this.textureOptions(true))), motion: o, placed: [] }));
+        this.stages.set(id, { stage, ground: new Ground(this.renderer, ground, atlas.width, atlas.height, handle, this.groundTint), beach, force: forceBackdrop, sky, objects });
       });
     }
     return this.stages.get(id) ?? null;
@@ -213,7 +315,7 @@ export class FightView {
     if (this.preparing === key) return false;
     this.preparing = key;
     for (const fighter of fighters) this.renderer.prepareMesh(fighter!.handle, fighter!.material);
-    for (const cell of drawn.stage.cells) if (cell !== null) this.renderer.prepareMesh(cell, drawn.stage.material, { translucent: true });
+    for (const cell of drawn.stage.cells) for (const piece of cell) this.renderer.prepareMesh(piece.mesh, piece.oneSided ? drawn.stage.oneSidedMaterial : drawn.stage.material, { translucent: true });
     void this.renderer.ready().then(() => {
       if (this.preparing === key) this.prepared = key;
     });
@@ -232,6 +334,33 @@ export class FightView {
     return joints;
   }
 
+  /**
+   * The scenery's cells the game keeps and its moving pieces (each part where `placeParts` set it,
+   * or a flipbook's frame): the solid polygons, or those cut out of their textures.
+   */
+  private drawScenery(state: FightState, drawn: StageDrawing, cut: boolean): void {
+    const renderer = this.renderer;
+    const model = this.sceneryMatrix();
+    for (const oneSided of [false, true]) {
+      renderer.setMaterial(oneSided ? drawn.stage.oneSidedMaterial : drawn.stage.material);
+      drawn.stage.cells.forEach((cell, i) => {
+        if (!(0 < this.scenery.cells[i]!)) return;
+        for (const piece of cell) if (piece.oneSided === oneSided && piece.cut === cut) renderer.drawTranslucentMesh(piece.mesh, model, 1, { lit: false, fog: false, depthLayer: piece.layer });
+      });
+    }
+    for (const object of drawn.objects) {
+      const motion = object.motion;
+      if (motion.shown === 'fighting' && state.round.flow === 0) continue;
+      const cells = motion.frames > 1 ? [[Math.floor(state.frameCount / motion.fields) % motion.frames, 0]] : motion.parts.map((_, i) => [i, i]);
+      /* Drawn from both sides: a piece is closed, and its own polygons face as the game's moving pieces do, not as its scenery's. */
+      renderer.setMaterial(object.stage.material);
+      for (const [cell, part] of cells) {
+        for (const piece of object.stage.cells[cell!] ?? []) if (piece.cut === cut) renderer.drawTranslucentMesh(piece.mesh, object.placed[part!]!, 1, { lit: false, fog: false, depthLayer: piece.layer });
+      }
+    }
+    renderer.setMaterial(null);
+  }
+
   /** The game's view in the engine's axes, and its projection over the picture's half-height. */
   private adoptCamera(state: FightState, aspect: number): void {
     const flip = [1, -1, -1];
@@ -246,6 +375,7 @@ export class FightView {
     this.camera.fovYDeg = (2 * Math.atan(HALF_HEIGHT / h) * 180) / Math.PI;
     this.camera.updateMatrices(0.6 * aspect);
     this.camera.adoptView(this.view, this.camera.projection);
+    eyeOf(this.view, this.camera.position);
   }
 
   /** The flash's glow on a fighter: its colour at the strength left, by how much of the blow's side the camera sees. */
@@ -284,21 +414,35 @@ export class FightView {
     const z = -around.reduce((sum, f) => sum + f.skeleton.base.translation[2]!, 0) / around.length / 1000;
     this.env.shadowDepthSpan = computeLightMatrix(this.env.directionalDir, x, 0.8, z, SHADOW_RADIUS, this.renderer.shadowMapSize, this.lightMatrix);
     this.env.shadowStrength = SHADOW_STRENGTH;
+    const [dx, dy, dz] = this.env.directionalDir;
+    const length = Math.hypot(dx, dy, dz);
+    const [ax, ay, az] = [-dx / length, -dy / length, -dz / length];
     const casters: ShadowCasters = (sink) => {
-      for (const fighter of casting) sink.mesh(fighter.handle, IDENTITY, fighter.material);
+      casting.forEach((fighter, i) => {
+        /* Lifted as it is drawn, then pushed from the light (see `OFFSET`): p + away * (OFFSET + SHEAR * y). */
+        const lift = this.lifts[i]!;
+        const model = (this.casterModels[i] ??= IDENTITY.slice());
+        model.set([ax * SHEAR, 1 + ay * SHEAR, az * SHEAR], 4);
+        model.set([ax * (OFFSET + SHEAR * lift), lift + ay * (OFFSET + SHEAR * lift), az * (OFFSET + SHEAR * lift)], 12);
+        sink.mesh(fighter.handle, model, fighter.material);
+      });
     };
     this.renderer.beginShadowPass(this.lightMatrix, 'dynamic');
     this.renderer.drawShadowCasters(casters);
     this.renderer.endShadowPass();
   }
 
-  /** The floor pushed away from the eye along each line of sight: every point on the same pixel, a little deeper. */
-  private floorMatrix(state: FightState): Float32Array {
+  /**
+   * A fighter lifted onto the floor by `lift` metres, and drawn pulled toward the eye along each
+   * line of sight: every point on the same pixel, a little nearer, so a sole on the floor stays in
+   * sight over it, while the floor and the shadows cast on it stay where they are.
+   */
+  private fighterMatrix(state: FightState, lift: number): Float32Array {
     const eye = state.camera.drawn.eye;
-    const k = 1 + FLOOR_DEPTH;
-    const [ex, ey, ez] = [eye[0]! / 1000, -eye[1]! / 1000, -eye[2]! / 1000];
-    this.floorModel.set([k, 0, 0, 0, 0, k, 0, 0, 0, 0, k, 0, (1 - k) * ex, (1 - k) * ey, (1 - k) * ez, 1]);
-    return this.floorModel;
+    const k = 1 - FIGHTER_DEPTH;
+    const [ex, ey, ez] = freeView.active ? freeView.eye : [eye[0]! / 1000, -eye[1]! / 1000, -eye[2]! / 1000];
+    this.fighterModel.set([k, 0, 0, 0, 0, k, 0, 0, 0, 0, k, 0, (1 - k) * ex, k * lift + (1 - k) * ey, (1 - k) * ez, 1]);
+    return this.fighterModel;
   }
 
   /** Where the scenery stands, in the engine's axes: at its place and the stage's height, turned by minus its yaw. */
@@ -320,6 +464,7 @@ export class FightView {
     const renderer = this.renderer;
     const widening = Math.max(1, aspect / (4 / 3));
     this.adoptCamera(state, aspect);
+    if (freeView.active) freeView.apply(this.camera, 0.6 * aspect);
     this.casting.length = 0;
     const posed: FighterState[] = [];
     const sides = this.sidesOf(state);
@@ -341,6 +486,7 @@ export class FightView {
       fighter.face(f.eyesShut !== 0 ? 1 : 0);
       fighter.pose(this.jointsOf(f));
       this.light(state, fighter, f);
+      this.lifts[this.casting.length] = liftOnto(fighter.lowest());
       this.casting.push(fighter);
     }
     this.castShadows(state, posed);
@@ -352,29 +498,33 @@ export class FightView {
     renderer.bindMeshPass(this.camera, this.env);
     const drawn = this.stageFor(state.stage);
     const layout = this.arena.stages[state.stage];
+    const scenery = drawn !== null && layout != null && only.scenery && state.match.trueOgres === 0 && layout.cellSize !== 0;
+    if (scenery) layScenery(state, this.data, this.arena, drawn.stage, { widening }, this.scenery, drawn.stage.grid === ARCADE_GRID ? this.heldArcade : this.heldDisc);
+    /* The free camera sees every cell: the game's culling is its own camera's. */
+    if (scenery && freeView.active) this.scenery.cells.fill(1);
+    /* An arcade stage's sky and panorama, behind everything drawn after them. */
+    if (drawn?.sky != null && only.scenery && state.match.trueOgres === 0) drawn.sky.draw(state, this.camera, this.env, aspect, this.scenery.yaw);
     const ball = state.mode === TEKKEN_BALL && !stageAlone;
     /* Tekken Force's backdrop is the farthest thing drawn: everything after it lies over it. */
     if (drawn?.force != null && state.mode === TEKKEN_FORCE) drawn.force.draw(state, this.data, aspect);
     if (drawn !== null && layout != null) {
-      if (only.scenery && state.match.trueOgres === 0 && layout.cellSize !== 0) {
-        layScenery(state, this.data, this.arena, layout, { widening }, this.scenery);
-        renderer.setMaterial(drawn.stage.material);
-        const model = this.sceneryMatrix();
-        drawn.stage.cells.forEach((cell, i) => {
-          if (cell !== null && 0 < this.scenery.cells[i]!) renderer.drawTranslucentMesh(cell, model, 1, { lit: false, fog: false });
-        });
-        renderer.setMaterial(null);
+      if (scenery) {
+        /* The stage's moving pieces: a model's parts each where the piece and the part stand this field. */
+        for (const object of drawn.objects) placeParts(object.motion, state.frameCount, this.sceneryMatrix(), object.placed);
+        this.drawScenery(state, drawn, false);
       }
       /*
        * The floor is solid, so the fighters' shadows and the occlusion where they stand land on it;
-       * its depth lies a little past it, so a sole the pose sinks into it stays in sight as the
-       * game, drawing the floor first and everything over it, keeps it.
+       * the fighters are drawn a little nearer than they stand (fighterMatrix), so a sole the pose
+       * sinks into it stays in sight as the game, drawing the floor first and everything over it,
+       * keeps it.
        */
-      layGround(state, this.data, this.arena, layout, { widening }, this.ground);
-      drawn.ground.update(this.ground);
+      layGround(state, this.data, this.arena, layout, { widening }, this.ground, drawn.stage.grid === ARCADE_GRID);
+      const edge = drawn.stage.grid === ARCADE_GRID ? EDGED.get(state.stage) : undefined;
+      drawn.ground.update(this.ground, edge === undefined ? null : { x: this.scenery.x, z: this.scenery.z, yaw: this.scenery.yaw, half: edge * 8 });
       if (drawn.ground.mesh !== null) {
         renderer.setMaterial(drawn.ground.material);
-        renderer.drawMesh(drawn.ground.mesh, this.floorMatrix(state));
+        renderer.drawMesh(drawn.ground.mesh, IDENTITY);
         renderer.setMaterial(null);
       }
       if (drawn.beach !== null) {
@@ -382,12 +532,14 @@ export class FightView {
         drawn.beach.drawPanorama(state, this.data, aspect);
       }
     }
+    /* The cut-out scenery, over the solid scenery and the floor: its soft edges blend with what lies behind it. */
+    if (drawn !== null && layout != null && scenery) this.drawScenery(state, drawn, true);
     behind?.();
-    for (const fighter of this.casting) {
+    this.casting.forEach((fighter, i) => {
       renderer.setMaterial(fighter.material);
-      renderer.drawMesh(fighter.handle, IDENTITY);
+      renderer.drawMesh(fighter.handle, this.fighterMatrix(state, this.lifts[i]!));
       renderer.setMaterial(null);
-    }
+    });
     if (ball) {
       this.ball ??= new BallView(renderer, this.data.ball, this.data.math, this.white);
       this.ball.draw(state, this.view);

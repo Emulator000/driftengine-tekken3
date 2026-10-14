@@ -7,7 +7,8 @@
 import { loadFightTables, loadMoveset } from '../assets/load.ts';
 import { Fight } from '../sim/fight/fight.ts';
 import { fightDataFor, matchMovesets, type MatchSetup } from '../sim/fight/match.ts';
-import { FightView, type DrawingFiles } from '../present/3d/fight-view.ts';
+import { FightView, type ArcadeStageFiles, type DrawingFiles } from '../present/3d/fight-view.ts';
+import { TEXTURE_SCALE, type ArcadeObject, type ArcadePanorama } from '../assets/manifest.ts';
 import { Hud } from '../present/hud/hud.ts';
 import { PauseScreen } from '../present/hud/pause.ts';
 import { loadTypefaces } from '../present/2d/typefaces.ts';
@@ -22,6 +23,25 @@ const LAW = 1;
 
 /** Whether the fighters and stages are drawn with their textures enlarged and smooth, or as the console drew them (`?textures=psx`). */
 const smooth = params.get('textures') !== 'psx';
+/**
+ * Whether a stage the arcade board's data has is drawn with the arcade's scenery, the default once
+ * `npm run arcade` has read it, or with the disc's (`?stages=psx`).
+ */
+const arcadeScenery = params.get('stages') !== 'psx';
+interface ArcadeList {
+  readonly stages: ReadonlySet<number>;
+  readonly panoramas: readonly ArcadePanorama[];
+  readonly objects: readonly ArcadeObject[];
+}
+let arcadeStages: Promise<ArcadeList> | null = null;
+/** The stages drawn with the arcade's scenery, their panoramas and their moving pieces. */
+const arcadeStagesOf = (): Promise<ArcadeList> =>
+  (arcadeStages ??= arcadeScenery
+    ? json('manifest.json').then((m) => {
+        const manifest = m as { arcadeStages?: number[]; arcadePanoramas?: ArcadePanorama[]; arcadeObjects?: ArcadeObject[] };
+        return { stages: new Set(manifest.arcadeStages ?? []), panoramas: manifest.arcadePanoramas ?? [], objects: manifest.arcadeObjects ?? [] };
+      })
+    : Promise.resolve({ stages: new Set(), panoramas: [], objects: [] }));
 /** A fighter's, an intro model's or a stage's texture atlas by its file's name: the enlarged one, or the original. */
 const atlas = (kind: string, name: string): Promise<ImageBitmap> => (smooth ? assetImage(`textures/${kind}/${name}.png`) : image(`${kind}/${name}.png`));
 /**
@@ -47,9 +67,26 @@ const backdropOf = (id: number): Promise<ImageBitmap> | undefined => {
   return undefined;
 };
 
-const stage = async (id: number): Promise<{ mesh: ArrayBuffer; ground: ArrayBuffer; texture: ImageBitmap; backdrop?: ImageBitmap }> => {
-  const [mesh, ground, texture, backdrop] = await Promise.all([dataBytes(`stages/${two(id)}.stg`), dataBytes(`stages/${two(id)}.gnd`), atlas('stages', two(id)), backdropOf(id)]);
-  return backdrop === undefined ? { mesh, ground, texture } : { mesh, ground, texture, backdrop };
+/** The arcade's scenery for a stage and its atlas, where it is drawn, and its panorama where it has one. */
+const arcadeOf = async (id: number): Promise<ArcadeStageFiles | undefined> => {
+  const { stages, panoramas, objects } = await arcadeStagesOf();
+  if (!stages.has(id)) return undefined;
+  const sky = panoramas.find((p) => p.stage === id);
+  const own = objects.filter((o) => o.stage === id);
+  const [mesh, texture, picture, pieces] = await Promise.all([
+    dataBytes(`arcade/stages/${two(id)}.stg`),
+    atlas('arcade/stages', two(id)),
+    sky === undefined ? null : atlas('arcade/stages', `${two(id)}.sky`),
+    Promise.all(own.map(async (o) => ({ ...o, mesh: await dataBytes(`arcade/stages/${two(id)}-${o.piece}.stg`), texture: await atlas('arcade/stages', `${two(id)}-${o.piece}`) }))),
+  ]);
+  const scale = smooth ? TEXTURE_SCALE.stages : 1;
+  const panorama = sky === undefined || picture === null ? undefined : { picture, width: picture.width / scale, height: picture.height / scale, top: sky.top, bottom: sky.bottom, horizon: sky.horizon };
+  return { mesh, texture, objects: pieces, ...(panorama === undefined ? {} : { panorama }) };
+};
+
+const stage = async (id: number): Promise<{ mesh: ArrayBuffer; ground: ArrayBuffer; texture: ImageBitmap; backdrop?: ImageBitmap; arcade?: ArcadeStageFiles }> => {
+  const [mesh, ground, texture, backdrop, arcade] = await Promise.all([dataBytes(`stages/${two(id)}.stg`), dataBytes(`stages/${two(id)}.gnd`), atlas('stages', two(id)), backdropOf(id), arcadeOf(id)]);
+  return { mesh, ground, texture, ...(backdrop === undefined ? {} : { backdrop }), ...(arcade === undefined ? {} : { arcade }) };
 };
 
 /** The fighters' and stages' drawing data, by pack and stage. */

@@ -5,7 +5,10 @@
  */
 import { createRenderer, describeGpu, ResolutionGovernor, startLoop, type RendererApi } from '@driftengine/core';
 import { entryLevelGpu, fightQuality, isQuality, type Quality } from '../present/3d/quality.ts';
+import { FpsMeter } from './fps-meter.ts';
 import { FrameStats } from './frame-stats.ts';
+import { FreeCamera } from './free-camera.ts';
+import { freeView } from '../present/3d/free-view.ts';
 import { PadInput } from './input.ts';
 import { CONSOLE_PADS, type Controllers } from '../present/2d/controls.ts';
 import { evenFrames } from './pacing.ts';
@@ -183,6 +186,9 @@ export function play(player: Player, renderer: RendererApi, backend: string): vo
     slow.long = 0;
   };
   const stopAt = Number(params.get('stop') ?? Infinity);
+  /* `P` flies a free camera through the held fight; `F` shows the frame rate. */
+  new FreeCamera(canvas);
+  const meter = new FpsMeter();
   let failure: Error | null = null;
   let fields = 0;
   /** The fields and the window size the last frame drawn showed, and the frames drawn and left. */
@@ -192,7 +198,7 @@ export function play(player: Player, renderer: RendererApi, backend: string): vo
   startLoop(
     {
       simulate() {
-        if (failure !== null || stopAt <= fields) return;
+        if (failure !== null || stopAt <= fields || freeView.active) return;
         try {
           const start = performance.now();
           const touched = touch?.word() ?? 0;
@@ -210,9 +216,10 @@ export function play(player: Player, renderer: RendererApi, backend: string): vo
       render() {
         const { width, height } = canvas;
         const now = performance.now();
-        const same = fields === drawnAt.fields && width === drawnAt.width && height === drawnAt.height && player.moving?.() !== true;
+        const same = fields === drawnAt.fields && width === drawnAt.width && height === drawnAt.height && player.moving?.() !== true && !freeView.active;
         if (same || (veryLow && now - lastDrawn < VERY_LOW_FRAME_MS)) {
           frames.kept += 1;
+          if (same) meter.frame(now);
           return;
         }
         if (lastDrawn > 0) {
@@ -227,6 +234,7 @@ export function play(player: Player, renderer: RendererApi, backend: string): vo
         stats.drawing();
         player.render(width, height);
         stats.drawn();
+        meter.frame(now);
       },
     },
     { fixedDt: 1 / 60, maxFrameTime: MOST_FIELDS / 60, frameSource: evenFrames() },

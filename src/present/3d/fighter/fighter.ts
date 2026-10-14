@@ -350,6 +350,27 @@ export class Fighter {
     this.renderer.posePointSkin(this.skin, f);
   }
 
+  /** The posed skin's lowest point: metres above the floor, or below it where less than 0. */
+  lowest(): number {
+    const { joints, weights, points } = this.data;
+    const f = this.matrices;
+    let low = Infinity;
+    for (let at = 0; at < weights.length; at += INFLUENCES) {
+      let y = 0;
+      let sum = 0;
+      for (let k = at; k < at + INFLUENCES; k += 1) {
+        const w = weights[k]!;
+        if (w === 0) continue;
+        const o = joints[k]! * 16;
+        y += w * (f[o + 1]! * points[k * 3]! + f[o + 5]! * points[k * 3 + 1]! + f[o + 9]! * points[k * 3 + 2]! + f[o + 13]!);
+        sum += w;
+      }
+      /* A vertex weighing nothing (a picture the face does not show) is drawn nowhere. */
+      if (sum > 0 && y < low) low = y;
+    }
+    return low;
+  }
+
   /**
    * Vertex `i` in the skin: its weighted points, the one on its normal's joint first (or that joint
    * weighing nothing, where it holds none of them); nothing, on a picture the face does not show.

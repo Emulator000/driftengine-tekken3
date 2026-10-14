@@ -20,6 +20,10 @@
  *   stages/NN.*      per stage: its scenery (.stg) and atlas (.png), its ground's cells (.gnd),
  *                    and the ground map itself (.map), which the fight reads; Tekken Force's
  *                    stages (15 to 18) and Tekken Ball's beach (19) with no scenery
+ *   arcade/stages/NN.* with the arcade board's data (`npm run arcade`, optional), per stage the
+ *                    arcade has: its scenery (.stg) and atlas (.png), drawn in place of the disc's,
+ *                    and the panorama behind it (.sky.png) where it has one, and its moving
+ *                    pieces from the board's program (NN-K.stg and .png)
  *   bns/NNN.bin      every file of TEKKEN3.BNS as it is, which the game's own loader reads by
  *                    logical id (the overlays, the menus' textures), their count in the manifest
  *   music/NN.xa      each XA song's own sectors (scripts/lib/xa.mjs)
@@ -46,6 +50,8 @@ import { readMoveset } from './lib/t4/moveset.mjs';
 import { exportFighter, partTable } from './lib/fighter.mjs';
 import { parseModel } from './lib/model.mjs';
 import { exportStage } from './lib/stage.mjs';
+import { archiveAt, PROGRAM_STAGES, STAGE_ARCHIVES, STAGE_OBJECTS, STAGE_PANORAMAS } from './lib/arcade/board.mjs';
+import { exportArcadeObject, exportArcadePanorama, exportArcadeStage } from './lib/arcade/stage.mjs';
 import { readTimChain } from './lib/texture.mjs';
 import { decodePng, encodePng } from './lib/png.mjs';
 import { openDisc } from './lib/iso.mjs';
@@ -59,10 +65,14 @@ const out = path.join(root, 'public/data');
 const exePath = path.join(root, '.cache/disc/SLUS_004.02');
 if (!existsSync(exePath)) throw new Error('no disc data: run npm run disc first');
 /** The format of what this writes, in its manifest: raised when the output changes, so `npm run dev` extracts again. */
-const DATA_FORMAT = 11;
+const DATA_FORMAT = 12;
+/** The arcade board's data, when `npm run arcade` has read it. */
+const arcadePath = path.join(root, '.cache/arcade/data.bin');
+/* Extracted already: at this format, and with the arcade's stages exactly when its data is there. */
 const extracted = (() => {
   try {
-    return JSON.parse(readFileSync(path.join(out, 'manifest.json'), 'utf8')).format === DATA_FORMAT && existsSync(path.join(out, 'movies/streams.json'));
+    const manifest = JSON.parse(readFileSync(path.join(out, 'manifest.json'), 'utf8'));
+    return manifest.format === DATA_FORMAT && existsSync(path.join(out, 'movies/streams.json')) && existsSync(arcadePath) === (manifest.arcadeStages?.length > 0);
   } catch {
     return false;
   }
@@ -312,6 +322,50 @@ for (let s = 15; s < 20; s += 1) {
   stages.push({ stage: s, height: exe.readInt16LE(at(0x80025138) + s * 4), ...result.stats });
 }
 
+/* The arcade's stages, from the board's data, when it is there: drawn in place of the disc's, with their panoramas. */
+const arcadeStages = [];
+const arcadePanoramas = [];
+const arcadeObjects = [];
+if (existsSync(arcadePath)) {
+  const data = new Uint8Array(readFileSync(arcadePath));
+  const program = new Uint8Array(readFileSync(path.join(root, '.cache/arcade/program.bin')));
+  const archives = [...STAGE_ARCHIVES.map((at, s) => [s, archiveAt(data, at)]), ...[...PROGRAM_STAGES].map(([s, at]) => [s, archiveAt(program, at)])];
+  archives.forEach(([s, archive]) => {
+    const id = String(s).padStart(2, '0');
+    const pieces = STAGE_OBJECTS.get(s) ?? [];
+    const result = exportArcadeStage(archive, encodePng, pieces.filter((p) => p.flipbook !== undefined).map((p) => p.flipbook), program);
+    put(`arcade/stages/${id}.stg`, result.mesh);
+    put(`arcade/stages/${id}.png`, result.atlas);
+    arcadeStages.push(s);
+    let book = 0;
+    pieces.forEach((object, k) => {
+      const piece = object.flipbook !== undefined ? result.books[book++] : exportArcadeObject(program, object, encodePng);
+      if (piece.stats.polygons === 0) throw new Error(`stage ${s}: its ${object.name} has no polygons`);
+      put(`arcade/stages/${id}-${k}.stg`, piece.mesh);
+      put(`arcade/stages/${id}-${k}.png`, piece.atlas);
+      const frames = object.flipbook !== undefined ? readTimChain(program.subarray(...object.flipbook)).length : 1;
+      arcadeObjects.push({
+        stage: s,
+        piece: k,
+        at: object.at ?? [0, 0, 0],
+        angles: object.angles ?? [0, 0, 0],
+        spin: object.spin ?? 0,
+        wrap: object.wrap ?? 0,
+        sway: object.sway ?? [],
+        parts: (object.parts ?? [{}]).map((part) => ({ at: part.at ?? [0, 0, 0], angles: part.angles ?? [0, 0, 0], spin: part.spin ?? { axis: 1, rate: 0 } })),
+        frames,
+        fields: object.fields ?? 1,
+        shown: object.shown ?? 'always',
+      });
+    });
+    const layout = STAGE_PANORAMAS.get(s);
+    if (layout === undefined) return;
+    const panorama = exportArcadePanorama(archive, layout, encodePng);
+    put(`arcade/stages/${id}.sky.png`, panorama.atlas);
+    arcadePanoramas.push({ stage: s, top: panorama.top, bottom: panorama.bottom, horizon: layout.horizon });
+  });
+}
+
 /* Every BNS file as it is, for the game's own loader. */
 let files = 0;
 for (; existsSync(path.join(bns, String(files).padStart(3, '0'))); files += 1) put(`bns/${String(files).padStart(3, '0')}.bin`, file(files));
@@ -376,7 +430,7 @@ if (haveFfmpeg()) {
   put('movies/version.json', JSON.stringify({ version: MOVIE_VERSION }));
 } else console.log('no ffmpeg: no movies (the game shows black for their length)');
 
-put('manifest.json', JSON.stringify({ format: DATA_FORMAT, fighters, stages, files, kazuya, kazuyaVoice: kazuya, songs: songs.length, tracks, movies }, null, 2));
+put('manifest.json', JSON.stringify({ format: DATA_FORMAT, fighters, stages, arcadeStages, arcadePanoramas, arcadeObjects, files, kazuya, kazuyaVoice: kazuya, songs: songs.length, tracks, movies }, null, 2));
 
 /*
  * Files are overwritten in place, never the directory removed and made again: a running dev server
@@ -387,4 +441,4 @@ for (const entry of readdirSync(out, { recursive: true, withFileTypes: true })) 
   const full = path.join(entry.parentPath, entry.name);
   if (entry.isFile() && !written.has(full)) rmSync(full);
 }
-console.log(`${fighters.length} fighters; ${fighters.reduce((n, f) => n + f.triangles, 0)} triangles in all; ${stages.length} stages`);
+console.log(`${fighters.length} fighters; ${fighters.reduce((n, f) => n + f.triangles, 0)} triangles in all; ${stages.length} stages${arcadeStages.length > 0 ? `, ${arcadeStages.length} of them the arcade's` : ''}`);

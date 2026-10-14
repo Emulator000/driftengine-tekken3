@@ -4,17 +4,29 @@
  * use; and the ground's 100 map cells with their atlas UVs, which the game lays as a patch that
  * follows the fighters.
  *
- * The mesh format (`STG1` version 2, little-endian): u32 magic, u32 version, u32 vertex count,
- * u32 index count, u16 atlas width, u16 atlas height, u32 the model's cell size (its second word);
- * per cell of the 6 × 6 grid, u32 first index and u32 index count; per vertex 20 bytes: i16 x, y,
- * z (8 mm units), u8 r, g, b (128 is unchanged), u8 reserved, u16 u, v (atlas texels), u16
- * reserved, u16 reserved; then u32 indices, cell by cell.
+ * The mesh format (`STG1` version 3, little-endian): u32 magic, u32 version, u32 vertex count,
+ * u32 index count, u16 atlas width, u16 atlas height, u32 the model's cell size (its second word),
+ * u32 the grid's cells each way (6; 16 for an arcade stage); per cell of the grid, row by row,
+ * u32 first index and u32 index count; per vertex 20 bytes: i16 x, y, z (8 mm units), u8 r, g, b
+ * (128 is unchanged), u8 flags (1: the stage shades it as the fight runs; 2: its polygon is seen
+ * from its front only; 4 and 8: the layer it lies in over a polygon in the same plane; 16: its
+ * texture has clear texels, so it is drawn after the solid scenery), u16 u, v (atlas texels),
+ * u16 reserved, u16 reserved; then u32 indices, cell by cell.
  */
 import { absoluteVram, packAtlas, packetTarget, readTimChain } from './texture.mjs';
 
 export const STG_MAGIC = 0x31475453; // 'STG1'
+export const STG_VERSION = 3;
 /** The stage model's 6 × 6 grid of cells. */
-const CELLS = 36;
+const GRID = 6;
+/**
+ * A vertex's flags: the stage shades it as the fight runs; its polygon is seen from its front only;
+ * the layer it lies in over others in its plane (0 to 3); its texture has clear texels.
+ */
+export const SHADED = 1;
+export const ONE_SIDED = 2;
+export const LAYER_SHIFT = 2;
+export const CUT = 16;
 
 /** A ground map's size, in tiles each way. */
 const MAP = 10;
@@ -116,41 +128,17 @@ export function exportStage(modelBytes, textureMembers, encodePng, tims = readTi
   const vertices = [];
   const indices = [];
   /* Per cell, where its polygons' indices start and how many, so the cells the game culls can be left out. */
-  const cellRanges = Array.from({ length: CELLS }, () => [0, 0]);
+  const cellRanges = Array.from({ length: GRID * GRID }, () => [0, 0]);
   for (const polygon of polygons) {
     const base = vertices.length;
     if (cellRanges[polygon.cell][1] === 0) cellRanges[polygon.cell][0] = indices.length;
-    for (const corner of polygon.corners) vertices.push([...corner.p, ...polygon.rgb, ...packed.place(polygon.target, corner.uv)]);
+    const flags = packed.clearIn(polygon.target, polygon.corners.map((c) => c.uv)) ? CUT : 0;
+    for (const corner of polygon.corners) vertices.push({ p: corner.p, rgb: polygon.rgb, flags, uv: packed.place(polygon.target, corner.uv) });
     if (polygon.corners.length === 3) indices.push(base, base + 1, base + 2);
     else indices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
     cellRanges[polygon.cell][1] = indices.length - cellRanges[polygon.cell][0];
   }
-  const mesh = new Uint8Array(24 + CELLS * 8 + vertices.length * 20 + indices.length * 4);
-  const out = new DataView(mesh.buffer);
-  out.setUint32(0, STG_MAGIC, true);
-  out.setUint32(4, 2, true);
-  out.setUint32(8, vertices.length, true);
-  out.setUint32(12, indices.length, true);
-  out.setUint16(16, width, true);
-  out.setUint16(18, height, true);
-  out.setUint32(20, view === null ? 0 : view.getUint32(4, true), true);
-  let at = 24;
-  for (const [start, count] of cellRanges) {
-    out.setUint32(at, start, true);
-    out.setUint32(at + 4, count, true);
-    at += 8;
-  }
-  for (const v of vertices) {
-    for (let k = 0; k < 3; k += 1) out.setInt16(at + k * 2, v[k], true);
-    for (let k = 0; k < 3; k += 1) out.setUint8(at + 6 + k, v[3 + k]);
-    out.setUint16(at + 10, v[6], true);
-    out.setUint16(at + 12, v[7], true);
-    at += 20;
-  }
-  for (const i of indices) {
-    out.setUint32(at, i, true);
-    at += 4;
-  }
+  const mesh = writeStageMesh({ vertices, indices, cellRanges, width, height, cellSize: view === null ? 0 : view.getUint32(4, true), grid: GRID });
   const ground = new Uint8Array(8 + cells.length * 16);
   const g = new DataView(ground.buffer);
   g.setUint32(0, GND_MAGIC, true);
@@ -163,4 +151,40 @@ export function exportStage(modelBytes, textureMembers, encodePng, tims = readTi
     });
   });
   return { mesh, ground, map: textureMembers[1], atlas: encodePng(width, height, atlas), stats: { polygons: polygons.length, atlas: [width, height] } };
+}
+
+/**
+ * A stage mesh file: `vertices` as `{ p: [x, y, z], rgb, flags, uv }`, `indices` cell by cell,
+ * and per cell of the `grid` × `grid` cells its first index and index count.
+ */
+export function writeStageMesh({ vertices, indices, cellRanges, width, height, cellSize, grid }) {
+  const mesh = new Uint8Array(28 + grid * grid * 8 + vertices.length * 20 + indices.length * 4);
+  const out = new DataView(mesh.buffer);
+  out.setUint32(0, STG_MAGIC, true);
+  out.setUint32(4, STG_VERSION, true);
+  out.setUint32(8, vertices.length, true);
+  out.setUint32(12, indices.length, true);
+  out.setUint16(16, width, true);
+  out.setUint16(18, height, true);
+  out.setUint32(20, cellSize, true);
+  out.setUint32(24, grid, true);
+  let at = 28;
+  for (const [start, count] of cellRanges) {
+    out.setUint32(at, start, true);
+    out.setUint32(at + 4, count, true);
+    at += 8;
+  }
+  for (const v of vertices) {
+    for (let k = 0; k < 3; k += 1) out.setInt16(at + k * 2, v.p[k], true);
+    for (let k = 0; k < 3; k += 1) out.setUint8(at + 6 + k, v.rgb[k]);
+    out.setUint8(at + 9, v.flags);
+    out.setUint16(at + 10, v.uv[0], true);
+    out.setUint16(at + 12, v.uv[1], true);
+    at += 20;
+  }
+  for (const i of indices) {
+    out.setUint32(at, i, true);
+    at += 4;
+  }
+  return mesh;
 }
