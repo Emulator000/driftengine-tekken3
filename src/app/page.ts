@@ -125,6 +125,7 @@ export async function pageRenderer(): Promise<{ renderer: RendererApi; backend: 
   if (remastered()) {
     renderer.setFilmicCurve({ slope: 1.2, toe: 0.3, shoulder: 0.26, blackClip: 0, whiteClip: 0.04 });
     applyLook(renderer, lookAsked());
+    applyBrightness(renderer, brightnessAsked());
   }
   console.log(`[tekken3 remake] ${backend}: ${reason}`);
   renderer.resize();
@@ -141,6 +142,20 @@ const LOOKS = [
 
 /** The look asked for: LOOK in REMAKE OPTION, or the address's (`?look=light`, `normal` or `strong`). */
 const lookAsked = (): number => Math.max(0, ['light', 'normal', 'strong'].indexOf(asked(params, 'look', settings.look, ['light', 'normal', 'strong']) ?? 'normal'));
+
+/** The remaster's brightness, low to high: how far into its filmic curve the picture is exposed (low as it was first drawn). */
+const BRIGHTNESS = [1, 1.15, 1.35] as const;
+
+/** The brightness asked for: BRIGHTNESS in REMAKE OPTION, or the address's (`?brightness=low`, `normal` or `high`). */
+const brightnessAsked = (): number => Math.max(0, ['low', 'normal', 'high'].indexOf(asked(params, 'brightness', settings.brightness, ['low', 'normal', 'high']) ?? 'normal'));
+
+/** Remastered, the picture's brightness (0 low, 1 normal, 2 high). */
+export function applyBrightness(renderer: RendererApi, brightness: number): void {
+  renderer.setOutputExposure(BRIGHTNESS[brightness] ?? BRIGHTNESS[1]);
+}
+
+/** Remastered, whether the floors fade into the dark as the game's do: FLOOR FADE in REMAKE OPTION, or the address's (`?floorfade=on` or `off`); changed as the setting is. */
+export const floorFade = { on: asked(params, 'floorfade', settings.floorFade, ['on', 'off']) !== 'off' };
 
 /** Remastered, the picture's look (0 light, 1 normal, 2 strong), as the remaster draws it. */
 export function applyLook(renderer: RendererApi, look: number): void {

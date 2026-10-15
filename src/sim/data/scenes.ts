@@ -444,7 +444,9 @@ export type OptionValue =
   | 'frameRate'
   | 'touchPad'
   | 'remaster'
-  | 'look';
+  | 'look'
+  | 'brightness'
+  | 'floorFade';
 
 /**
  * An item of an Options list: what it changes, its label and its values' names, how left and

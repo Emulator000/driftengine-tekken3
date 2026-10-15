@@ -24,7 +24,7 @@ import { Puddles } from './stage/puddles.ts';
 import { lookOfStage, pixelsOf } from './stage/looks.ts';
 import { Backdrop, type Ridge } from './stage/backdrop.ts';
 import { createStage, stageAtlasSize, type Stage } from './stage/stage.ts';
-import { ACCESSORIES, FEET, GROUND_TILE, layGround, layScenery, liftOnto, newGround, newHeldScenery, newScenery } from './layout.ts';
+import { ACCESSORIES, fadeScenery, FEET, GROUND_TILE, layGround, layScenery, liftOnto, newGround, newHeldScenery, newScenery, newSceneryFade } from './layout.ts';
 import { Effects } from './effects/effects.ts';
 import { BallView } from './ball.ts';
 import { Beach, BEACH_STAGE, beachClear } from './stage/beach.ts';
@@ -55,6 +55,8 @@ export interface DrawingFiles {
   readonly cloth: boolean;
   /** Whether the fight is remastered: drawn with the engine's lighting, the stage's own sky and light, and the assets made on this machine. */
   readonly remaster?: boolean;
+  /** Remastered, whether the floors fade into the dark as the game's do (the default), or are lit evenly. */
+  readonly floorFade?: boolean;
 }
 
 /** An atlas's normal and ORM maps, and its heights, made on this machine for the remaster. */
@@ -120,6 +122,8 @@ const SUNLIT = 0.75;
  * (4096ths) go before the scenery is moved, an arcade stage's and the disc's, which stands nearer.
  */
 const ARCADE_GRID = 16;
+/** Every scenery cell drawn whole, as the reflection probe sees the stage. */
+const ALL_SHOWN = new Float32Array(256).fill(1);
 const HELD = { arcade: { radius: 3000, slack: 0x155 }, disc: { radius: 1500, slack: 0xaa } } as const;
 /** The arcade stages whose floor ends at their own edge (the helipad's, a square this far from its middle, model units), where the fight's floor is cut off. */
 const EDGED = new Map([[11, 1068]]);
@@ -219,6 +223,7 @@ export class FightView {
   private items: ForceItems | null | undefined;
   private readonly ground = newGround();
   private readonly scenery = newScenery();
+  private readonly sceneryFade = newSceneryFade();
   /** The scenery, held still on the floor while the fighters move a little way: an arcade stage's, and the disc's. */
   private readonly heldArcade = newHeldScenery(HELD.arcade.radius, HELD.arcade.slack);
   private readonly heldDisc = newHeldScenery(HELD.disc.radius, HELD.disc.slack);
@@ -334,7 +339,7 @@ export class FightView {
         const sceneryMaps = (arcade === undefined ? ownMaps : arcade.maps) ?? null;
         const heights = remaster && stageLook.relief > 0 && sceneryMaps?.height != null ? pixelsOf(sceneryMaps.height) : null;
         const look = remaster ? { light: { dir: stageLook.sun, sun: stageLook.sunColour, sky: stageLook.ambient, ground: stageLook.ambientGround, shade: SHADE, sunlit: SUNLIT }, ...this.mapTextures(sceneryMaps), height: heights, relief: stageLook.relief, ragged: stageLook.ragged === true } : null;
-        const stage = arcade === undefined ? createStage(this.renderer, mesh, handle, look) : createStage(this.renderer, arcade.mesh, this.renderer.createSurfaceTexture(arcade.texture, this.textureOptions(true, remaster && arcade.maps != null)), look);
+        const stage = arcade === undefined ? createStage(this.renderer, mesh, handle, look) : createStage(this.renderer, arcade.mesh, this.renderer.createSurfaceTexture(arcade.texture, this.textureOptions(true, remaster && arcade.maps != null)), look, remaster);
         const floorLook = remaster ? floorLookOf(this.renderer, texture, atlas, floor, stageLook) : null;
         const tint = remaster ? floorTint(stageLook) : this.groundTint;
         const laid = new Ground(this.renderer, ground, atlas.width, atlas.height, handle, tint, floorLook);
@@ -430,20 +435,25 @@ export class FightView {
   }
 
   /**
-   * The scenery's cells the game keeps and its moving pieces (each part where `placeParts` set it,
-   * or a flipbook's frame): the solid polygons, or those cut out of their textures.
+   * The scenery's cells the game keeps (each as much as `shown` says) and its moving pieces (each
+   * part where `placeParts` set it, or a flipbook's frame): the solid polygons, or those cut out of
+   * their textures. The cells drawn whole, with the moving pieces; or, `fading`, those partly drawn,
+   * writing no depth, so what lies behind a cell fading out shows through it.
    */
-  private drawScenery(state: FightState, drawn: StageDrawing, cut: boolean): void {
+  private drawScenery(state: FightState, drawn: StageDrawing, cut: boolean, shown: Float32Array, fading = false): void {
     const renderer = this.renderer;
     const model = this.sceneryMatrix();
     for (const oneSided of [false, true]) {
       renderer.setMaterial(oneSided ? drawn.stage.oneSidedMaterial : drawn.stage.material);
       drawn.stage.cells.forEach((cell, i) => {
-        if (!(0 < this.scenery.cells[i]!)) return;
+        const opacity = shown[i]!;
+        if (fading ? !(0 < opacity && opacity < 1) : opacity !== 1) return;
         /* The sky over the stage a picture, unlit as the game draws it. */
-        for (const piece of cell) if (piece.oneSided === oneSided && piece.cut === cut) renderer.drawTranslucentMesh(piece.mesh, model, 1, { lit: drawn.stage.lit && piece.far !== true, fog: false, depthLayer: piece.layer });
+        for (const piece of cell) if (piece.oneSided === oneSided && piece.cut === cut) renderer.drawTranslucentMesh(piece.mesh, model, opacity, { lit: drawn.stage.lit && piece.far !== true, fog: false, depthLayer: piece.layer, depthWrite: !fading });
       });
     }
+    renderer.setMaterial(null);
+    if (fading) return;
     for (const object of drawn.objects) {
       const motion = object.motion;
       const cells = motion.frames > 1 ? [[Math.floor(state.frameCount / motion.fields) % motion.frames, 0]] : motion.parts.map((_, i) => [i, i]);
@@ -533,19 +543,16 @@ export class FightView {
     const f = state.fighters.slice(0, 2);
     const x = f.reduce((sum, g) => sum + g.skeleton.base.translation[0]!, 0) / f.length / 1000;
     const z = -f.reduce((sum, g) => sum + g.skeleton.base.translation[2]!, 0) / f.length / 1000;
-    const cells = this.scenery.cells.slice();
     const renderer = this.renderer;
     renderer.bakeReflectionProbe([x, 1, z], [0, 0, 0], (camera) => {
       renderer.bindMeshPass(camera, this.env);
       drawn.sky?.draw(camera, state.frameCount / 60, lookOfStage(state.stage).wind, this.scenery.yaw, PROBE_SIGHT);
-      this.scenery.cells.fill(1);
-      this.drawScenery(state, drawn, false);
+      this.drawScenery(state, drawn, false, ALL_SHOWN);
       renderer.setMaterial(drawn.ground.material);
       if (drawn.ground.mesh !== null) renderer.drawMesh(drawn.ground.mesh, IDENTITY);
       drawn.ground.drawRelief();
       renderer.setMaterial(null);
-      this.drawScenery(state, drawn, true);
-      this.scenery.cells.set(cells);
+      this.drawScenery(state, drawn, true, ALL_SHOWN);
     }, { irradiance: false });
   }
 
@@ -670,6 +677,7 @@ export class FightView {
     if (scenery) layScenery(state, this.data, this.arena, drawn.stage, { widening }, this.scenery, drawn.stage.grid === ARCADE_GRID ? this.heldArcade : this.heldDisc);
     /* The free camera sees every cell: the game's culling is its own camera's. */
     if (scenery && freeView.active) this.scenery.cells.fill(1);
+    if (scenery) fadeScenery(state, this.scenery, this.sceneryFade);
     /* An arcade stage's background, behind everything drawn after it. */
     if (drawn?.sky != null && only.scenery && state.match.trueOgres === 0) drawn.sky.draw(this.camera, state.frameCount / 60, lookOfStage(state.stage).wind, this.scenery.yaw);
     else if (drawn?.background != null && only.scenery && state.match.trueOgres === 0) drawn.background.draw(lookOf(this.camera), aspect, this.scenery.yaw, sky);
@@ -677,24 +685,28 @@ export class FightView {
     /* Tekken Force's backdrop is the farthest thing drawn: everything after it lies over it. */
     if (drawn?.force != null && state.mode === TEKKEN_FORCE) drawn.force.draw(state, this.data, aspect);
     if (drawn !== null && layout != null) {
+      layGround(state, this.data, this.arena, layout, { widening }, this.ground, drawn.stage.grid === ARCADE_GRID);
+      const fade = this.files.floorFade !== false;
       if (scenery) {
         /* The stage's moving pieces: a model's parts each where the piece and the part stand this field. */
         for (const object of drawn.objects) placeParts(object.motion, state.frameCount, this.sceneryMatrix(), object.placed);
-        this.drawScenery(state, drawn, false);
+        /* Remastered, an arcade stage's own floors fade as the fight's does. */
+        drawn.stage.darkenFloors(this.sceneryMatrix(), fade ? this.ground.shadeOf : null);
+        this.drawScenery(state, drawn, false, this.sceneryFade.shown);
       }
       /*
        * The floor is solid, so the fighters' shadows and the occlusion where they stand land on it;
        * the fighters are drawn a little nearer than they stand (fighterMatrix), so a sole the pose
        * sinks into it stays in sight as the game, drawing the floor first and everything over it,
-       * keeps it.
+       * keeps it. A sunk floor's veil over it, under its puddles.
        */
-      layGround(state, this.data, this.arena, layout, { widening }, this.ground, drawn.stage.grid === ARCADE_GRID);
       const edge = drawn.stage.grid === ARCADE_GRID ? EDGED.get(state.stage) : undefined;
-      drawn.ground.update(this.ground, edge === undefined ? null : { x: this.scenery.x, z: this.scenery.z, yaw: this.scenery.yaw, half: edge * 8 });
+      drawn.ground.update(this.ground, edge === undefined ? null : { x: this.scenery.x, z: this.scenery.z, yaw: this.scenery.yaw, half: edge * 8 }, fade);
       renderer.setMaterial(drawn.ground.material);
       drawn.ground.drawRelief();
       if (drawn.ground.mesh !== null) renderer.drawMesh(drawn.ground.mesh, IDENTITY);
       renderer.setMaterial(null);
+      drawn.ground.drawVeil();
       if (drawn.puddles !== null) {
         renderer.setMaterial(drawn.puddles.material);
         renderer.drawMesh(drawn.puddles.mesh, IDENTITY);
@@ -732,8 +744,16 @@ export class FightView {
         drawn.beach.drawPanorama(state, this.data, aspect);
       }
     }
-    /* The cut-out scenery, over the solid scenery and the floor: its soft edges blend with what lies behind it. */
-    if (drawn !== null && layout != null && scenery) this.drawScenery(state, drawn, true);
+    /*
+     * The cut-out scenery, over the solid scenery and the floor: its soft edges blend with what lies
+     * behind it. Then the cells fading in or out, over all of it and under the fighters.
+     */
+    if (drawn !== null && layout != null && scenery) {
+      const shown = this.sceneryFade.shown;
+      this.drawScenery(state, drawn, true, shown);
+      this.drawScenery(state, drawn, false, shown, true);
+      this.drawScenery(state, drawn, true, shown, true);
+    }
     /*
      * What goes behind the fighters (the gauges, the names, the time), as the game layers it; but
      * remastered, over the finished picture, after the frame's antialiasing over time, which would

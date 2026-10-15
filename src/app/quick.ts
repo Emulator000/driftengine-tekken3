@@ -14,7 +14,7 @@ import type { FightTables } from '../sim/fight/match.ts';
 import { Hud } from '../present/hud/hud.ts';
 import { PauseScreen } from '../present/hud/pause.ts';
 import { loadTypefaces } from '../present/2d/typefaces.ts';
-import { assetBytes, assetImage, dataBytes, image, json, pageQuality, pageRenderer, params, play, remastered, status, two } from './page.ts';
+import { assetBytes, assetImage, dataBytes, floorFade, image, json, pageQuality, pageRenderer, params, play, remastered, status, two } from './page.ts';
 import { asked, settings } from './settings.ts';
 import { startSound } from './sound.ts';
 
@@ -148,6 +148,9 @@ export const drawingFiles: DrawingFiles = {
   get remaster() {
     return remastered();
   },
+  get floorFade() {
+    return floorFade.on;
+  },
 };
 
 /** An attract intro's drawing data: for each pack, the model its archive holds in the pair its table names; the stages as the fight's. */
@@ -162,6 +165,9 @@ export const introFiles = (intro: number, pairs: readonly number[]): DrawingFile
   cloth,
   get remaster() {
     return remastered();
+  },
+  get floorFade() {
+    return floorFade.on;
   },
 });
 

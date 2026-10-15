@@ -158,6 +158,12 @@ export function musicAfterWin(state: FightState, volume: number): void {
   state.sound.commands.push({ key: 'music end after fade' });
 }
 
+/** The music faded out over `frames`, then ended. */
+export function musicFadedOut(state: FightState, frames: number): void {
+  fadeMusic(state, 0, frames);
+  state.sound.commands.push({ key: 'music end after fade' });
+}
+
 /** The music's driver reset: its volume back to full and its song stopped. */
 export function resetMusic(state: FightState): void {
   state.sound.commands.push({ key: 'music reset' });

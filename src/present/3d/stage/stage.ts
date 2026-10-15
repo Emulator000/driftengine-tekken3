@@ -46,6 +46,45 @@ export interface Stage {
   readonly oneSidedMaterial: SurfaceMaterial<SurfaceTextureHandle>;
   /** Drawn lit, by the normals its polygons' faces give it. */
   readonly lit: boolean;
+  /**
+   * Its floors (level polygons within `FLOOR_REACH` of the floor's height), on a stage made with
+   * them kept, darkened at each vertex by the shade the fight's floor takes there (`shadeOf`, by
+   * the game's millimetres) where it darkens, `model` placing the scenery; with none, as they are.
+   */
+  darkenFloors(model: ArrayLike<number>, shadeOf: ((x: number, z: number) => number) | null): void;
+}
+
+/** How near the floor's height (metres) a level polygon is one of the scenery's floors, a pavement's kerb with it; and how level. */
+const FLOOR_REACH = 0.45;
+const FLOOR_LEVEL = 0.95;
+/** Each shade over 128, taken into linear light. */
+const LINEAR_SHADES = Float32Array.from({ length: 129 }, (_, k) => (k / 128) ** 2.2);
+
+/** A piece's floors: its vertices on them, where they lie, and its colours as made and as darkened. */
+interface Floors {
+  readonly mesh: MeshHandle;
+  readonly at: Uint32Array;
+  readonly x: Float32Array;
+  readonly z: Float32Array;
+  readonly base: Float32Array;
+  readonly colors: Float32Array;
+}
+
+/** The vertices of a mesh's level triangles within `FLOOR_REACH` of the floor's height. */
+function floorsOf(positions: Float32Array, indices: Uint32Array): Uint32Array {
+  const on = new Set<number>();
+  const p = (i: number, k: number): number => positions[i * 3 + k]!;
+  for (let t = 0; t < indices.length; t += 3) {
+    const [a, b, c] = [indices[t]!, indices[t + 1]!, indices[t + 2]!];
+    if (!(Math.abs(p(a, 1)) <= FLOOR_REACH && Math.abs(p(b, 1)) <= FLOOR_REACH && Math.abs(p(c, 1)) <= FLOOR_REACH)) continue;
+    const u = [p(b, 0) - p(a, 0), p(b, 1) - p(a, 1), p(b, 2) - p(a, 2)];
+    const v = [p(c, 0) - p(a, 0), p(c, 1) - p(a, 1), p(c, 2) - p(a, 2)];
+    const n = [u[1]! * v[2]! - u[2]! * v[1]!, u[2]! * v[0]! - u[0]! * v[2]!, u[0]! * v[1]! - u[1]! * v[0]!];
+    const length = Math.hypot(n[0]!, n[1]!, n[2]!);
+    if (length === 0 || Math.abs(n[1]!) / length < FLOOR_LEVEL) continue;
+    on.add(a).add(b).add(c);
+  }
+  return Uint32Array.from(on);
 }
 
 /**
@@ -260,7 +299,7 @@ function normalsOf(positions: Float32Array, indices: Uint32Array): Float32Array 
   return out;
 }
 
-export function createStage(renderer: RendererApi, buffer: ArrayBuffer, texture: SurfaceTextureHandle, look: StageLook | null = null): Stage {
+export function createStage(renderer: RendererApi, buffer: ArrayBuffer, texture: SurfaceTextureHandle, look: StageLook | null = null, fadingFloors = false): Stage {
   const view = new DataView(buffer);
   const { width, height } = stageAtlasSize(buffer);
   const n = view.getUint32(8, true);
@@ -320,6 +359,15 @@ export function createStage(renderer: RendererApi, buffer: ArrayBuffer, texture:
   }
   const shared = (i: number, j: number): boolean => (edges.get(edgeOf(i, j)) ?? 0) > 1;
   const broad = look?.height != null ? broadHeights(look.height, Math.max(2, Math.round(look.height.width / 512))) : null;
+  /* A piece's mesh; where the floors fade, its floors kept with their colours to be darkened. */
+  const floors: Floors[] = [];
+  const meshOf = (data: Parameters<RendererApi['createMesh']>[0] & { positions: Float32Array; indices: Uint32Array; colors: Float32Array }): MeshHandle => {
+    const at = fadingFloors ? floorsOf(data.positions, data.indices) : new Uint32Array(0);
+    if (at.length === 0) return renderer.createMesh(data);
+    const mesh = renderer.createMesh(data, { dynamicColors: true });
+    floors.push({ mesh, at, x: Float32Array.from(at, (i) => data.positions[i * 3]!), z: Float32Array.from(at, (i) => data.positions[i * 3 + 2]!), base: data.colors.slice(), colors: data.colors.slice() });
+    return mesh;
+  };
   const piece = (own: number[], kind: number): StagePiece => {
     /* The sky: in the farthest layer, wholly high up, level or facing down to the arena. */
     let far = ((kind >> LAYER_SHIFT) & 3) === 0 && smooth !== null;
@@ -330,7 +378,7 @@ export function createStage(renderer: RendererApi, buffer: ArrayBuffer, texture:
     }
     if (broad !== null && smooth !== null && (kind & CUT) === 0 && !far && (look?.relief ?? 0.3) > 0) {
       const raisedPiece = raised(own, positions, smooth, colors, uvs, shared, broad, look?.relief ?? 0.3, look?.ragged === true);
-      const mesh = renderer.createMesh({ ...raisedPiece, emissive: new Float32Array(raisedPiece.positions.length / 3) });
+      const mesh = meshOf({ ...raisedPiece, emissive: new Float32Array(raisedPiece.positions.length / 3) });
       return { mesh, layer: (kind >> LAYER_SHIFT) & 3, oneSided: (kind & ONE_SIDED) !== 0, cut: false, far };
     }
     let lo = Infinity;
@@ -342,7 +390,7 @@ export function createStage(renderer: RendererApi, buffer: ArrayBuffer, texture:
     const m = hi - lo + 1;
     const normals = smooth !== null ? smooth.slice(lo * 3, (hi + 1) * 3) : new Float32Array(m * 3);
     if (smooth === null) for (let i = 0; i < m; i += 1) normals[i * 3 + 1] = 1;
-    const mesh = renderer.createMesh({
+    const mesh = meshOf({
       positions: positions.slice(lo * 3, (hi + 1) * 3),
       normals,
       colors: colors.slice(lo * 3, (hi + 1) * 3),
@@ -372,6 +420,24 @@ export function createStage(renderer: RendererApi, buffer: ArrayBuffer, texture:
     material: { albedo: texture, cutout: 0.5, doubleSided: true, ...maps },
     oneSidedMaterial: { albedo: texture, cutout: 0.5, doubleSided: false, ...maps },
     lit: look !== null,
+    darkenFloors(model, shadeOf) {
+      for (const floor of floors) {
+        let changed = false;
+        floor.at.forEach((i, k) => {
+          const x = model[0]! * floor.x[k]! + model[8]! * floor.z[k]! + model[12]!;
+          const z = model[2]! * floor.x[k]! + model[10]! * floor.z[k]! + model[14]!;
+          const shade = shadeOf === null ? 128 : Math.round(Math.min(128, Math.max(0, shadeOf(x * 1000, -z * 1000))));
+          const light = LINEAR_SHADES[shade]!;
+          for (let c = 0; c < 3; c += 1) {
+            const value = floor.base[i * 3 + c]! * light;
+            if (value === floor.colors[i * 3 + c]) continue;
+            floor.colors[i * 3 + c] = value;
+            changed = true;
+          }
+        });
+        if (changed) renderer.updateMeshColors(floor.mesh, floor.colors);
+      }
+    },
   };
 }
 

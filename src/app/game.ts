@@ -27,7 +27,7 @@ import { PauseScreen } from '../present/hud/pause.ts';
 import { loadTypefaces } from '../present/2d/typefaces.ts';
 import { ScenePresenter } from '../present/scenes/scenes.ts';
 import { SCREEN } from '../present/scenes/screen.ts';
-import { applyLook, assetImage, canvas, controllers, dataUrl, json, pageRenderer, params, play, remasterMadeHere, remastered, status, two } from './page.ts';
+import { applyBrightness, applyLook, assetImage, floorFade, canvas, controllers, dataUrl, json, pageRenderer, params, play, remasterMadeHere, remastered, status, two } from './page.ts';
 import { controlWords } from '../present/2d/controls.ts';
 import { drawingFiles, introFiles, withArcadeFighters } from './quick.ts';
 import { readProgress, writeProgress } from './save.ts';
@@ -133,13 +133,15 @@ export async function playGame(): Promise<void> {
   game.state.remake.remasterMade = remasterMadeHere();
   /*
    * REMAKE OPTION's settings: kept as they change, the frame rate shown or hidden at once (and `F`'s
-   * switch shown on the page), the remaster's look changed at once, and on leaving the page with one
+   * switch shown on the page), the remaster's look, brightness and floors changed at once, and on leaving the page with one
    * a restart applies changed, the progress saved where auto save keeps it, then the page started
    * again.
    */
   let keptSettings = { ...settings };
   let meterOn = settings.frameRate;
   let lookOn = settings.look;
+  let brightnessOn = settings.brightness;
+  let floorFadeOn = settings.floorFade;
   let restarting = false;
   const settle = (): void => {
     const state = game.state;
@@ -150,6 +152,10 @@ export async function playGame(): Promise<void> {
     meterOn = remake.frameRate;
     if (remake.look !== lookOn && remastered()) applyLook(renderer, remake.look);
     lookOn = remake.look;
+    if (remake.brightness !== brightnessOn && remastered()) applyBrightness(renderer, remake.brightness);
+    brightnessOn = remake.brightness;
+    if (remake.floorFade !== floorFadeOn) floorFade.on = remake.floorFade === 0;
+    floorFadeOn = remake.floorFade;
     if ((Object.keys(remake) as (keyof typeof remake)[]).some((key) => remake[key] !== keptSettings[key])) {
       keptSettings = { ...remake };
       writeSettings(keptSettings);

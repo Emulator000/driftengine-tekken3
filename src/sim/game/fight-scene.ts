@@ -22,7 +22,7 @@ import { Flow } from '../fight/flow.ts';
 import { practiceFrame, practiceRoundStart } from './practice.ts';
 import { printCall } from '../fight/hud.ts';
 import type { FightData } from '../fight/state.ts';
-import { effect, fadeMusic, playSong, resetMusic, stopSounds, voiceLine } from '../fight/voices.ts';
+import { effect, fadeMusic, musicFadedOut, playSong, resetMusic, stopSounds, voiceLine } from '../fight/voices.ts';
 import type { SceneTables } from '../data/scenes.ts';
 import { arcadeRound, arcadeStart, ballMatch, choosePlayers, chooseStage, survivalRound } from './arcade.ts';
 import { clearShoves } from '../fight/ball.ts';
@@ -79,6 +79,8 @@ const LAST_OPPONENT = 9;
 const TRUE_OGRE = 0x14;
 /** Fields the match's load waits after the versus screen began. */
 const LOAD_WAIT = 0x3b;
+/** How many frames the music takes to fade out as a match's versus screen comes up: about as long as the picture's cut to it. */
+const MATCH_SILENCE = 0x14;
 /** Fields into a round before a challenger may join. */
 const JOIN_WAIT = 8;
 /** The continue's count: frames a count, the counts, its announcer's lines (the count's and none left), the music's volume. */
@@ -577,6 +579,8 @@ function step(game: GameState, data: FightSceneData): void {
       chooseStage(game, data.tables);
       run.after.scene = Scene.FIGHT;
       run.after.step = FightStep.LOAD;
+      /* The match loads silent: what still plays (a won match's song fading, the select's) faded out as the picture cuts to the versus screen. */
+      musicFadedOut(world, MATCH_SILENCE);
       game.scene = Scene.VERSUS;
       game.step = 0;
       holdPicture(game, 1);

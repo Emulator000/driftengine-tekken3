@@ -4,7 +4,9 @@
  * places it and shaded as the game shades it, texel times shade over 128 (times a tint the scene's
  * light is undone by, so the lit floor keeps the game's colours where nothing shades it). Made again
  * when the patch moves or its cells change; its shades, which change with the camera nearly every
- * frame, are rewritten in place.
+ * frame, are rewritten in place. A redrawn floor takes the game's shade only where it darkens, so it
+ * fades into the dark by depth, or away from the stage's lights, as the game's does; a sunk one,
+ * whose tiles carry no colours of their own, under a black veil as dark as that shade at each corner.
  */
 import type { MeshHandle, RendererApi, SurfaceMaterial, SurfaceTextureHandle } from '@driftengine/core';
 import { ReliefTiles, type FloorRelief } from './relief.ts';
@@ -16,6 +18,9 @@ const LINEAR_SHADES = Float32Array.from({ length: 256 }, (_, k) => (k / 128) ** 
 
 const GND_MAGIC = 0x31444e47;
 const CELLS = 100;
+/** How far over the floor its veil lies (metres): over its stones' tops, under anything standing on them. */
+const VEIL_LIFT = 0.004;
+const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 
 export interface GroundState {
   readonly drawn: boolean;
@@ -95,9 +100,12 @@ export class Ground {
   private readonly tint: readonly [number, number, number];
   /** A wet floor's reflectance, at every vertex. */
   private readonly specular: number | null;
-  /** A lit floor (a redrawn one) takes no shade from the game, which brightens it round the fighters where the scene's own light now falls; every corner at 128. */
+  /** A lit floor (a redrawn one) takes the game's shade only where it darkens (the scene's own light brightens it round the fighters), or none. */
   private readonly steady: boolean;
-  private unshaded = new Uint8Array(0);
+  private darkened = new Uint8Array(0);
+  /** Over a sunk floor, a black veil as opaque at each corner as the game's shade darkens it there; its plain material. */
+  private veil: MeshHandle | null = null;
+  private readonly veilMaterial: SurfaceMaterial<SurfaceTextureHandle> | null;
   /** The tiles `prepare` compiles the patch's pipelines with. */
   private warm: MeshHandle[] | null = null;
   /** For each of the flat tiles' vertices, its tile and where it lies across it (0 to 1 each way), which its shade is mixed by. */
@@ -142,6 +150,8 @@ export class Ground {
     this.specular = floor?.wet?.specular ?? null;
     this.steady = floor !== null;
     this.reliefTiles = floor?.relief == null ? null : new ReliefTiles(renderer, floor.relief, this.uvs, tint, this.specular);
+    const white = new ImageData(new Uint8ClampedArray([255, 255, 255, 255]), 1, 1);
+    this.veilMaterial = this.reliefTiles === null ? null : { albedo: renderer.createSurfaceTexture(white, { colorSpace: 'linear', filter: 'nearest', mipmap: false, wrap: 'clamp' }), doubleSided: true };
   }
 
   /**
@@ -164,20 +174,26 @@ export class Ground {
     this.reliefTiles?.prepare(this.material);
   }
 
-  /** Lays the patch the fight placed this frame, cut to `clip` where there is one; drops it when the fight draws no ground. */
-  update(given: GroundState, clip: GroundClip | null = null): void {
+  /**
+   * Lays the patch the fight placed this frame, cut to `clip` where there is one; drops it when the
+   * fight draws no ground. A redrawn floor fades as the game's does, or with `fade` off is lit evenly.
+   */
+  update(given: GroundState, clip: GroundClip | null = null, fade = true): void {
     let state = given;
     if (this.steady) {
-      if (this.unshaded.length !== given.shade.length) this.unshaded = new Uint8Array(given.shade.length).fill(128);
-      state = { ...given, shade: this.unshaded };
+      if (this.darkened.length !== given.shade.length) this.darkened = new Uint8Array(given.shade.length);
+      for (let v = 0; v < given.count * 4; v += 1) this.darkened[v] = fade ? Math.min(128, given.shade[v]!) : 128;
+      state = { ...given, shade: this.darkened };
     }
     if (!state.drawn) {
       this.drop();
       this.dropRelief();
+      this.dropVeil();
       return;
     }
     if (clip !== null) {
       this.cutTo(state, clip);
+      this.dropVeil();
       return;
     }
     const n = state.count;
@@ -192,6 +208,7 @@ export class Ground {
         this.last.shade.set(state.shade.subarray(0, n * 4));
         this.shadeFlat(n);
         if (this.mesh !== null) this.renderer.updateMeshColors(this.mesh, this.colors);
+        this.layVeil(n);
       }
       return;
     }
@@ -203,6 +220,43 @@ export class Ground {
       cell: state.cell.slice(0, n),
     };
     this.layNear(state, n);
+    this.layVeil(n);
+  }
+
+  /** The veil over a sunk floor's first `n` tiles, a quad over each; none where nothing darkens it. */
+  private layVeil(n: number): void {
+    if (this.veilMaterial === null) return;
+    this.dropVeil();
+    const { x, z, shade } = this.last;
+    if (!shade.subarray(0, n * 4).some((v) => v < 128)) return;
+    const positions = new Float32Array(n * 12);
+    const normals = new Float32Array(n * 12);
+    const channel = new Float32Array(n * 16);
+    const indices = new Uint32Array(n * 6);
+    for (let q = 0; q < n; q += 1) {
+      indices.set([q * 4, q * 4 + 1, q * 4 + 2, q * 4 + 1, q * 4 + 3, q * 4 + 2], q * 6);
+      for (let k = 0; k < 4; k += 1) {
+        const v = q * 4 + k;
+        positions.set([x[v]! / 1000, VEIL_LIFT, -z[v]! / 1000], v * 3);
+        normals[v * 3 + 1] = 1;
+        /* Black, as opaque as the shade takes from the floor's light. */
+        channel.set([0, 1, 1 - LINEAR_SHADES[shade[v]!]!, 0], v * 4);
+      }
+    }
+    this.veil = this.renderer.createMesh({ positions, normals, colors: new Float32Array(n * 12), emissive: new Float32Array(n * 4), uvs: new Float32Array(n * 8), indices, channel });
+  }
+
+  /** The veil over a sunk floor, over the floor and what lies on it, writing no depth. */
+  drawVeil(): void {
+    if (this.veil === null || this.veilMaterial === null) return;
+    this.renderer.setMaterial(this.veilMaterial);
+    this.renderer.drawTranslucentMesh(this.veil, IDENTITY, 1, { lit: false, fog: false, depthWrite: false });
+    this.renderer.setMaterial(null);
+  }
+
+  private dropVeil(): void {
+    if (this.veil !== null) this.renderer.disposeMesh(this.veil);
+    this.veil = null;
   }
 
   /** The near tiles: on a floor with relief each an instance of its cell's sunk grid; otherwise one mesh of quads. */
@@ -271,7 +325,8 @@ export class Ground {
       for (const corner of outline) {
         positions.push(corner[2] / 1000, 0, -corner[3] / 1000);
         uvs.push(corner[4], corner[5]);
-        const k = LINEAR_SHADES[corner[6]]!;
+        /* A corner the cut made lies between two, its shade between theirs. */
+        const k = LINEAR_SHADES[Math.round(corner[6])]!;
         colors.push(k * r, k * g, k * b);
       }
       for (let i = 1; i + 1 < outline.length; i += 1) indices.push(base, base + i, base + i + 1);

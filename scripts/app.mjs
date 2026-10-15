@@ -29,7 +29,7 @@
  * An app carries the disc's converted data: it is for the user's own devices, never to share.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -140,13 +140,24 @@ run(process.execPath, [bin, 'bootstrap', `--target=${target}`], { env });
 run(process.execPath, [bin, 'build', `--target=${target}`, ...flags], { env });
 
 /*
- * A build that ended without the app's files (the packager finished, its archives were never
- * made): the staged copy goes, the unpacked app stays, as it runs as it is, and the build says so.
+ * A build that ended without the app's files (the packager finished, its archives were never made).
+ * Where it stopped before packing the game into the unpacked app (Electron alone, no `app.asar`),
+ * the staged game is laid in as the app's folder, which Electron runs as it would the archive. A
+ * Linux build then makes its tar.gz itself, as the packager would have; elsewhere the staged copy
+ * goes, the unpacked app stays, as it runs as it is, and the build says so.
  */
 if (!readdirSync(out).some((name) => FINISHED.test(name) || (KEPT_FOLDERS[target] ?? []).includes(name))) {
-  rmSync(path.join(out, 'stage'), { recursive: true, force: true });
   const unpacked = readdirSync(out).find((name) => name.endsWith('-unpacked'));
-  refuse(
+  const resources = unpacked === undefined ? null : path.join(out, unpacked, 'resources');
+  if (resources !== null && existsSync(resources) && !existsSync(path.join(resources, 'app.asar')) && !existsSync(path.join(resources, 'app')) && existsSync(path.join(out, 'stage'))) {
+    cpSync(path.join(out, 'stage'), path.join(resources, 'app'), { recursive: true });
+  }
+  rmSync(path.join(out, 'stage'), { recursive: true, force: true });
+  if (target === 'linux-x64' && unpacked !== undefined) {
+    const name = `tekken3-${version(root)}`;
+    console.log(`\nThe packager finished without the app's files: the build packs ${name}.tar.gz from the unpacked app itself.`);
+    run('tar', ['-czf', path.join(out, `${name}.tar.gz`), '-C', out, `--transform=s,^${unpacked},${name},`, unpacked]);
+  } else refuse(
     [
       `\nThe packager finished without the app's files (${target === 'linux-x64' ? 'an AppImage and a tar.gz' : 'its archives'}) in ${path.relative(root, out) || out}.`,
       unpacked === undefined ? 'Nothing was packed either.' : `The unpacked app is kept, and runs as it is: ${path.relative(root, path.join(out, unpacked))}`,

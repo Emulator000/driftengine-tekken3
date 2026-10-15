@@ -21,7 +21,7 @@ import { mapPads } from './menu.ts';
 import { print } from './printer.ts';
 import { playCount, sortPairs } from './records.ts';
 import { share } from './records-screen.ts';
-import { isRemakeSetting, REMAKE_ITEM, REMAKE_PAGE, remakeOptions, REMASTER_LINE, remasterMissing, RESTART_LINE, restartWanted } from './remake-options.ts';
+import { isRemakeSetting, REMAKE_ITEM, REMAKE_PAGE, remakeLineY, remakeOptions, REMASTER_LINE, remasterMissing, RESTART_LINE, restartWanted } from './remake-options.ts';
 import { restoreProgress, saveProgress } from './save.ts';
 import { buttonRow, draw, tile } from './draw.ts';
 import { Scene, type GameState, type KeySide } from './state.ts';
@@ -247,8 +247,8 @@ function modeBox(game: GameState, tables: OptionsTables, modes: number): void {
 }
 
 /** A card's message, centred. */
-function message(game: GameState, text: string, colour: number): void {
-  print(game, 0, colour, MESSAGE.centre - ((text.length * ADVANCE) >> 1), MESSAGE.y, text);
+function message(game: GameState, text: string, colour: number, y: number = MESSAGE.y): void {
+  print(game, 0, colour, MESSAGE.centre - ((text.length * ADVANCE) >> 1), y, text);
 }
 
 /** The two prompts under a card's screen, and the buttons that answer the second. */
@@ -706,9 +706,10 @@ function pageFrame(game: GameState, data: OptionsData, scenes: SceneTables): voi
     const remake = remakeOptions(game);
     screen.remake.cursor = Math.min(screen.remake.cursor, remake.items.length - 1);
     listInput(game, data, remake, screen.remake);
-    listDraw(game, remakeOptions(game), screen.remake);
-    if (remasterMissing(game)) message(game, REMASTER_LINE, 5);
-    else if (restartWanted(game)) message(game, RESTART_LINE, 5);
+    const listed = remakeOptions(game);
+    listDraw(game, listed, screen.remake);
+    if (remasterMissing(game)) message(game, REMASTER_LINE, 5, remakeLineY(listed));
+    else if (restartWanted(game)) message(game, RESTART_LINE, 5, remakeLineY(listed));
     return;
   }
   const page = tables.pages[screen.page];

@@ -246,7 +246,8 @@ reads, bypasses and emulates no security hardware.
 REMASTER in REMAKE OPTION draws the fights as a modern game would: the engine's lighting and
 shadows, each stage's own sky and light, wet floors reflecting the fighters, floors and scenery
 in 3D relief, grass that sways and is trampled, and the textures enlarged with their normal,
-roughness and height maps, with a look of its own (LOOK: light, normal or strong). It is off by
+roughness and height maps, with a look of its own (LOOK: light, normal or strong; BRIGHTNESS: low,
+normal or high), its floors fading into the dark as the game's do (FLOOR FADE). It is off by
 default, and experimental: REMAKE OPTION asks you to run `npm run remaster` first until its assets
 have been made on your machine, and the lowest picture quality leaves it off.
 

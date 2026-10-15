@@ -442,6 +442,10 @@ export interface RemakeSettings {
   remaster: number;
   /** The remaster's look: light, normal (the default) or strong. */
   look: number;
+  /** The remaster's brightness: low, normal (the default) or high. */
+  brightness: number;
+  /** Whether the remaster's floors fade into the dark as the game's do: on (the default) or off. */
+  floorFade: number;
 }
 
 /**

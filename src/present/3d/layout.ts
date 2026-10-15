@@ -2,7 +2,9 @@
  * Where the arena's pieces go this frame, worked out from the fight's state as the game lays them
  * for drawing. The scenery stands at the fighters' midpoint (one fighter averaged over four frames
  * while the camera holds on the other's spin), at the stage's height, turned by the yaw the fight
- * keeps; of its 6 × 6 cells (an arcade stage's 16 × 16) only those the view can see past the fighters are drawn. The ground is
+ * keeps; of its 6 × 6 cells only those the view can see past the fighters are drawn, of an arcade
+ * stage's 16 × 16 all but those the board hides near the camera, each fading in or out over a few
+ * fields where the game shows or hides it at once, and at once on a cut. The ground is
  * a 10 × 10 patch of 1800 mm tiles snapped around the fighters (or, under a high camera, where the
  * view's lower edge meets the floor), its tiles taken from the stage's map by position, each corner
  * shaded darker with its depth past the fighters. Some stages light their floor instead: a light
@@ -13,7 +15,8 @@
  * extra rings of tiles, continuing the map as it repeats. Tekken Force lays a wider patch, 10 × 3
  * tiles of 2500 mm, from its own template and the first three rows of the map, always at the same
  * depth, its shade by depth measured from the camera's own distance, its dark stage lit at the
- * player's feet (the patch laid round them) and its final stage lit ahead of the camera.
+ * player's feet (the patch laid round them, none of it past the backdrop, which lies over it) and
+ * its final stage lit ahead of the camera.
  */
 import type { ArenaTables, GroundTemplate, StageLayout } from '../../assets/arena.ts';
 import { libraryRoot, tableRoot } from '../../sim/math/roots.ts';
@@ -27,8 +30,11 @@ const TILE = 1800;
 const MAP = 10;
 /** A fight's ground tile's side (mm). */
 export const GROUND_TILE = TILE;
-/** Tekken Force's patch: its tiles, its map's rows, the depth it is laid at, and where its final stage's light stands in depth. */
-const FORCE = { tile: 2500, rows: 3, z: 0x145, lightZ: -2000 } as const;
+/**
+ * Tekken Force's patch: its tiles, its map's rows, the depth it is laid at, where its final stage's
+ * light stands in depth, and the depth its backdrop stands at, which lies over the floor past it.
+ */
+const FORCE = { tile: 2500, rows: 3, z: 0x145, lightZ: -2000, backdrop: 2500 } as const;
 const TEKKEN_FORCE = 8;
 /** Rings of tiles past the patch: at most, on a wide picture and on an arcade stage, whose scenery stands much farther off than the disc's. */
 const MAX_RINGS = 10;
@@ -117,9 +123,13 @@ function hold(out: SceneryLayout, held: HeldScenery, reset: boolean): void {
   out.yaw = held.yaw;
 }
 
-export const newGround = (): GroundState & { drawn: boolean; count: number } => ({
+/** The ground laid this frame, and the shade it gives a point on the floor anywhere (null while none is laid). */
+export type GroundLayout = GroundState & { drawn: boolean; count: number; shadeOf: ((x: number, z: number) => number) | null };
+
+export const newGround = (): GroundLayout => ({
   drawn: false,
   count: 0,
+  shadeOf: null,
   cell: new Int16Array(MAX_QUADS),
   x: new Int32Array(MAX_QUADS * 4),
   z: new Int32Array(MAX_QUADS * 4),
@@ -154,7 +164,12 @@ function cullingAngle(state: FightState, view: View): number {
 
 /**
  * The scenery cells the view can see past the fighters (`yaw` the view's against the scenery's, the
- * camera at `cx`, `cz` in its frame), on a grid of `n` × `n` cells about the fighters.
+ * camera at `cx`, `cz` in its frame), on a grid of `n` × `n` cells about the fighters: the cells two
+ * rays from the camera cross at the view's edges, the grid's border between where they leave it,
+ * each row filled between its outermost cells, then the camera's cell and every cell no farther
+ * from it than the nearest of the four around the fighters left out. An arcade grid starts from
+ * every cell, which the GPU clips: its cells' polygons reach past their squares, so a cell beside
+ * the rays can still be in the picture.
  */
 function cullScenery(trig: Trig, arena: ArenaTables, fov: number, yaw: number, cx: number, cz: number, { cellSize: size, grid: n }: SceneryGrid, out: Int8Array): void {
   const half = n >> 1;
@@ -191,8 +206,8 @@ function cullScenery(trig: Trig, arena: ArenaTables, fov: number, yaw: number, c
     return last;
   };
   if (n !== DISC_GRID) {
-    /* An arcade grid: every cell, which the GPU clips. Its polygons face into the stage, so a wall behind the camera never hides the fighters. */
     out.fill(1);
+    hideNear(out, n, half, cell, gridX, gridZ, cx, cz);
     return;
   }
   let [row, column] = ray(-yaw - (fov >> 1));
@@ -294,6 +309,40 @@ export function layScenery(state: FightState, data: FightData, arena: ArenaTable
     const centre = -0x1389 < camY && (-0xaf1 < camY || far) ? 1 : 0;
     for (const k of [14, 15, 20, 21]) cells[k] = centre;
   }
+}
+
+/** How many fields a cell takes to fade in or out. */
+const FADE_FIELDS = 10;
+
+/** How much of each scenery cell is drawn (0 to 1), and the camera and scenery it was last faded under. */
+export interface SceneryFade {
+  readonly shown: Float32Array;
+  last: { stage: number; x: number; y: number; z: number; yaw: number; sceneryX: number; sceneryZ: number; sceneryYaw: number } | null;
+}
+
+export const newSceneryFade = (): SceneryFade => ({ shown: new Float32Array(MAX_CELLS), last: null });
+
+/**
+ * Each cell eased toward what the culling chose for it this field, by a `FADE_FIELDS`th; set at
+ * once on a new stage and on a cut, where the camera or the scenery jumps rather than moves.
+ */
+export function fadeScenery(state: FightState, scenery: SceneryLayout, fade: SceneryFade): void {
+  const eye = state.camera.drawn.eye;
+  const now = { stage: state.stage, x: eye[0]!, y: eye[1]!, z: eye[2]!, yaw: state.camera.drawn.yaw, sceneryX: scenery.x, sceneryZ: scenery.z, sceneryYaw: scenery.yaw };
+  const last = fade.last;
+  const cut =
+    last === null ||
+    last.stage !== now.stage ||
+    Math.hypot(now.x - last.x, now.y - last.y, now.z - last.z) > JUMP ||
+    Math.abs(turnOf(now.yaw - last.yaw)) > JUMP_YAW ||
+    Math.hypot(now.sceneryX - last.sceneryX, now.sceneryZ - last.sceneryZ) > JUMP ||
+    Math.abs(turnOf(now.sceneryYaw - last.sceneryYaw)) > JUMP_YAW;
+  fade.last = now;
+  const shown = fade.shown;
+  scenery.cells.forEach((v, i) => {
+    const to = 0 < v ? 1 : 0;
+    shown[i] = cut ? to : to > shown[i]! ? Math.min(to, shown[i]! + 1 / FADE_FIELDS) : Math.max(to, shown[i]! - 1 / FADE_FIELDS);
+  });
 }
 
 /**
@@ -400,7 +449,7 @@ function lightsOf(state: FightState, kind: number): readonly [readonly number[],
 }
 
 /** The ground's patch this frame: each quad's map cell, its corners (mm) and their shades (128 unchanged); `arcade` for an arcade stage's floor. */
-export function layGround(state: FightState, data: FightData, arena: ArenaTables, stage: StageLayout, view: View, out: ReturnType<typeof newGround>, arcade = false): void {
+export function layGround(state: FightState, data: FightData, arena: ArenaTables, stage: StageLayout, view: View, out: GroundLayout, arcade = false): void {
   const trig = new Trig(data.math.sine);
   const patch = patchOf(state, arena);
   const { tile, columns, rows, template } = patch;
@@ -410,6 +459,7 @@ export function layGround(state: FightState, data: FightData, arena: ArenaTables
   const lit = lighting.kind !== GroundLight.DEPTH;
   const centre = lit ? litCentre(trig, state, patch) : groundCentre(trig, state, data, patch);
   out.drawn = centre !== null;
+  out.shadeOf = null;
   if (centre === null) return;
   const ix = tileOf(centre[0] + tile / 2, tile);
   const iz = tileOf(centre[1] + tile / 2, tile);
@@ -438,6 +488,10 @@ export function layGround(state: FightState, data: FightData, arena: ArenaTables
   const [lightA, lightB] = lightsOf(state, lighting.kind);
   /* A corner's shade: by its depth, or by the light where it lies. */
   const shadeOf = (x: number, z: number): number => (lit ? litShade(lighting.kind, lighting.brightest, lightA, lightB, x, z) : shadeAt(depthOf(state, ox, oz, x - ox, z - oz)));
+  /* A point anywhere on the floor, however far from the patch: its depth taken whole. */
+  const r = state.view.rotation;
+  const t = state.view.translation;
+  out.shadeOf = (x, z) => (lit ? litShade(lighting.kind, lighting.brightest, lightA, lightB, x, z) : shadeAt(Math.min(0xffff, Math.max(0, Math.trunc((r[6]! * x + r[8]! * z) / 4096) + t[2]!))));
   const shades = template.vertices.map(([x, z]) => shadeOf(x + ox, z + oz));
   let mapRow = row;
   for (let r = 0; r < rows; r += 1) {
@@ -457,6 +511,21 @@ export function layGround(state: FightState, data: FightData, arena: ArenaTables
     mapRow = mapRow - 1 < 0 ? rows - 1 : mapRow - 1;
   }
   out.count = columns * rows;
+  /* Tekken Force's patch laid round the player (its dark stage) drops the rows past its backdrop, which the game draws over them. */
+  if (force) {
+    let kept = 0;
+    for (let q = 0; q < out.count; q += 1) {
+      if (Math.min(out.z[q * 4]!, out.z[q * 4 + 1]!, out.z[q * 4 + 2]!, out.z[q * 4 + 3]!) >= FORCE.backdrop) continue;
+      out.cell[kept] = out.cell[q]!;
+      for (let k = 0; k < 4; k += 1) {
+        out.x[kept * 4 + k] = out.x[q * 4 + k]!;
+        out.z[kept * 4 + k] = out.z[q * 4 + k]!;
+        out.shade[kept * 4 + k] = out.shade[q * 4 + k]!;
+      }
+      kept += 1;
+    }
+    out.count = kept;
+  }
   /* Tekken Force's patch already reaches past the widest view, at a fixed depth; an arcade stage's floor reaches out toward its walls. */
   const rings = force ? 0 : arcade ? MAX_RINGS : view.widening <= 1 ? 0 : Math.min(MAX_RINGS, Math.ceil(5 * (view.widening - 1)) + 1);
   const wrap = (v: number, n: number): number => ((v % n) + n) % n;

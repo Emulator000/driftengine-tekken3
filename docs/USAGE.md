@@ -66,6 +66,8 @@ address's.
 | `touch=1`, `touch=0` | The touch pad over the picture anywhere, or nowhere (by default on a touch screen or a phone) |
 | `remaster=on`, `remaster=off` | The fight remastered or not (as REMASTER in REMAKE OPTION), once `npm run remaster` has made its assets |
 | `look=light`, `look=normal`, `look=strong` | The remaster's look (as LOOK in REMAKE OPTION) |
+| `brightness=low`, `brightness=normal`, `brightness=high` | The remaster's brightness (as BRIGHTNESS in REMAKE OPTION) |
+| `floorfade=on`, `floorfade=off` | Whether the remaster's floors fade into the dark (as FLOOR FADE in REMAKE OPTION) |
 | `stop=N` | Holds the game after `N` fields (sixtieths of a second), for comparing pictures |
 | `viewer` | Opens the viewer for every fighter and move instead of the game (`fighter`, `move` and `paused=1` set where it starts) |
 
@@ -146,6 +148,8 @@ or the app) for every start after.
 | TOUCH PAD | AUTO (on a touch screen or a phone), ON, OFF |
 | REMASTER | OFF, ON (the fight drawn with the engine's lighting, the stage's own sky, light and 3D floor, and the assets `npm run remaster` made; until it has, the page says RUN NPM RUN REMASTER FIRST; off at the lowest picture quality) |
 | LOOK | LIGHT, NORMAL, STRONG (listed while REMASTER is on: how strongly the remastered picture is graded, its shadows toward teal and its lights toward magenta, its corners darkened and its edges fringed; changed at once) |
+| BRIGHTNESS | LOW, NORMAL, HIGH (listed while REMASTER is on: how brightly the remastered picture is exposed, LOW as it was first drawn; changed at once) |
+| FLOOR FADE | ON, OFF (listed while REMASTER is on: the floors darkened by depth, or away from the stage's lights, as the game darkens its own, an arcade stage's own floors with them; or lit evenly; changed at once) |
 
 The frame rate shows or hides at once. The others change what the game loads: while one differs
 from the start's, the page says LEAVING RESTARTS THE GAME, and leaving it starts the game again
@@ -181,9 +185,11 @@ it.
 | macOS | `out/mac-arm64/` (Apple silicon) or `out/mac-x64/` (Intel): a `.dmg` and a zip |
 | Linux (x64) | `out/linux-x64/`: `Tekken 3-<version>.AppImage` and `tekken3-<version>.tar.gz` |
 
-Should a build end without these files, it keeps the unpacked app it made (on Linux
-`out/linux-x64/linux-unpacked/`, which runs as it is), says so, and stops with an error; run it again
-with `DEBUG=electron-builder` set to see where it stopped.
+Should the packager end without these files, the build lays the game into the unpacked app it
+made where the packager had not (as `resources/app/`, which Electron runs as it would its archive).
+On Linux it then makes `tekken3-<version>.tar.gz` itself; elsewhere it keeps the unpacked app
+(`out/<target>/…-unpacked/`, which runs as it is), says so, and stops with an error. Run it again with
+`DEBUG=electron-builder` set to see where the packager stopped.
 
 Each is some 900 MB. Once `npm run remaster` has made its assets, the app carries them too, and the
 remaster with them (REMASTER in REMAKE OPTION): some 3 GB more, which the build says. A Windows
