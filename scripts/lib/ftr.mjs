@@ -22,6 +22,11 @@
  *   - u32 picture count; per picture, u32 triangle count and u32 triangle numbers (a triangle's
  *     indices at three times its number): the triangles drawn only while that picture is on the
  *     face, the first picture the face as loaded, the i-th triangle of each picture the same face.
+ * - Version 6: version 5, each triangle wound counter-clockwise seen from its front (the player
+ *   draws the front alone), then a u32 count and u32 triangle numbers: the triangles drawn from both
+ *   faces. Before it, the triangles are as the console winds them, and every face is drawn. Kazuya's
+ *   is version 6 with his rig's nodes in place of the zero count, every triangle drawn from both
+ *   faces; it is not read here (`hasRig`).
  */
 export const FTR_MAGIC = 0x31525446;
 const V1_BYTES = 28;
@@ -29,17 +34,24 @@ const V3_BYTES = 48;
 /** A step whose shape keeps the shape drawn. */
 export const KEEP_SHAPE = 255;
 
-/** A mesh's vertices, triangles, shapes and pictures, texture coordinates in eighths of a texel whatever the version. */
+/** Whether a mesh carries Tekken 4's rig (Kazuya's): from version 4, a count of nodes after its vertices (48 bytes each) and indices. */
+export function hasRig(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (view.getUint32(4, true) < 4) return false;
+  return view.getUint32(24 + view.getUint32(8, true) * 48 + view.getUint32(12, true) * 2, true) > 0;
+}
+
+/** A mesh's vertices, triangles, shapes, pictures and triangles drawn from both faces (null before version 6), texture coordinates in eighths of a texel whatever the version. */
 export function readFtr(bytes) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (view.getUint32(0, true) !== FTR_MAGIC) throw new Error('not a fighter mesh');
   const version = view.getUint32(4, true);
-  if (version !== 1 && version !== 3 && version !== 5) throw new Error(`fighter mesh version ${version} is not read here`);
+  if (version !== 1 && version !== 3 && version !== 5 && version !== 6) throw new Error(`fighter mesh version ${version} is not read here`);
   const count = view.getUint32(8, true);
   const indexCount = view.getUint32(12, true);
   const width = view.getUint16(16, true);
   const height = view.getUint16(18, true);
-  const garment = version === 5 ? view.getUint32(20, true) : 0;
+  const garment = version >= 5 ? view.getUint32(20, true) : 0;
   const vertices = [];
   let at = 24;
   const triple = (offset) => [0, 1, 2].map((c) => view.getInt16(offset + c * 2, true));
@@ -47,7 +59,7 @@ export function readFtr(bytes) {
     if (version >= 3) {
       const used = view.getUint8(at);
       const bytesOf = Array.from({ length: used }, (_, k) => view.getUint8(at + 5 + k * 8));
-      const total = version === 5 ? bytesOf.reduce((s, b) => s + b, 0) : 255;
+      const total = version >= 5 ? bytesOf.reduce((s, b) => s + b, 0) : 255;
       const influences = bytesOf.map((b, k) => ({ joint: view.getUint8(at + 4 + k * 8), weight: b / total, point: triple(at + 6 + k * 8) }));
       vertices.push({ influences, normalJoint: view.getUint8(at + 1), normal: triple(at + 36), uv: [view.getUint16(at + 42, true), view.getUint16(at + 44, true)] });
       at += V3_BYTES;
@@ -63,8 +75,9 @@ export function readFtr(bytes) {
   at += indexCount * 2;
   const shapes = [];
   const pictures = [];
-  if (version === 5) {
-    if (view.getUint32(at, true) !== 0) throw new Error('a version 5 mesh with a rig is not read here');
+  let twoFaced = null;
+  if (version >= 5) {
+    if (view.getUint32(at, true) !== 0) throw new Error(`a version ${version} mesh with a rig is not read here`);
     at += 4;
     const groups = view.getUint32(at, true);
     at += 4;
@@ -104,8 +117,12 @@ export function readFtr(bytes) {
       pictures.push(Array.from({ length: n }, (_, k) => view.getUint32(at + k * 4, true)));
       at += n * 4;
     }
+    if (version === 6) {
+      const n = view.getUint32(at, true);
+      twoFaced = Array.from({ length: n }, (_, k) => view.getUint32(at + 4 + k * 4, true));
+    }
   }
-  return { version, width, height, garment, vertices, indices, shapes, pictures };
+  return { version, width, height, garment, vertices, indices, shapes, pictures, twoFaced };
 }
 
 /** Weights as 255ths that sum to 255: each rounded down, the largest remainders rounded up. */
@@ -178,7 +195,7 @@ function writeMesh(version, { width, height, vertices, indices, garment = 0 }, o
   out.u32(indices.length);
   out.u16(width);
   out.u16(height);
-  out.u32(version === 5 ? garment : 0);
+  out.u32(version >= 5 ? garment : 0);
   for (const v of vertices) {
     if (v.influences.length < 1 || v.influences.length > 4) throw new Error(`a vertex with ${v.influences.length} influences`);
     out.u8(v.influences.length);
@@ -210,12 +227,13 @@ export function writeFtr3(mesh) {
  * A mesh as FTR version 5, with its shapes (`[{ part, steps, vertices, shapes }]`, each shape a
  * `{ points, normal }` per vertex), pictures (triangle numbers per picture) and the joint its
  * garment hangs on (`garment`, 0 for none). A shape's vertex must have as many points as
- * influences, and a picture's triangles vertices of their own.
+ * influences, and a picture's triangles vertices of their own. With `twoFaced` (the triangles drawn
+ * from both faces, its triangles wound counter-clockwise seen from their front), as version 6.
  */
 export function writeFtr5(mesh) {
-  const { vertices, indices, shapes = [], pictures = [] } = mesh;
+  const { vertices, indices, shapes = [], pictures = [], twoFaced = null } = mesh;
   const out = writer(24 + vertices.length * V3_BYTES + indices.length * 2 + 64);
-  writeMesh(5, mesh, out, weightParts);
+  writeMesh(twoFaced === null ? 5 : 6, mesh, out, weightParts);
   out.u32(0);
   out.u32(shapes.length);
   for (const group of shapes) {
@@ -260,6 +278,13 @@ export function writeFtr5(mesh) {
   for (const triangles of pictures) {
     out.u32(triangles.length);
     for (const t of triangles) out.u32(t);
+  }
+  if (twoFaced !== null) {
+    out.u32(twoFaced.length);
+    for (const t of twoFaced) {
+      if (!(0 <= t && t * 3 < indices.length)) throw new Error(`triangle ${t} drawn from both faces is not one of the ${indices.length / 3}`);
+      out.u32(t);
+    }
   }
   return out.done();
 }

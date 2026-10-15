@@ -25,6 +25,7 @@
  *             fighter's place in VRAM
  *   shapes    a hand's: a table of vertex blocks by its step, or 0 to keep the one drawn
  */
+import { facingNormals } from '../facing.mjs';
 import { KEEP_SHAPE, writeFtr5 } from '../ftr.mjs';
 import { absoluteVram, packAtlas, readTimChain } from '../texture.mjs';
 
@@ -428,13 +429,19 @@ function handShapes(model, handParts, accessories) {
   return groups;
 }
 
+/** Whether the board's archive holds a stand-in for a costume it has no model of: a texture chain of one image. */
+export const standIn = ({ textures }) => readTimChain(textures).filter((t) => t.image).length <= 1;
+
 /**
  * The fighter's mesh and atlas from the board (`model` and `textures`, its archive's two members;
  * `board`, its accessories as the board's tables give them), each accessory on its own joint; and
  * its accessories as the fight hangs and swings them. `handParts` gives the part each hand's joint
- * is drawn as.
+ * is drawn as. The mesh's triangles are wound counter-clockwise seen from their front, the other way
+ * round from the board's, with those it draws from both faces listed (`FTR` version 6). Given the
+ * body's skeleton (`bodyJoints`, the disc's, joints 0 to 17), its skeleton is the body's, the
+ * accessories' and the garment's, and its normals are turned the way its faces face (`facing.mjs`).
  */
-export function exportArcadeFighter({ model: modelBytes, textures }, board, handParts, encodePng) {
+export function exportArcadeFighter({ model: modelBytes, textures }, board, handParts, encodePng, bodyJoints = null) {
   const { model, accessories, hung } = placeAccessories(readArcadeFighter(modelBytes), board);
   const body = resolveArcadeFighter(model, new Map(), accessories);
   if (body.problems.length) throw new Error(`the board's model does not resolve: ${body.problems[0]}`);
@@ -487,10 +494,14 @@ export function exportArcadeFighter({ model: modelBytes, textures }, board, hand
     }
     return index;
   };
-  /* The GPU draws a quad as (0, 1, 2) and (1, 3, 2). */
-  const triangles = (ids) => (ids.length === 3 ? [ids] : [[ids[0], ids[1], ids[2]], [ids[1], ids[3], ids[2]]]);
+  /* The GPU draws a quad as (0, 1, 2) and (1, 3, 2); each turned round, its front counter-clockwise. */
+  const triangles = (ids) => (ids.length === 3 ? [[ids[0], ids[2], ids[1]]] : [[ids[0], ids[2], ids[1]], [ids[1], ids[2], ids[3]]]);
+  const twoFaced = [];
   polygons.forEach((p, i) => {
-    for (const t of triangles(p.corners.map((_, k) => vertexOf(i, k)))) indices.push(...t);
+    for (const t of triangles(p.corners.map((_, k) => vertexOf(i, k)))) {
+      if (p.doubleSided) twoFaced.push(indices.length / 3);
+      indices.push(...t);
+    }
   });
   const shapes = groups.map((group, g) => {
     const members = shapesOf.flatMap((s, v) => (s?.group === g ? [v] : []));
@@ -502,12 +513,33 @@ export function exportArcadeFighter({ model: modelBytes, textures }, board, hand
     };
   });
   const garment = vertices.filter((v) => v.influences.some((f) => f.joint === GARMENT)).length;
-  const mesh = writeFtr5({ width, height, vertices, indices, shapes, pictures: [], garment: garment > 0 ? GARMENT : 0 });
+  const records = { width, height, vertices, indices, shapes, pictures: [], garment: garment > 0 ? GARMENT : 0, twoFaced };
+  /* The body's joints, the accessories' on their own (18 on), and the garment's where the hips are. */
+  const skeleton =
+    bodyJoints === null
+      ? null
+      : [
+          ...bodyJoints.filter((j) => j.joint < BODY),
+          ...hung.flatMap((a, k) => (a === null ? [] : [{ joint: BODY + k, parent: a.parent, offset: a.offset, rest: a.rest }])),
+          ...(garment > 0 ? [{ joint: GARMENT, parent: HIPS, offset: [0, 0, 0], rest: [0, 0, 0] }] : []),
+        ];
+  const facing = skeleton === null ? { mesh: records, turned: 0 } : facingNormals(records, skeleton);
   return {
-    mesh,
+    mesh: writeFtr5(facing.mesh),
     atlas: encodePng(width, height, atlas),
+    skeleton,
     accessories: hung,
     garment: garment > 0,
-    stats: { polygons: polygons.length, accessories: [...accessories.keys()], garment, vertices: vertices.length, triangles: indices.length / 3, atlas: [width, height], shapes: shapes.map((s) => [s.part, s.shapes.length, s.vertices.length]) },
+    stats: {
+      polygons: polygons.length,
+      accessories: [...accessories.keys()],
+      garment,
+      vertices: vertices.length,
+      triangles: indices.length / 3,
+      twoFaced: twoFaced.length,
+      turned: facing.turned,
+      atlas: [width, height],
+      shapes: shapes.map((s) => [s.part, s.shapes.length, s.vertices.length]),
+    },
   };
 }

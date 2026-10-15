@@ -17,7 +17,9 @@
  * shape's places and normals and the cut surface made even again, so every shape has the same
  * vertices and triangles. A face's pictures (its closed eyes) are rounded once, as the face is
  * loaded, and each picture's triangles made from those on vertices of their own, their texture
- * coordinates moved to its region.
+ * coordinates moved to its region. A face drawn from both faces (version 6) is cut into triangles
+ * drawn from both, each wound as the face is; a face lying right under one stays flat
+ * (`round/surface.mjs`).
  */
 import { bindPose } from './round/bind.mjs';
 import { readFtr, writeFtr5 } from './ftr.mjs';
@@ -105,7 +107,8 @@ export function roundMesh(mesh, skeleton, steps = STEPS) {
   const n = steps;
   const core = coreOf({ shapes: [], pictures: [], ...mesh });
   const frames = bindPose(core.vertices, skeleton, core.indices);
-  const surface = surfaceOf(core.vertices, core.indices, frames);
+  const both = new Set(mesh.twoFaced ?? []);
+  const surface = surfaceOf(core.vertices, core.indices, frames, new Set(core.faceOf.flatMap((t, f) => (both.has(t) ? [f] : []))));
   const { faces } = surface;
   const edgeOf = (f, s) => edgeKey(faces[f].points[s], faces[f].points[(s + 1) % 3]);
 
@@ -340,6 +343,10 @@ export function roundMesh(mesh, skeleton, steps = STEPS) {
     return { part: group.part, steps: group.steps };
   });
 
+  /* Each face's triangles drawn from both faces where the face is. */
+  const per = n * n;
+  const twoFaced = core.faceOf.flatMap((t, f) => (both.has(t) ? Array.from({ length: per }, (_, k) => f * per + k) : []));
+
   /* Each picture's triangles on vertices of their own: the first's as loaded, the others' texture coordinates moved to their regions. */
   const pictures = (mesh.pictures ?? []).map(() => []);
   if (pictures.length > 0) {
@@ -354,7 +361,6 @@ export function roundMesh(mesh, skeleton, steps = STEPS) {
       return copies[picture].get(key);
     };
     const later = [];
-    const per = n * n;
     surface.faces.forEach((_, f) => {
       const at = core.pictureOf.get(core.faceOf[f]);
       if (at === undefined) return;
@@ -372,11 +378,12 @@ export function roundMesh(mesh, skeleton, steps = STEPS) {
           if (picture === 0) {
             indices.splice(t * 3, 3, ...copied);
             pictures[0].push(t);
-          } else later.push({ picture, copied });
+          } else later.push({ picture, copied, both: both.has(mesh.pictures[picture][at.i]) });
         });
       }
     });
-    for (const { picture, copied } of later) {
+    for (const { picture, copied, both: drawnBoth } of later) {
+      if (drawnBoth) twoFaced.push(indices.length / 3);
       pictures[picture].push(indices.length / 3);
       indices.push(...copied);
     }
@@ -402,8 +409,9 @@ export function roundMesh(mesh, skeleton, steps = STEPS) {
       return { ...group, vertices: members, shapes: mesh.shapes[g].shapes.map((_, s) => members.map((v) => keptForms[v].shapes[s])) };
     }),
     pictures,
+    twoFaced: mesh.twoFaced == null ? null : twoFaced,
   };
 }
 
-/** A fighter mesh's bytes (FTR version 1 or 5, as extracted) rounded, as FTR version 5. */
+/** A fighter mesh's bytes (FTR version 1, 5 or 6, as extracted) rounded, as FTR version 5, or 6 from 6. */
 export const roundFighter = (bytes, skeleton, steps = STEPS) => writeFtr5(roundMesh(readFtr(bytes), skeleton, steps));

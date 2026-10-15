@@ -15,8 +15,14 @@
  * bytes, four of a joint, a weight in 255ths and a point, then the normal and the coordinates); 4
  * the same followed by a Tekken 4 model's nodes (a count, then a parent, an offset and a rest
  * rotation each), for the joints past Tekken 3's its vertices hang on (`tekken4.ts`); 5 as 4, each
- * weight a part of the vertex's weights' sum, then the hands' shapes and the face's pictures
- * (`scripts/lib/ftr.mjs`).
+ * weight a part of the vertex's weights' sum, then the hands' shapes and the face's pictures; 6 as
+ * 5, its triangles wound counter-clockwise seen from their front, then the triangles drawn from both
+ * faces (`scripts/lib/ftr.mjs`); Kazuya's is 6 with his nodes.
+ *
+ * A version 6 mesh is drawn from the front of each face alone, as the console draws it: a triangle
+ * drawn from both faces is drawn twice, its back on vertices of its own, wound the other way and its
+ * normals turned round. Every face of an older mesh is drawn from both, the side it is seen from
+ * taken from its normals.
  *
  * A hand's shapes: per part, the shape each of its steps draws, and the points and normals of the
  * vertices the shapes move, copied in when the drawn shape changes. A face's pictures (its eyes
@@ -63,7 +69,7 @@ export interface FighterMesh {
   readonly normal: Int16Array;
   readonly uv: Float32Array;
   readonly indices: Uint32Array;
-  /** The joints past Tekken 3's, for a Tekken 4 model (version 4). */
+  /** The joints past Tekken 3's, for a Tekken 4 model (version 4, or 6 with its nodes). */
   readonly rig: HelperRig | null;
   /** The hands' other shapes (version 5). */
   readonly shapes: readonly ShapeGroup[];
@@ -73,6 +79,8 @@ export interface FighterMesh {
   readonly pictures: number;
   /** The joint its garment hangs on, posed as the hips and kept off the thighs; 0 where it has none (version 5). */
   readonly garment: number;
+  /** Whether each face is drawn from its front alone, a face drawn from both faces in it twice (version 6). */
+  readonly oneSided: boolean;
 }
 
 export function readFighterMesh(buffer: ArrayBuffer): FighterMesh {
@@ -100,6 +108,7 @@ export function readFighterMesh(buffer: ArrayBuffer): FighterMesh {
     pictureOf: new Uint8Array(n),
     pictures: 0,
     garment: version >= 5 ? view.getUint32(20, true) : 0,
+    oneSided: version >= 6,
   };
   const stride = version >= 3 ? 48 : 28;
   let at = 24;
@@ -155,12 +164,72 @@ export function readFighterMesh(buffer: ArrayBuffer): FighterMesh {
     if (version === 4 || count > 0) mesh.rig = new HelperRig(nodes);
     at += 4 + count * 28;
   }
-  if (version >= 5) readShapesAndPictures(view, at, mesh);
-  return mesh;
+  if (version < 5) return mesh;
+  at = readShapesAndPictures(view, at, mesh);
+  if (version < 6) return mesh;
+  const twoFaced = new Uint32Array(view.getUint32(at, true));
+  for (let k = 0; k < twoFaced.length; k += 1) twoFaced[k] = view.getUint32(at + 4 + k * 4, true);
+  return withBacks(mesh, twoFaced);
 }
 
-/** Version 5's hand shapes and face pictures, from `at` (after the rig). */
-function readShapesAndPictures(view: DataView, start: number, mesh: FighterMesh & { shapes: ShapeGroup[]; pictures: number }): void {
+/**
+ * The mesh with the back of each triangle in `twoFaced`: the triangle again, wound the other way, on
+ * a copy of each of its vertices with the normal turned round (in each of a hand's shapes too).
+ */
+function withBacks(mesh: FighterMesh, twoFaced: Uint32Array): FighterMesh {
+  const n = mesh.vertexCount;
+  const backOf = new Map<number, number>();
+  for (const t of twoFaced) for (let c = 0; c < 3; c += 1) if (!backOf.has(mesh.indices[t * 3 + c]!)) backOf.set(mesh.indices[t * 3 + c]!, n + backOf.size);
+  const count = n + backOf.size;
+  const grown = <T extends Uint8Array | Int16Array | Float32Array>(from: T, each: number, make: (length: number) => T): T => {
+    const to = make(count * each);
+    to.set(from);
+    for (const [v, back] of backOf) to.set(from.subarray(v * each, (v + 1) * each), back * each);
+    return to;
+  };
+  const normal = grown(mesh.normal, 3, (l) => new Int16Array(l));
+  for (const back of backOf.values()) for (let c = 0; c < 3; c += 1) normal[back * 3 + c] = -normal[back * 3 + c]!;
+  const indices = new Uint32Array(mesh.indices.length + twoFaced.length * 3);
+  indices.set(mesh.indices);
+  twoFaced.forEach((t, k) => {
+    const [a, b, c] = [0, 1, 2].map((i) => backOf.get(mesh.indices[t * 3 + i]!)!);
+    indices.set([a!, c!, b!], mesh.indices.length + k * 3);
+  });
+  const shapes = mesh.shapes.map((group) => {
+    const backs = Array.from(group.vertices, (v) => backOf.get(v) ?? -1);
+    const kept = backs.flatMap((back, k) => (back < 0 ? [] : [k]));
+    const vertices = new Uint16Array(group.vertices.length + kept.length);
+    vertices.set(group.vertices);
+    kept.forEach((k, i) => (vertices[group.vertices.length + i] = backs[k]!));
+    const each = (forms: readonly Int16Array[], size: number, sign: number): Int16Array[] =>
+      forms.map((form) => {
+        const to = new Int16Array(vertices.length * size);
+        to.set(form);
+        kept.forEach((k, i) => {
+          for (let c = 0; c < size; c += 1) to[(group.vertices.length + i) * size + c] = sign * form[k * size + c]!;
+        });
+        return to;
+      });
+    return { ...group, vertices, points: each(group.points, INFLUENCES * 3, 1), normals: each(group.normals, 3, -1) };
+  });
+  return {
+    ...mesh,
+    vertexCount: count,
+    influenceCount: grown(mesh.influenceCount, 1, (l) => new Uint8Array(l)),
+    joints: grown(mesh.joints, INFLUENCES, (l) => new Uint8Array(l)),
+    weights: grown(mesh.weights, INFLUENCES, (l) => new Float32Array(l)),
+    points: grown(mesh.points, INFLUENCES * 3, (l) => new Int16Array(l)),
+    normalJoint: grown(mesh.normalJoint, 1, (l) => new Uint8Array(l)),
+    normal,
+    uv: grown(mesh.uv, 2, (l) => new Float32Array(l)),
+    indices,
+    shapes,
+    pictureOf: grown(mesh.pictureOf, 1, (l) => new Uint8Array(l)),
+  };
+}
+
+/** Version 5's hand shapes and face pictures, from `at` (after the rig); where they end. */
+function readShapesAndPictures(view: DataView, start: number, mesh: FighterMesh & { shapes: ShapeGroup[]; pictures: number }): number {
   let at = start;
   const groups = view.getUint32(at, true);
   at += 4;
@@ -209,6 +278,7 @@ function readShapesAndPictures(view: DataView, start: number, mesh: FighterMesh 
     }
     at += count * 4;
   }
+  return at;
 }
 
 /** A joint's world transform in game axes: rotation and translation in millimetres. */
@@ -295,7 +365,7 @@ export class Fighter {
     this.material = {
       albedo: texture,
       cutout: 0.5,
-      doubleSided: true,
+      doubleSided: !mesh.oneSided,
       ...(white === null ? {} : { emissive: white, emissiveScale: this.glow }),
       ...(look?.normal == null ? {} : { normal: look.normal, normalStrength: 0.8 }),
       ...(look?.orm == null ? {} : { orm: look.orm }),

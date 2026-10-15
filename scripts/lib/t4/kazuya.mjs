@@ -14,6 +14,7 @@ import { HelperRig, JOINT_OF_NODE, RIG_NODES, rigJoint } from '../../../src/mod/
 import { poseRotations } from '../../../src/motion/motion.ts';
 import { decodeTexture } from './chrtk4.mjs';
 import { apply, convertPose, mul, restRotation, transpose } from './retarget.mjs';
+import { add, cross, dot, sub } from '../round/vec.mjs';
 
 const FLIP = [1, 0, 0, 0, -1, 0, 0, 0, -1];
 /** How far a drawing laid over another stands off it, in Tekken 3's units (millimetres, near enough). */
@@ -214,8 +215,10 @@ function packRows(sizes) {
 }
 
 /**
- * The mesh (`FTR` version 4: four influences a vertex, and his nodes), the atlas and the skeleton
- * from his model (`parseChrtk4`), its textures (`parseUploads`) and Tekken 3's motion tables.
+ * The mesh (`FTR` version 6: four influences a vertex, his nodes, each triangle wound to face its
+ * corners' normals and drawn from both faces, as a strip's triangles alternate their winding), the
+ * atlas and the skeleton from his model (`parseChrtk4`), its textures (`parseUploads`) and Tekken 3's
+ * motion tables.
  */
 export function exportKazuya(model, uploads, tables, encodePng) {
   const skeleton = skeletonOf(model.nodes);
@@ -258,6 +261,10 @@ export function exportKazuya(model, uploads, tables, encodePng) {
   const vertices = [];
   const lookup = new Map();
   const indices = [];
+  /* Each vertex's place and normal at the bind pose, in Tekken 3's axes; a triangle's front, its length twice its area. */
+  const bindPlaces = [];
+  const bindNormals = [];
+  const faceOf = ([a, b, c]) => cross(sub(bindPlaces[b], bindPlaces[a]), sub(bindPlaces[c], bindPlaces[a]));
   let dropped = 0;
   const toJoint = (joint, v) => apply(transpose(bind[joint].r), v);
   const local = (joint, v) => {
@@ -279,6 +286,8 @@ export function exportKazuya(model, uploads, tables, encodePng) {
         const position = apply(FLIP, posed[l][m][v].position);
         const normal = apply(FLIP, posed[l][m][v].normal);
         return {
+          position,
+          normal,
           /* Its points in each joint's space, `layer` lifts off the surface along its normal. */
           influences: (layer) =>
             kept.map(([joint], k) => {
@@ -321,6 +330,8 @@ export function exportKazuya(model, uploads, tables, encodePng) {
             index = vertices.length;
             lookup.set(k, index);
             vertices.push(fields);
+            bindPlaces.push(v.position);
+            bindNormals.push(v.normal);
           }
           return index;
         };
@@ -330,18 +341,31 @@ export function exportKazuya(model, uploads, tables, encodePng) {
           const at = all.findIndex((d) => d.s === s && d.i === i);
           if (all.slice(at + 1).some((d) => opaque.get(d.key))) continue;
           const layer = all.slice(0, at).filter((d, k) => !all.slice(k + 1).some((e) => opaque.get(e.key))).length;
-          indices.push(idOf(strip.items[i - 2], layer), idOf(strip.items[i - 1], layer), idOf(strip.items[i], layer));
+          const corners = [idOf(strip.items[i - 2], layer), idOf(strip.items[i - 1], layer), idOf(strip.items[i], layer)];
+          /* Wound to face its corners' normals: a strip's triangles alternate their winding. */
+          if (dot(faceOf(corners), add(add(bindNormals[corners[0]], bindNormals[corners[1]]), bindNormals[corners[2]])) < 0) [corners[1], corners[2]] = [corners[2], corners[1]];
+          indices.push(...corners);
         }
       }
     }
   }
   if (vertices.length > 0xffff) throw new Error(`${vertices.length} vertices do not fit u16 indices`);
+  /* A normal against the faces it is on (their fronts weighed by their area) turned round, so no face is lit from behind. */
+  const fronts = vertices.map(() => [0, 0, 0]);
+  for (let t = 0; t < indices.length; t += 3) {
+    const face = faceOf(indices.slice(t, t + 3));
+    for (let c = 0; c < 3; c += 1) fronts[indices[t + c]] = add(fronts[indices[t + c]], face);
+  }
+  vertices.forEach((f, i) => {
+    if (dot(bindNormals[i], fronts[i]) < 0) f.n = f.n.map((x) => -x + 0);
+  });
+  const triangles = indices.length / 3;
 
-  /* Version 4: version 3, then his nodes (a count, and a parent, offset and rest rotation each) for the rig. */
-  const mesh = new Uint8Array(24 + vertices.length * 48 + indices.length * 2 + 4 + model.nodes.length * 28);
+  /* Version 6: four influences a vertex, each weight a part of their sum (255); his nodes (a count, and a parent, offset and rest rotation each) for the rig; no hand shapes or pictures; then every triangle, drawn from both faces. */
+  const mesh = new Uint8Array(24 + vertices.length * 48 + indices.length * 2 + 4 + model.nodes.length * 28 + 8 + 4 + triangles * 4);
   const view = new DataView(mesh.buffer);
   view.setUint32(0, 0x31525446, true);
-  view.setUint32(4, 4, true);
+  view.setUint32(4, 6, true);
   view.setUint32(8, vertices.length, true);
   view.setUint32(12, indices.length, true);
   view.setUint16(16, side, true);
@@ -375,6 +399,10 @@ export function exportKazuya(model, uploads, tables, encodePng) {
     rotation.forEach((x, k) => view.setFloat32(at + 16 + k * 4, x, true));
     at += 28;
   }
+  /* No hand shapes, no pictures. */
+  at += 8;
+  view.setUint32(at, triangles, true);
+  for (let t = 0; t < triangles; t += 1) view.setUint32(at + 4 + t * 4, t, true);
   return {
     mesh,
     atlas: encodePng(side, side, atlas),

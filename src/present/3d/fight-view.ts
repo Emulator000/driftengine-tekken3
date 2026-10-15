@@ -133,8 +133,6 @@ const lookOf = (camera: Camera): { pitch: number; yaw: number } => {
   const turn = 4096 / (2 * Math.PI);
   return { pitch: Math.round(Math.asin(Math.max(-1, Math.min(1, -y))) * turn) & 0xfff, yaw: Math.round(Math.atan2(-x, -z) * turn) & 0xfff };
 };
-/** How far off the floor ends ahead (metres): an arcade stage's floor's rings reach a little farther every way. */
-const FLOOR_END = 90;
 /** The picture's half-height in the game's pixels, which its projection distance is against. */
 const HALF_HEIGHT = 240;
 /** Stage 11's sky behind its clouds, unless True Ogre plays there (8-bit sRGB). */
@@ -458,22 +456,6 @@ export class FightView {
     renderer.setMaterial(null);
   }
 
-  /**
-   * Where the floor ends ahead, as the picture's line (of 480): a point on it as far off as its
-   * rings reach, straight ahead of the camera; null where it lies behind the camera.
-   */
-  private floorEnd(): number | null {
-    const camera = this.camera;
-    const [fx, , fz] = camera.forward as unknown as [number, number, number];
-    const across = Math.hypot(fx, fz);
-    if (across === 0) return null;
-    const p = [camera.position[0]! + (fx / across) * FLOOR_END, 0, camera.position[2]! + (fz / across) * FLOOR_END, 1];
-    const m = camera.viewProjection as unknown as ArrayLike<number>;
-    const clip = [1, 3].map((r) => m[r]! * p[0]! + m[4 + r]! * p[1]! + m[8 + r]! * p[2]! + m[12 + r]! * p[3]!) as [number, number];
-    if (!(clip[1] > 0)) return null;
-    return ((1 - clip[0] / clip[1]) / 2) * 480;
-  }
-
   /** The game's view in the engine's axes, and its projection over the picture's half-height. */
   private adoptCamera(state: FightState, aspect: number): void {
     const flip = [1, -1, -1];
@@ -559,7 +541,7 @@ export class FightView {
       this.scenery.cells.fill(1);
       this.drawScenery(state, drawn, false);
       renderer.setMaterial(drawn.ground.material);
-      for (const mesh of [drawn.ground.mesh, drawn.ground.farMesh]) if (mesh !== null) renderer.drawMesh(mesh, IDENTITY);
+      if (drawn.ground.mesh !== null) renderer.drawMesh(drawn.ground.mesh, IDENTITY);
       drawn.ground.drawRelief();
       renderer.setMaterial(null);
       this.drawScenery(state, drawn, true);
@@ -690,7 +672,7 @@ export class FightView {
     if (scenery && freeView.active) this.scenery.cells.fill(1);
     /* An arcade stage's background, behind everything drawn after it. */
     if (drawn?.sky != null && only.scenery && state.match.trueOgres === 0) drawn.sky.draw(this.camera, state.frameCount / 60, lookOfStage(state.stage).wind, this.scenery.yaw);
-    else if (drawn?.background != null && only.scenery && state.match.trueOgres === 0) drawn.background.draw(lookOf(this.camera), aspect, this.scenery.yaw, this.floorEnd(), sky);
+    else if (drawn?.background != null && only.scenery && state.match.trueOgres === 0) drawn.background.draw(lookOf(this.camera), aspect, this.scenery.yaw, sky);
     const ball = state.mode === TEKKEN_BALL && !stageAlone;
     /* Tekken Force's backdrop is the farthest thing drawn: everything after it lies over it. */
     if (drawn?.force != null && state.mode === TEKKEN_FORCE) drawn.force.draw(state, this.data, aspect);
@@ -711,7 +693,7 @@ export class FightView {
       drawn.ground.update(this.ground, edge === undefined ? null : { x: this.scenery.x, z: this.scenery.z, yaw: this.scenery.yaw, half: edge * 8 });
       renderer.setMaterial(drawn.ground.material);
       drawn.ground.drawRelief();
-      for (const mesh of [drawn.ground.mesh, drawn.ground.farMesh]) if (mesh !== null) renderer.drawMesh(mesh, IDENTITY);
+      if (drawn.ground.mesh !== null) renderer.drawMesh(drawn.ground.mesh, IDENTITY);
       renderer.setMaterial(null);
       if (drawn.puddles !== null) {
         renderer.setMaterial(drawn.puddles.material);

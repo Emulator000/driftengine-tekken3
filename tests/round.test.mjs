@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { readFighterMesh } from '../src/present/3d/fighter/fighter.ts';
-import { readFtr, weightBytes, writeFtr3, writeFtr5 } from '../scripts/lib/ftr.mjs';
+import { hasRig, readFtr, weightBytes, writeFtr3, writeFtr5 } from '../scripts/lib/ftr.mjs';
 
 /** A version 1 mesh: each vertex one point (`at` of one) or a seam of two, its normal a unit vector. */
 function ftr1(vertices, triangles) {
@@ -606,12 +606,15 @@ test('every fighter and intro model rounds, within the limits, its seams meeting
   for (const kind of ['fighters', 'intro']) {
     for (const name of readdirSync(path.join(data, kind)).filter((n) => n.endsWith('.ftr'))) {
       const bytes = new Uint8Array(readFileSync(path.join(data, kind, name)));
-      if (![1, 5].includes(new DataView(bytes.buffer, bytes.byteOffset).getUint32(4, true))) continue;
+      if (![1, 5, 6].includes(new DataView(bytes.buffer, bytes.byteOffset).getUint32(4, true)) || hasRig(bytes)) continue;
       const source = readFtr(bytes);
       const { skeleton } = JSON.parse(readFileSync(path.join(data, kind, name.replace(/\.ftr$/, '.json')), 'utf8'));
-      const out = readFighterMesh(bufferOf(roundFighter(bytes, skeleton)));
+      const rounded = roundFighter(bytes, skeleton);
+      const out = readFtr(rounded);
       assert.equal(out.indices.length, source.indices.length * 9, `${kind}/${name}`);
-      assert.ok(out.vertexCount <= 0xffff, `${kind}/${name}`);
+      assert.ok(out.vertices.length <= 0xffff, `${kind}/${name}`);
+      assert.equal(out.twoFaced?.length, source.twoFaced === null ? undefined : source.twoFaced.length * 9, `${kind}/${name}: each face drawn from both faces cut into nine`);
+      assert.ok(readFighterMesh(bufferOf(rounded)).vertexCount >= out.vertices.length, `${kind}/${name}`);
       const gaps = seamGaps(source.vertices, bindPose(source.vertices, skeleton, source.indices));
       if (gaps.length > 0) means.push(gaps.reduce((s, g) => s + g, 0) / gaps.length);
     }

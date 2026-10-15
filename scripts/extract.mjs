@@ -24,6 +24,9 @@
  *                    arcade has: its scenery (.stg) and atlas (.png), drawn in place of the disc's,
  *                    and the panorama behind it (.sky.png) where it has one, and its moving
  *                    pieces from the board's program (NN-K.stg and .png)
+ *   arcade/fighters/NN.* with the board's data, per pack it has a model of (not its stand-in for a
+ *                    costume it has none of): the mesh (.ftr, scripts/lib/arcade/fighter.mjs), its
+ *                    skeleton and accessories (.json) and atlas (.png), drawn in place of the disc's
  *   bns/NNN.bin      every file of TEKKEN3.BNS as it is, which the game's own loader reads by
  *                    logical id (the overlays, the menus' textures), their count in the manifest
  *   music/NN.xa      each XA song's own sectors (scripts/lib/xa.mjs)
@@ -52,7 +55,7 @@ import { parseModel } from './lib/model.mjs';
 import { exportStage } from './lib/stage.mjs';
 import { ACCESSORY_TABLES, archiveAt, BACKGROUND_RULES, BACKGROUND_TABLES, PROGRAM_CODE, PROGRAM_STAGES, STAGE_ARCHIVES, STAGE_LEFT_OUT, STAGE_OBJECTS } from './lib/arcade/board.mjs';
 import { exportArcadeBackground, exportArcadeObject, exportArcadeStage } from './lib/arcade/stage.mjs';
-import { arcadeFighters, boardAccessories, exportArcadeFighter, GARMENT } from './lib/arcade/fighter.mjs';
+import { arcadeFighters, boardAccessories, exportArcadeFighter, standIn } from './lib/arcade/fighter.mjs';
 import { decompress } from './lib/lz.mjs';
 import { readTimChain } from './lib/texture.mjs';
 import { decodePng, encodePng } from './lib/png.mjs';
@@ -67,7 +70,7 @@ const out = path.join(root, 'public/data');
 const exePath = path.join(root, '.cache/disc/SLUS_004.02');
 if (!existsSync(exePath)) throw new Error('no disc data: run npm run disc first');
 /** The format of what this writes, in its manifest: raised when the output changes, so `npm run dev` extracts again. */
-const DATA_FORMAT = 18;
+const DATA_FORMAT = 20;
 /** The arcade board's data, when `npm run arcade` has read it. */
 const arcadePath = path.join(root, '.cache/arcade/data.bin');
 /* Extracted already: at this format, and with the arcade's stages exactly when its data is there. */
@@ -144,10 +147,8 @@ function eyesOf(pack) {
 /** True Ogre's roster id: his model's second record on the chest has its shapes past the first in his moveset. */
 const TRUE_OGRE = 0x14;
 const WINGS_RECORD = 2;
-/** The hands' joints, whose parts have shapes; the first accessory's; the hips'. */
+/** The hands' joints, whose parts have shapes. */
 const HANDS = [6, 10];
-const FIRST_ACCESSORY_JOINT = 18;
-const HIPS_JOINT = 11;
 
 /**
  * Where a pack's model keeps shapes outside itself: for True Ogre's, his moveset (by the roster
@@ -377,25 +378,22 @@ if (existsSync(arcadePath)) {
     arcadePanoramas.push({ stage: s, ...background, ...(BACKGROUND_RULES.get(s) ?? {}) });
   });
   arcadeFighters(data).forEach((board, pack) => {
-    if (shapesFromOf(pack) !== null) return;
+    /* The board's stand-in for a costume it has no model of (Julia's second) leaves the disc's drawn. */
+    if (shapesFromOf(pack) !== null || standIn(board)) return;
     const id = String(pack).padStart(2, '0');
-    const first = 71 + pack * 4;
     const parts = partTable(exe, pack);
     const hands = new Map(parts.filter((p) => p.joint === HANDS[0] || p.joint === HANDS[1]).map((p) => [p.joint, p.index]));
     let result;
     try {
-      result = exportArcadeFighter(board, boardAccessories(code, PROGRAM_CODE.base, ACCESSORY_TABLES, pack), hands, encodePng);
+      /* The disc's body, which the board's has, with the board's accessories and garment on their own joints. */
+      result = exportArcadeFighter(board, boardAccessories(code, PROGRAM_CODE.base, ACCESSORY_TABLES, pack), hands, encodePng, skeletons.get(pack));
     } catch (error) {
       console.warn(`the board's fighter ${id} is left out (the disc's is drawn): ${error.message}`);
       return;
     }
     put(`arcade/fighters/${id}.ftr`, result.mesh);
     put(`arcade/fighters/${id}.png`, result.atlas);
-    /* The disc's body, which the board's has, the board's accessories on their own joints, and its garment's joint where the hips are. */
-    const body = skeletons.get(pack).filter((j) => j.joint < FIRST_ACCESSORY_JOINT);
-    const accessories = result.accessories.flatMap((a, k) => (a === null ? [] : [{ joint: FIRST_ACCESSORY_JOINT + k, parent: a.parent, offset: a.offset, rest: a.rest }]));
-    const garment = result.garment ? [{ joint: GARMENT, parent: HIPS_JOINT, offset: [0, 0, 0], rest: [0, 0, 0] }] : [];
-    put(`arcade/fighters/${id}.json`, JSON.stringify({ skeleton: [...body, ...accessories, ...garment], accessories: result.accessories }));
+    put(`arcade/fighters/${id}.json`, JSON.stringify({ skeleton: result.skeleton, accessories: result.accessories }));
     arcadeFighterPacks.push(pack);
   });
 }

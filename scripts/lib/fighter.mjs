@@ -9,7 +9,12 @@
  * points in each. And a face's closed eyes: the triangles whose texels the costume's closed eyes,
  * copied over its face in VRAM, change are drawn twice, once as the face is loaded and once
  * sampling an atlas region decoded with the closed eyes in place, each on vertices of its own.
+ *
+ * Its triangles are wound counter-clockwise seen from their front, the other way round from the
+ * console's, with the polygons the console draws from both faces listed (`FTR` version 6), and its
+ * normals turned the way its faces face (`facing.mjs`).
  */
+import { facingNormals } from './facing.mjs';
 import { KEEP_SHAPE, writeFtr5 } from './ftr.mjs';
 import { resolveFighter } from './model.mjs';
 import { attributeTarget, decodePage, packAtlas, readTimChain, vramOf } from './texture.mjs';
@@ -211,12 +216,14 @@ export function exportFighter(modelBytes, archiveMembers, parts, parseModel, enc
     }
     return index;
   };
-  /* The GPU draws a quad as (0, 1, 2) and (1, 3, 2). */
-  const triangles = (ids) => (ids.length === 3 ? [ids] : [[ids[0], ids[1], ids[2]], [ids[1], ids[3], ids[2]]]);
+  /* The GPU draws a quad as (0, 1, 2) and (1, 3, 2); each turned round, its front counter-clockwise. */
+  const triangles = (ids) => (ids.length === 3 ? [[ids[0], ids[2], ids[1]]] : [[ids[0], ids[2], ids[1]], [ids[1], ids[2], ids[3]]]);
   const pictures = [[], []];
+  const twoFaced = [];
   const emit = (i, target, picture) => {
     for (const t of triangles(polygons[i].corners.map((_, k) => vertexOf(i, k, target, picture)))) {
       if (picture !== null) pictures[picture].push(indices.length / 3);
+      if (polygons[i].doubleSided) twoFaced.push(indices.length / 3);
       indices.push(...t);
     }
   };
@@ -233,10 +240,12 @@ export function exportFighter(modelBytes, archiveMembers, parts, parseModel, enc
       shapes: group.shapes.map((_, s) => members.map((v) => ({ points: shapesOf[v].points[s], normal: vertices[v].normal }))),
     };
   });
-  const mesh = writeFtr5({ width, height, vertices, indices, shapes, pictures: shut.size > 0 ? pictures : [] });
+  const skeleton = skeletonOf(model, parts);
+  const facing = facingNormals({ width, height, vertices, indices, shapes, pictures: shut.size > 0 ? pictures : [], twoFaced }, skeleton);
+  const mesh = writeFtr5(facing.mesh);
   return {
     mesh,
-    skeleton: skeletonOf(model, parts),
+    skeleton,
     atlas: encodePng(width, height, atlas),
     stats: {
       polygons: polygons.length,
@@ -245,6 +254,8 @@ export function exportFighter(modelBytes, archiveMembers, parts, parseModel, enc
       atlas: [width, height],
       shapes: shapes.map((s) => [s.part, s.shapes.length, s.vertices.length]),
       eyes: shut.size,
+      twoFaced: twoFaced.length,
+      turned: facing.turned,
     },
   };
 }

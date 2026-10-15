@@ -15,8 +15,9 @@
  *
  * A face rounds only where the bind pose holds it as the model has it (`round`): none of its corners
  * a seam whose places do not meet (an armpit), and every two joints it spans either joined by seams
- * that meet within 2 mm or both placed by trusted frames. Any other face stays flat, its edges
- * straight.
+ * that meet within 2 mm or both placed by trusted frames; and neither lying right under a face drawn
+ * from both faces (`twoFaced`: a skirt's panel over the hips) nor such a face over it, as rounding
+ * one would bring it through the other. Any other face stays flat, its edges straight.
  *
  * `reshape` gives the places and the corners' and faces' normals of the same surface with its
  * vertices moved (a hand's other shape): the same points, faces, edges and groups.
@@ -53,6 +54,9 @@ export const SMALL = 80;
 /** A corner whose faces' normals, weighted, average shorter than this is a tip (a horn's, a cone's sharper than 30° across). */
 export const CUSP = 0.25;
 
+/** A face whose corners all lie behind faces drawn from both faces, no further than this (millimetres), lies under them. */
+export const UNDER = 20;
+
 /** An edge between two surface points, either way round. */
 export const edgeKey = (a, b) => (a < b ? `${a}-${b}` : `${b}-${a}`);
 
@@ -69,7 +73,19 @@ function cornerAngles(p) {
   });
 }
 
-export function surfaceOf(vertices, indices, frames) {
+/** Whether `p` lies behind `face` (its corners' places `at`), no further than `UNDER`, within its outline. */
+function lyingUnder(p, face, at) {
+  const [a, b, c] = face.corners.map((k) => at[k]);
+  const depth = dot(sub(a, p), face.normal);
+  if (depth < -0.5 || depth > UNDER) return false;
+  const q = add(p, scale(face.normal, depth));
+  const twice = dot(cross(sub(b, a), sub(c, a)), face.normal);
+  if (Math.abs(twice) < 1e-9) return false;
+  const part = (u, v) => dot(cross(sub(u, q), sub(v, q)), face.normal) / twice;
+  return [part(b, c), part(c, a), part(a, b)].every((w) => w > -0.02);
+}
+
+export function surfaceOf(vertices, indices, frames, twoFaced = new Set()) {
   const position = vertices.map((v) => bindPosition(v, frames));
   const given = vertices.map((v) => bindNormal(v, frames));
 
@@ -124,6 +140,15 @@ export function surfaceOf(vertices, indices, frames) {
     const corners = [indices[f], indices[f + 1], indices[f + 2]];
     faces.push({ corners, points: corners.map(root), ...faceShape(corners, position, given), round: roundable(corners) });
   }
+  /* A face lying under faces drawn from both faces stays flat, and so do they. */
+  const shells = [...twoFaced];
+  faces.forEach((face, f) => {
+    if (twoFaced.has(f) || shells.length === 0) return;
+    const over = face.corners.map((c) => shells.filter((g) => lyingUnder(position[c], faces[g], position)));
+    if (!over.every((list) => list.length > 0)) return;
+    face.round = false;
+    for (const g of over.flat()) faces[g].round = false;
+  });
 
   /* The faces each edge bounds. */
   const edgesOf = () => {

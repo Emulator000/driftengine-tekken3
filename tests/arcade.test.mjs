@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 
 import { ACCESSORY_TABLES, archiveAt, BACKGROUND_TABLES, identifyChips, joinData, joinPair, PROGRAM_CODE, PROGRAM_STAGES, sha256, STAGE_ARCHIVES, STAGE_OBJECTS } from '../scripts/lib/arcade/board.mjs';
 import { exportArcadeBackground, exportArcadeObject, exportArcadeStage, readArcadeModel } from '../scripts/lib/arcade/stage.mjs';
-import { arcadeFighters, boardAccessories, exportArcadeFighter, GARMENT, placeAccessories, readArcadeFighter, resolveArcadeFighter } from '../scripts/lib/arcade/fighter.mjs';
+import { arcadeFighters, boardAccessories, exportArcadeFighter, GARMENT, placeAccessories, readArcadeFighter, resolveArcadeFighter, standIn } from '../scripts/lib/arcade/fighter.mjs';
 import { readFtr } from '../scripts/lib/ftr.mjs';
 import { decompress } from '../scripts/lib/lz.mjs';
 import { decodePng, encodePng } from '../scripts/lib/png.mjs';
@@ -309,6 +309,11 @@ test('every fighter of the board\'s data reads and resolves, its seams\' weights
     assert.deepEqual(problems, [], `fighter ${k}`);
     assert.ok(polygons.length > 400, `fighter ${k}'s polygons`);
   });
+});
+
+test('the board\'s one stand-in is for Julia\'s second costume (pack 21), which it has no model of', { skip }, () => {
+  const fighters = arcadeFighters(new Uint8Array(readFileSync(path.join(arcade, 'data.bin'))));
+  assert.deepEqual(fighters.flatMap((f, pack) => (standIn(f) ? [pack] : [])), [21]);
 });
 
 test('a board\'s fighter\'s coat hung on the hips alone is put on a joint of its own, a fighter with none has none', { skip }, () => {

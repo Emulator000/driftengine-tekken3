@@ -239,8 +239,12 @@ function lockedOn(c: Camera): number {
   return -1;
 }
 
-/** The fighter the camera holds on this frame (its spinning sidestep), or -1: the presentation stands the scenery by it. */
-export const fighterLockedOn = (state: FightState, data: FightData): number => lockedOn({ state, data });
+/**
+ * The fighter the camera holds on this frame (its spinning sidestep), or -1, as before the fight's
+ * first field, when neither plays a move yet: the presentation stands the scenery by it.
+ */
+export const fighterLockedOn = (state: FightState, data: FightData): number =>
+  state.fighters[0]!.move === null || state.fighters[1]!.move === null ? -1 : lockedOn({ state, data });
 
 /**
  * Where the camera tracks each fighter this frame. A fighter mid-throw, or in a move that asks

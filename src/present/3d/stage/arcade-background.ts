@@ -6,13 +6,10 @@
  * its tile, the colour below, the filled tiles' colour or nothing; its top moving with the camera's
  * pitch; the colour above it, and the colour below it down to three quarters of the picture, where
  * the stage draws them. Stage 3 has a gradient in place of its tiles, and stage 6 its colour over
- * the whole picture. The scenery is seen through the console's camera, not the board's, so where the
- * panorama (or the gradient) would end above the line the floor ends at, it is lowered to meet it,
- * and no colour below opens between them; where that, or a camera looking higher than the board's,
- * brings its top into sight lower than the board ever lays it, its sky goes on up in its own colour
- * (the mean of its top texels, or the gradient's first), each column's top texels fading into it,
- * not the colour above. A cell that draws nothing, which the board's scenery always hides, shows
- * that sky too where nothing stands behind the background.
+ * the whole picture. Remastered, its sky goes on up above it in its own colour (the mean of its top
+ * texels, or the gradient's first), each column's top texels fading into it, in place of the colour
+ * above. A cell that draws nothing, which the board's scenery always hides, shows that sky where
+ * nothing stands behind the background.
  */
 import { srgbColor, type RendererApi } from '@driftengine/core';
 import { createSpritePass, drawSprite, type SpritePass } from '@driftengine/ui2d';
@@ -39,7 +36,9 @@ const FADE_STEPS = 6;
 const CAPACITY = 1024;
 
 const mod = (a: number, n: number): number => ((a % n) + n) % n;
-const linear = (rgb: Rgb): [number, number, number, number] => [...srgbColor(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255), 1];
+/** A colour as the board's screen shows it, five bits a channel, widened to eight as the panorama's texels are: a filled cell then meets a tile of the same colour without a seam. */
+const shown = (c: number): number => ((c >> 3) << 3) | (c >> 5);
+const linear = (rgb: Rgb): [number, number, number, number] => [...srgbColor(shown(rgb[0]) / 255, shown(rgb[1]) / 255, shown(rgb[2]) / 255), 1];
 
 export class ArcadeBackground {
   private readonly renderer: RendererApi;
@@ -79,11 +78,10 @@ export class ArcadeBackground {
 
   /**
    * The background for a camera looking `look` (its pitch and yaw in 4096ths), `aspect` the
-   * picture's, `sceneryYaw` the scenery's turn (4096ths); `floor` the line the floor ends at ahead
-   * (null where none is in sight); `skyBehind` where a sky of its own stands behind the background,
-   * which a cell that draws nothing shows.
+   * picture's, `sceneryYaw` the scenery's turn (4096ths); `skyBehind` where a sky of its own stands
+   * behind the background, which a cell that draws nothing shows.
    */
-  draw(look: { readonly pitch: number; readonly yaw: number }, aspect: number, sceneryYaw: number, floor: number | null = null, skyBehind = false): void {
+  draw(look: { readonly pitch: number; readonly yaw: number }, aspect: number, sceneryYaw: number, skyBehind = false): void {
     const layout = this.layout;
     const width = LINES * aspect;
     const pass = this.pass;
@@ -99,12 +97,8 @@ export class ArcadeBackground {
     let top = Math.trunc((-pitch * layout.pitch) / 256) + layout.offset;
     if (layout.most !== null && top > layout.most) top = layout.most;
     if (layout.least !== null && top < layout.least) top = layout.least;
-    const laid = top;
-    /* Down to where the floor ends, a line past it so no seam shows. */
-    const height = layout.gradient !== null ? layout.gradient.lines : layout.rows * TILE;
-    if (floor !== null && top + height < floor + 1) top = Math.ceil(floor + 1 - height);
-    /* Its top in sight where the board never shows it: lowered past where the board lays it, or past the board's most. */
-    const skyOn = top > 0 && (top > laid || (layout.most !== null && top > layout.most));
+    /* Remastered, its sky going on up over it where its top is in sight. */
+    const skyOn = top > 0 && this.ownSky;
 
     const gradient = layout.gradient;
     if (gradient !== null) {
@@ -120,9 +114,8 @@ export class ArcadeBackground {
       return;
     }
 
-    if (top > 0 && layout.drawn.above && !skyOn && !this.ownSky) this.fill(0, 0, width, top, this.colours.above);
-    if (skyOn && !this.ownSky) this.fill(0, 0, width, top, this.colours.sky);
-    if (top > 0 && this.ownSky) {
+    if (top > 0 && layout.drawn.above && !this.ownSky) this.fill(0, 0, width, top, this.colours.above);
+    if (skyOn) {
       for (let y = 0; y < top; y += BAND) {
         const deep = 1 - 0.45 * Math.min(1, (top - y) / LINES);
         this.fill(0, y, width, BAND, this.colours.sky.map((c) => c * deep));

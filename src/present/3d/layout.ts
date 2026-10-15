@@ -30,15 +30,8 @@ export const GROUND_TILE = TILE;
 /** Tekken Force's patch: its tiles, its map's rows, the depth it is laid at, and where its final stage's light stands in depth. */
 const FORCE = { tile: 2500, rows: 3, z: 0x145, lightZ: -2000 } as const;
 const TEKKEN_FORCE = 8;
-/** Rings of tiles past the patch: at most on a wide picture, and an arcade stage's floor's, out toward the horizon. */
-const WIDE_RINGS = 10;
-/**
- * The darkest an arcade stage's floor is shaded, by distance or away from its lights: the disc's
- * fades into its dark backdrop, where an arcade stage's scenery goes on, its floor in sight to its
- * far end.
- */
-const ARCADE_LEAST_SHADE = 0x60;
-const MAX_RINGS = 48;
+/** Rings of tiles past the patch: at most, on a wide picture and on an arcade stage, whose scenery stands much farther off than the disc's. */
+const MAX_RINGS = 10;
 const MAX_QUADS = (MAP + 2 * MAX_RINGS) ** 2;
 /** The game's picture: half its width in pixels, the culling's view angle at it (4096ths), the attract intro's. */
 const HALF_WIDTH = 192;
@@ -124,14 +117,13 @@ function hold(out: SceneryLayout, held: HeldScenery, reset: boolean): void {
   out.yaw = held.yaw;
 }
 
-export const newGround = (): GroundState & { drawn: boolean; count: number; near: number } => ({
+export const newGround = (): GroundState & { drawn: boolean; count: number } => ({
   drawn: false,
   count: 0,
   cell: new Int16Array(MAX_QUADS),
   x: new Int32Array(MAX_QUADS * 4),
   z: new Int32Array(MAX_QUADS * 4),
   shade: new Uint8Array(MAX_QUADS * 4),
-  near: 0,
 });
 
 /** The view's width over the game's 4:3, at least 1. */
@@ -446,8 +438,7 @@ export function layGround(state: FightState, data: FightData, arena: ArenaTables
   const [lightA, lightB] = lightsOf(state, lighting.kind);
   /* A corner's shade: by its depth, or by the light where it lies. */
   const shadeOf = (x: number, z: number): number => (lit ? litShade(lighting.kind, lighting.brightest, lightA, lightB, x, z) : shadeAt(depthOf(state, ox, oz, x - ox, z - oz)));
-  const cornerShade = (x: number, z: number): number => (arcade ? Math.max(shadeOf(x, z), ARCADE_LEAST_SHADE) : shadeOf(x, z));
-  const shades = template.vertices.map(([x, z]) => cornerShade(x + ox, z + oz));
+  const shades = template.vertices.map(([x, z]) => shadeOf(x + ox, z + oz));
   let mapRow = row;
   for (let r = 0; r < rows; r += 1) {
     let mapColumn = column;
@@ -466,34 +457,24 @@ export function layGround(state: FightState, data: FightData, arena: ArenaTables
     mapRow = mapRow - 1 < 0 ? rows - 1 : mapRow - 1;
   }
   out.count = columns * rows;
-  /* Tekken Force's patch already reaches past the widest view, at a fixed depth. */
-  /*
-   * An arcade stage's floor reaches as far as the rings go, past its scenery's far end: where the
-   * scenery opens, it runs on toward the horizon, over the colour its background lays below its
-   * panorama.
-   */
-  const rings = force ? 0 : arcade ? MAX_RINGS : view.widening <= 1 ? 0 : Math.min(WIDE_RINGS, Math.ceil(5 * (view.widening - 1)) + 1);
+  /* Tekken Force's patch already reaches past the widest view, at a fixed depth; an arcade stage's floor reaches out toward its walls. */
+  const rings = force ? 0 : arcade ? MAX_RINGS : view.widening <= 1 ? 0 : Math.min(MAX_RINGS, Math.ceil(5 * (view.widening - 1)) + 1);
   const wrap = (v: number, n: number): number => ((v % n) + n) % n;
   let quad = out.count;
-  /* The rings a wide picture takes first, shaded as the fight goes; then those past them, under an arcade stage's own floors, at its least shade. */
-  for (const far of [false, true]) {
-    for (let r = -rings; r < MAP + rings; r += 1) {
-      for (let c = -rings; c < MAP + rings; c += 1) {
-        if (0 <= r && r < MAP && 0 <= c && c < MAP) continue;
-        if (far !== (r < -WIDE_RINGS || MAP + WIDE_RINGS <= r || c < -WIDE_RINGS || MAP + WIDE_RINGS <= c)) continue;
-        const x0 = ox - 9000 + c * TILE;
-        const z0 = oz - 9000 + r * TILE;
-        out.cell[quad] = wrap(row - r, MAP) * MAP + wrap(column + c, MAP);
-        const corners = [[x0, z0 + TILE], [x0 + TILE, z0 + TILE], [x0, z0], [x0 + TILE, z0]] as const;
-        corners.forEach(([x, z], k) => {
-          out.x[quad * 4 + k] = x;
-          out.z[quad * 4 + k] = z;
-          out.shade[quad * 4 + k] = far ? ARCADE_LEAST_SHADE : cornerShade(x, z);
-        });
-        quad += 1;
-      }
+  for (let r = -rings; r < MAP + rings; r += 1) {
+    for (let c = -rings; c < MAP + rings; c += 1) {
+      if (0 <= r && r < MAP && 0 <= c && c < MAP) continue;
+      const x0 = ox - 9000 + c * TILE;
+      const z0 = oz - 9000 + r * TILE;
+      out.cell[quad] = wrap(row - r, MAP) * MAP + wrap(column + c, MAP);
+      const corners = [[x0, z0 + TILE], [x0 + TILE, z0 + TILE], [x0, z0], [x0 + TILE, z0]] as const;
+      corners.forEach(([x, z], k) => {
+        out.x[quad * 4 + k] = x;
+        out.z[quad * 4 + k] = z;
+        out.shade[quad * 4 + k] = shadeOf(x, z);
+      });
+      quad += 1;
     }
-    if (!far) out.near = quad;
   }
   out.count = quad;
 }

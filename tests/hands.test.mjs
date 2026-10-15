@@ -8,7 +8,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 
-import { KEEP_SHAPE, readFtr, writeFtr5 } from '../scripts/lib/ftr.mjs';
+import { hasRig, KEEP_SHAPE, readFtr, writeFtr5 } from '../scripts/lib/ftr.mjs';
 import { parseModel } from '../scripts/lib/model.mjs';
 import { roundMesh } from '../scripts/lib/round.mjs';
 import { Fighter, readFighterMesh } from '../src/present/3d/fighter/fighter.ts';
@@ -369,7 +369,7 @@ test('a replay keeps True Ogre\'s wings\' step and half his arm, and plays them 
 const data = 'public/data/fighters';
 const assets = 'public/assets/models/fighters';
 const versionOf = (file) => new DataView(readFileSync(file).buffer).getUint32(4, true);
-const extracted = existsSync(path.join(data, '00.ftr')) && versionOf(path.join(data, '00.ftr')) === 5;
+const extracted = existsSync(path.join(data, '00.ftr')) && versionOf(path.join(data, '00.ftr')) >= 5;
 
 /** True Ogre's model packs, whose chest carries his wings' shapes. */
 const WINGED = ['32.ftr', '33.ftr'];
@@ -379,8 +379,9 @@ test('every fighter\'s hands carry their shapes, open to a fist, True Ogre his w
   let pictured = 0;
   let winged = 0;
   for (const name of readdirSync(data).filter((n) => n.endsWith('.ftr'))) {
-    if (versionOf(path.join(data, name)) !== 5) continue;
-    const source = readFtr(new Uint8Array(readFileSync(path.join(data, name))));
+    const bytes = new Uint8Array(readFileSync(path.join(data, name)));
+    if (versionOf(path.join(data, name)) < 5 || hasRig(bytes)) continue;
+    const source = readFtr(bytes);
     for (const group of source.shapes) {
       if (group.part === 1) {
         assert.ok(WINGED.includes(name), `${name}: wings on its chest`);

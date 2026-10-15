@@ -1,11 +1,12 @@
 /**
  * The fighters' and the attract intros' meshes rounded (`scripts/lib/round.mjs`) for the smooth
  * models the remake draws by default: `models/fighters/NN.ftr` and `models/intro/I-PP.ftr`, from
- * `public/data/`. A mesh of another version (Kazuya's, from Tekken 4) is copied as it is.
+ * `public/data/`. A mesh of another version, or one with Tekken 4's rig (Kazuya's), is copied as it is.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
+import { hasRig } from '../lib/ftr.mjs';
 import { roundFighter } from '../lib/round.mjs';
 
 /** Writes every mesh into `output`; returns how many were rounded. */
@@ -17,7 +18,7 @@ export function roundModels(root, output) {
     for (const name of readdirSync(dir).filter((n) => n.endsWith('.ftr')).sort()) {
       const bytes = new Uint8Array(readFileSync(path.join(dir, name)));
       const target = `models/${kind}/${name}`;
-      if (![1, 5].includes(new DataView(bytes.buffer).getUint32(4, true))) {
+      if (![1, 5, 6].includes(new DataView(bytes.buffer).getUint32(4, true)) || hasRig(bytes)) {
         output.bytes(target, bytes);
         continue;
       }

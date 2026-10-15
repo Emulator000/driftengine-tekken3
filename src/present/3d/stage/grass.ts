@@ -118,9 +118,9 @@ export class Grass {
    * `CHUNK` by `CHUNK` tiles, a chunk made again when its tiles change.
    */
   plant(state: GroundState): void {
-    if (!state.drawn || state.near === 0) return;
+    if (!state.drawn || state.count === 0) return;
     /* Nothing to do while the patch lies where it lay. */
-    const n = state.near;
+    const n = state.count;
     const placed = `${n}:${state.x[2]},${state.z[2]}:${state.x[n * 4 - 2]},${state.z[n * 4 - 2]}`;
     if (placed === this.placed) return;
     this.placed = placed;
@@ -134,7 +134,7 @@ export class Grass {
     cx /= n * 4;
     cz /= n * 4;
     const wanted = new Map<string, string>();
-    for (let q = 0; q < state.near; q += 1) {
+    for (let q = 0; q < state.count; q += 1) {
       const x = Math.min(state.x[q * 4]!, state.x[q * 4 + 1]!, state.x[q * 4 + 2]!, state.x[q * 4 + 3]!);
       const z = Math.min(state.z[q * 4]!, state.z[q * 4 + 1]!, state.z[q * 4 + 2]!, state.z[q * 4 + 3]!);
       if (Math.max(Math.abs(x + width / 2 - cx), Math.abs(z + width / 2 - cz)) > REACH * width) continue;
