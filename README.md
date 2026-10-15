@@ -263,7 +263,8 @@ have been made on your machine, and the lowest picture quality leaves it off.
   (`--cpu`, `--rocm` or `--cuda` names it); on the CPU they take many hours.
 - **Like everything converted from your disc and your board**, what it makes is in an ignored
   folder (`public/assets/remaster/`) and is for your own devices: never commit, upload or share it.
-  An app built with `npm run desktop`, `npm run android` or `npm run ios` leaves it out.
+  An app built with `npm run desktop` after `npm run remaster` carries it (some 3 GB more); one
+  built with `npm run android` or `npm run ios` leaves it out.
 
 ```sh
 npm run remaster

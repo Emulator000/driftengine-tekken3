@@ -23,6 +23,9 @@
  * holds some), which an account may do with Developer Mode on: where a test link cannot be made,
  * the build says so before it starts, and goes on.
  *
+ * A computer's app carries the remaster's assets too where `npm run remaster` made them (a phone's
+ * leaves them out).
+ *
  * An app carries the disc's converted data: it is for the user's own devices, never to share.
  */
 import { spawnSync } from 'node:child_process';
@@ -37,9 +40,17 @@ const packager = path.join(packagerHome, 'node_modules', '@driftengine', 'packag
 const TARGETS = ['win-x64', 'mac-arm64', 'mac-x64', 'linux-x64', 'android', 'ios'];
 /** The systems each target is built on, where it is not built on every one. */
 const BUILT_ON = { 'win-x64': ['win32'], 'mac-arm64': ['darwin', 'linux'], 'mac-x64': ['darwin', 'linux'], 'linux-x64': ['linux'], ios: ['darwin'] };
+/** The targets that are phones, whose apps leave the remaster out. */
+const PHONES = ['android', 'ios'];
 /** What a build leaves in `out/<target>/` that is the app: its files, and an iPhone's Xcode project. */
 const FINISHED = /\.(apk|AppImage|tar\.gz|exe|dmg|zip|ipa)$/;
 const KEPT_FOLDERS = { ios: ['project'] };
+
+/** A folder's files' bytes, all of them. */
+const sizeOf = (dir) =>
+  readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .reduce((sum, entry) => sum + statSync(path.join(entry.parentPath, entry.name)).size, 0);
 
 /** Stop, saying why in one line. */
 function refuse(message) {
@@ -103,8 +114,13 @@ const version = (dir) => (existsSync(path.join(dir, 'package.json')) ? JSON.pars
 run(process.execPath, ['scripts/extract.mjs', '--if-missing']);
 run(process.execPath, ['scripts/import.mjs', '--if-missing']);
 run(process.execPath, [path.join(root, 'node_modules', 'vite', 'bin', 'vite.js'), 'build']);
-/* The remaster's assets (gigabytes, made on this machine) stay out of the app: it plays the game as the disc and the board give it. */
-rmSync(path.join(root, 'dist', 'assets', 'remaster'), { recursive: true, force: true });
+/*
+ * The remaster's assets, where `npm run remaster` made them (its manifest written), go with a
+ * computer's app, gigabytes of them; a phone's leaves them out, as it does any made only in part.
+ */
+const remaster = path.join(root, 'dist', 'assets', 'remaster');
+if (PHONES.includes(target) || !existsSync(path.join(remaster, 'manifest.json'))) rmSync(remaster, { recursive: true, force: true });
+else console.log(`The app carries the remaster's assets: ${(sizeOf(remaster) / 1e9).toFixed(1)} GB.`);
 
 const engine = version(path.join(root, 'node_modules', '@driftengine', 'core'));
 if (version(packager) !== engine) {

@@ -12,7 +12,7 @@
 | `npm run remaster` | On Linux, makes the remaster's assets on this machine, on its GPU where it has one (`-- --cpu`, `-- --rocm`, `-- --cuda` to choose), into `public/assets/remaster/`; then REMASTER in REMAKE OPTION draws with them ([The remaster](../README.md#the-remaster-optional)) |
 | `npm run dev` | Serves the game on `localhost:5190` (or the next free port), running `extract` and `import` first when their output is missing |
 | `npm run dev:lan` | Serves the game to your own devices on your home network, over HTTPS ([In a phone's browser](#in-a-phones-browser)) |
-| `npm run desktop` | Builds the game as an app for this computer (Windows, macOS or Linux), with your disc's data in it, into `out/<target>/`; `-- mac-arm64` or `-- mac-x64` builds a Mac's on Linux ([As an app](#as-an-app)) |
+| `npm run desktop` | Builds the game as an app for this computer (Windows, macOS or Linux), with your disc's data in it (and the remaster's assets, once `npm run remaster` has made them), into `out/<target>/`; `-- mac-arm64` or `-- mac-x64` builds a Mac's on Linux ([As an app](#as-an-app)) |
 | `npm run android` | Builds the game as an Android app for your own phone, with your disc's data in it, into `out/android/` ([As an app](#as-an-app)) |
 | `npm run ios` | On a Mac with Xcode, builds the game as an iPhone app, with your disc's data in it, into `out/ios/` ([As an app](#as-an-app)) |
 | `npm run build` | Runs the tests, then builds the page into `dist/`. The build copies the disc's data from `public/` into `dist/`: it is for your own machine, never to host or share |
@@ -185,7 +185,13 @@ Should a build end without these files, it keeps the unpacked app it made (on Li
 `out/linux-x64/linux-unpacked/`, which runs as it is), says so, and stops with an error; run it again
 with `DEBUG=electron-builder` set to see where it stopped.
 
-Each is some 900 MB. `npm run desktop -- mac-arm64` (or `mac-x64`) builds a Mac's app on Linux, as a
+Each is some 900 MB. Once `npm run remaster` has made its assets, the app carries them too, and the
+remaster with them (REMASTER in REMAKE OPTION): some 3 GB more, which the build says. A Windows
+installer cannot hold more than 2 GB, so with the remaster made, play a Windows app from its zip,
+or from the unpacked app the build keeps where the installer fails. A phone's app
+(`npm run android`, `npm run ios`) leaves the remaster out.
+
+`npm run desktop -- mac-arm64` (or `mac-x64`) builds a Mac's app on Linux, as a
 zip signed ad hoc; a Windows app is built on Windows, and a Linux app on Linux. The first build
 fetches Electron's runtime (and, for a Mac's app built on Linux, `rcodesign`, which signs it).
 
