@@ -1,12 +1,13 @@
 /**
  * The title (scene 3): the opening movie (unless the attract cycle skips it), the title fading in
  * from black, held five seconds with the start line blinking under it, then fading out to the
- * attract demo; start goes to the mode menu, as a movie the stream gave up on does.
+ * attract demo; start goes to the mode menu, as a movie the stream gave up on does. The remake's
+ * shortcut, for showing them: select during a movie goes straight to the attract overlay's intro.
  */
 import type { FightData } from '../fight/state.ts';
 import { voiceLine } from '../fight/voices.ts';
 import type { SceneTables } from '../data/scenes.ts';
-import { goToLogo, START_SOUND, startPressed } from './logo.ts';
+import { goToIntro, goToLogo, START_SOUND, startPressed } from './logo.ts';
 import { startMovie, stepMovie } from './movie.ts';
 import { print } from './printer.ts';
 import { stopMotors } from './rumble.ts';
@@ -33,6 +34,8 @@ const COPYRIGHT = [
 const COPYRIGHT_COLOUR = 6;
 /** Both pads are in: the start line for both. */
 const BOTH_PADS = 3;
+/** The raw pad's select button. */
+const SELECT = 0x100;
 
 /** The attract cycle's next step (0 to 3). */
 export function nextAttractStep(game: GameState): void {
@@ -72,6 +75,10 @@ export function drawTitle(game: GameState, scenes: SceneTables, shows: number): 
  */
 export function titleScene(game: GameState, data: Pick<FightData, 'sound' | 'music'>, scenes: SceneTables, startDemo: (game: GameState) => void): void {
   const title = game.title;
+  if (title.shows === TitleShows.MOVIE && ((game.world.input.fresh[0]! | game.world.input.fresh[1]!) & SELECT) !== 0) {
+    goToIntro(game);
+    return;
+  }
   let shows = title.shows;
   switch (game.step) {
     case 0: {

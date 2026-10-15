@@ -39,7 +39,8 @@ function takeRandom(game: GameState, pool: number[]): number {
  * A team's members past those its player chose, drawn: on a human's team of three or more the
  * first is one of the two characters it has played least; the rest from those drawn into teams
  * least (more as needed to have enough), at random, in the costume its size's button chose (the
- * other where the other team chose the same); then each member counted as drawn.
+ * other where the other team chose the same); then each member counted as drawn (but an added
+ * character, which is never drawn).
  */
 function drawMembers(game: GameState, human: boolean, team: Team, other: Team): void {
   const uses = game.run.team.uses;
@@ -75,7 +76,7 @@ function drawMembers(game: GameState, human: boolean, team: Team, other: Team): 
   }
   for (let k = 0; k < team.size; k += 1) {
     const roster = team.members[k]! >> 2;
-    uses[roster] = (uses[roster]! + 1) & 0xffff;
+    if (roster < CHARACTERS) uses[roster] = (uses[roster]! + 1) & 0xffff;
   }
 }
 

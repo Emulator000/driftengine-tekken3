@@ -15,6 +15,7 @@ import { drawMokujin } from './match.ts';
 import { endSoundScript, startRound } from './move.ts';
 import { ReplayState } from './replay.ts';
 import { resetComputers } from './computer.ts';
+import { resetLooks } from './look.ts';
 import { InputSource, Mode, type FightData, type FightState, type Fighter } from './state.ts';
 import { keyOffVoices, playSong } from './voices.ts';
 
@@ -249,6 +250,7 @@ export function startRoundOfMatch(state: FightState, data: FightData): void {
   }
   state.hud.marksShown[0] = a.wins & 0xff;
   state.hud.marksShown[1] = b.wins & 0xff;
+  resetLooks(state.looks);
   state.flash.left = 0;
   state.flash.pull.fill(0);
   round.replayRequest = 0;

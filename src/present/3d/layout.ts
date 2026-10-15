@@ -25,6 +25,8 @@ import type { GroundState } from './stage/ground.ts';
 
 const TILE = 1800;
 const MAP = 10;
+/** A fight's ground tile's side (mm). */
+export const GROUND_TILE = TILE;
 /** Tekken Force's patch: its tiles, its map's rows, the depth it is laid at, and where its final stage's light stands in depth. */
 const FORCE = { tile: 2500, rows: 3, z: 0x145, lightZ: -2000 } as const;
 const TEKKEN_FORCE = 8;

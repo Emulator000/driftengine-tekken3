@@ -31,11 +31,14 @@ export function edgePoint(pa, pb, na, nb, straight, t) {
   return { position, normal };
 }
 
-/** A triangle's patch: corners `p`, their normals `n`, and whether each edge (0-1, 1-2, 2-0) runs straight. */
-export function patchOf(p, n, straight) {
-  const [b210, b120] = edgeControls(p[0], p[1], n[0], n[1], straight[0]);
-  const [b021, b012] = edgeControls(p[1], p[2], n[1], n[2], straight[1]);
-  const [b102, b201] = edgeControls(p[2], p[0], n[2], n[0], straight[2]);
+/**
+ * A triangle's patch: corners `p`, their normals `n`, and whether each edge (0-1, 1-2, 2-0) runs
+ * straight; `ends` gives each edge's normals at its two ends where they are not its corners'.
+ */
+export function patchOf(p, n, straight, ends = [[n[0], n[1]], [n[1], n[2]], [n[2], n[0]]]) {
+  const [b210, b120] = edgeControls(p[0], p[1], ...ends[0], straight[0]);
+  const [b021, b012] = edgeControls(p[1], p[2], ...ends[1], straight[1]);
+  const [b102, b201] = edgeControls(p[2], p[0], ...ends[2], straight[2]);
   const e = scale([b210, b120, b021, b012, b102, b201].reduce(add), 1 / 6);
   const v = scale(add(add(p[0], p[1]), p[2]), 1 / 3);
   return {
@@ -48,9 +51,9 @@ export function patchOf(p, n, straight) {
     b102,
     b201,
     b111: add(e, scale(sub(e, v), 0.5)),
-    n110: edgeNormal(p[0], p[1], n[0], n[1], straight[0]),
-    n011: edgeNormal(p[1], p[2], n[1], n[2], straight[1]),
-    n101: edgeNormal(p[2], p[0], n[2], n[0], straight[2]),
+    n110: edgeNormal(p[0], p[1], ...ends[0], straight[0]),
+    n011: edgeNormal(p[1], p[2], ...ends[1], straight[1]),
+    n101: edgeNormal(p[2], p[0], ...ends[2], straight[2]),
   };
 }
 

@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 
 import { loadFightTables } from '../src/assets/load.ts';
 import { Game } from '../src/sim/game/game.ts';
-import { REMAKE_PAGE, RESTART_LINE } from '../src/sim/game/remake-options.ts';
+import { REMAKE_PAGE, REMASTER_LINE, RESTART_LINE, restartWanted } from '../src/sim/game/remake-options.ts';
 import { Scene } from '../src/sim/game/state.ts';
 import { musicCommand, newMusic } from '../src/sim/sound/music.ts';
 
@@ -217,7 +217,7 @@ test('REMAKE OPTION changes the remake\'s settings, says a restart applies one, 
   for (let i = 0; i < 5; i += 1) press(DOWN);
   press(CROSS);
   assert.equal(state.optionsScreen.page, REMAKE_PAGE);
-  for (const label of ['REMAKE OPTION', 'TEXTURES', 'MODELS', 'STAGES', 'FIGHTERS', 'CLOTH', 'PICTURE', 'FRAME RATE', 'TOUCH PAD', 'EXIT']) assert.ok(texts(state).includes(label), label);
+  for (const label of ['REMAKE OPTION', 'TEXTURES', 'MODELS', 'STAGES', 'FIGHTERS', 'CLOTH', 'PICTURE', 'FRAME RATE', 'TOUCH PAD', 'REMASTER', 'EXIT']) assert.ok(texts(state).includes(label), label);
   assert.equal(printed(state, 'SMOOTH').colour, 1, 'the default value');
   assert.ok(!texts(state).includes(RESTART_LINE));
   press(RIGHT);
@@ -238,6 +238,25 @@ test('REMAKE OPTION changes the remake\'s settings, says a restart applies one, 
   press(DOWN);
   press(LEFT);
   assert.equal(state.remake.settings.touchPad, 2, 'left from the first wraps to the last');
+  press(DOWN);
+  press(RIGHT);
+  assert.equal(state.remake.settings.remaster, 1);
+  assert.ok(texts(state).includes(REMASTER_LINE), 'the remaster asked for, its assets not made');
+  const remasterOnly = { remake: { ...state.remake, settings: { ...state.remake.started, remaster: 1 } } };
+  assert.ok(!restartWanted(remasterOnly), 'not made: the remaster alone restarts nothing');
+  state.remake.remasterMade = true;
+  press(LEFT);
+  press(RIGHT);
+  assert.ok(!texts(state).includes(REMASTER_LINE) && texts(state).includes(RESTART_LINE), 'made: a restart draws it');
+  assert.ok(restartWanted({ remake: { ...state.remake, settings: { ...state.remake.started, remaster: 1 } } }), 'made: the remaster alone restarts');
+  assert.ok(texts(state).includes('LOOK') && texts(state).includes('NORMAL'), 'the remaster on: its look listed, normal');
+  press(DOWN);
+  press(RIGHT);
+  assert.equal(state.remake.settings.look, 2);
+  assert.ok(!restartWanted({ remake: { ...state.remake, settings: { ...state.remake.started, look: 2 } } }), 'the look changes at once');
+  press(UP);
+  press(LEFT);
+  assert.ok(!texts(state).includes('LOOK'), 'the remaster off: its look not listed');
   press(SELECT);
   assert.equal(state.optionsScreen.page, 0);
   assert.equal(state.remake.settings.touchPad, 2, 'kept on leaving');

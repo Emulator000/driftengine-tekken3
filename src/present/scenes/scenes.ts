@@ -51,10 +51,10 @@ export interface SceneDrawingData {
   readonly math: MathTables;
 }
 
-/** A cut's dissolve: how long the frame before it takes to fade out over the new one, in seconds. */
+/** A cut's dissolve, in seconds: the frame before it fading out to a colour for half of it, then the new frames fading in from it. */
 const DISSOLVE = 0.4;
 
-/** The frame before a cut, fading out over the frames after it: its sprites (none when it was 3D), the colour under them, and when it began. */
+/** The frame before a cut, fading out before the frames after it fade in: its sprites (none when it was 3D), the colour it goes to, and when it began. */
 interface Dissolve {
   readonly art: readonly DrawnSprite[];
   readonly light: readonly DrawnLight[];
@@ -74,13 +74,16 @@ const ART_SCREENS = 3;
 const BLACK = [0, 0, 0] as const;
 const WHITE = [1, 1, 1] as const;
 
+/** Units past the screen's middle a quad covering the whole window reaches, every way. */
+const WINDOW = 0x4000;
+
 /** How much of the picture a fade must hide to count as covering it. */
 const COVERING = 0.9;
 
-/** The colour a field's fades all but cover the picture in, if one does (the attract intro ends under white); null when none does. */
 /** Tekken Ball's mode, whose select shows the ball being chosen. */
 const TEKKEN_BALL = 7;
 
+/** The colour a field's fades all but cover the picture in, if one does (the attract intro ends under white); null when none does. */
 function coverOf(fades: readonly { level: number }[]): readonly [number, number, number] | null {
   let cover: readonly [number, number, number] | null = null;
   for (const { level } of fades) {
@@ -136,9 +139,10 @@ export class ScenePresenter {
   }
 
   /**
-   * A cut at `now` (seconds): the frame before it fades out over what follows. When the scenes
-   * drew it (`ours`), it is drawn again from their sprites over black; otherwise (3D) the new
-   * frames fade in from the colour that frame's fades covered it in, or from black. A frame of
+   * A cut at `now` (seconds): the frame before it fades out, alone, then what follows fades in, the
+   * two never drawn over each other. When the scenes drew it (`ours`), it is drawn again from their
+   * sprites, going to black; otherwise (3D) the new frames fade in from the colour that frame's
+   * fades covered it in, or from black, over the whole dissolve. A frame of
    * nothing between two scenes (a loader's, a field long) leaves a dissolve under way as it is, so
    * the scene before it fades out whole rather than vanishing into the empty frame.
    */
@@ -149,10 +153,10 @@ export class ScenePresenter {
   }
 
   /**
-   * A frame of the game holding its picture (`now` in seconds): while a dissolve still fades the
-   * frame before a cut out, the held frame is drawn again under it until it is over, where the
-   * window kept the frame the hold began on, the two scenes half over each other for as long as the
-   * hold lasted (the versus screen over the character select for its whole wait).
+   * A frame of the game holding its picture (`now` in seconds): while a dissolve is under way, the
+   * held frame is drawn again for it until it is over, where the window kept the frame the hold
+   * began on, which the dissolve never finished (the character select's last frame over the versus
+   * screen's for its whole wait).
    */
   hold(width: number, height: number, now: number): void {
     const last = this.last;
@@ -164,7 +168,7 @@ export class ScenePresenter {
     this.light.redraw(last.light, 1);
     this.layer.redraw(last.layer, 1);
     this.over.redraw(last.over, 1);
-    this.drawDissolve(now);
+    this.drawDissolve(width, height, now);
     this.end();
   }
 
@@ -212,12 +216,13 @@ export class ScenePresenter {
   }
 
   /**
-   * The dissolve over this frame's layers, begun. The colour under the frame before goes under its
-   * pictures, in the pictures' pass, where it lay in the text's and covered them: the first frames
-   * of every dissolve showed the frame before as its text alone on black. With no pictures to fade
-   * out (after a 3D frame) it covers the whole new frame, which fades in from it.
+   * The dissolve over this frame's layers, begun: for its first half the frame before alone (what
+   * this frame drew set aside, its pictures kept painted), going to its colour; then this frame,
+   * coming out of it. After a 3D frame, with nothing of the frame before to draw, the new frame
+   * comes out of the colour over the whole dissolve. The colour is laid over everything, in the
+   * last pass.
    */
-  private drawDissolve(now: number): void {
+  private drawDissolve(width: number, height: number, now: number): void {
     const d = this.dissolve;
     if (d === null) return;
     const t = (now - d.start) / DISSOLVE;
@@ -225,12 +230,33 @@ export class ScenePresenter {
       this.dissolve = null;
       return;
     }
-    const alpha = 1 - t * t * (3 - 2 * t);
-    (d.art.length === 0 ? this.layer : this.art).fillWindow([...d.colour, alpha]);
-    this.art.redraw(d.art, alpha);
-    this.light.redraw(d.light, alpha);
-    this.layer.redraw(d.layer, alpha);
-    this.over.redraw(d.over, alpha);
+    const smooth = (x: number): number => x * x * (3 - 2 * x);
+    const before = d.art.length + d.light.length + d.layer.length + d.over.length !== 0;
+    if (!before) {
+      this.coverWith(d.colour, 1 - smooth(t));
+      return;
+    }
+    if (0.5 <= t) {
+      this.coverWith(d.colour, 1 - smooth(t * 2 - 1));
+      return;
+    }
+    this.art.begin(width, height, true);
+    this.light.begin(width, height, true);
+    this.layer.begin(width, height, true);
+    this.over.begin(width, height, true);
+    /* On black, as it was drawn, whatever this frame drew under the layers (a 3D picture). */
+    this.art.fillWindow([0, 0, 0, 1]);
+    this.art.redraw(d.art, 1);
+    this.light.redraw(d.light, 1);
+    this.layer.redraw(d.layer, 1);
+    this.over.redraw(d.over, 1);
+    this.coverWith(d.colour, smooth(t * 2));
+  }
+
+  /** The whole window in a colour at `alpha`, over everything the layers drew. */
+  private coverWith(colour: readonly [number, number, number], alpha: number): void {
+    if (alpha <= 0) return;
+    this.over.quad('over', -WINDOW, -WINDOW, WINDOW * 2, WINDOW * 2, colour, colour, null, false, Math.min(1, alpha));
   }
 
   /** This field's picture, unless the game holds the last one; false when it held. Over a 3D picture already drawn this frame (`over`), nothing is cleared. */
@@ -305,7 +331,7 @@ export class ScenePresenter {
     this.movieDrawn = movie;
     this.last = over || movie ? null : { art: this.art.drawn.slice(), light: this.light.drawn.slice(), layer: layer.drawn.slice(), over: this.over.drawn.slice() };
     this.cover = coverOf(game.fades);
-    this.drawDissolve(now);
+    this.drawDissolve(width, height, now);
     if (ball) this.endOverBall(game, width / height);
     else this.end();
     return true;
@@ -314,6 +340,8 @@ export class ScenePresenter {
   /** The layers drawn with Tekken Ball's ball between the pictures and the text, all in one frame. */
   private endOverBall(game: GameState, aspect: number): void {
     const renderer = this.renderer;
+    /* The pictures are drawn in the ball's frame, under it, and move as no camera does: a temporal resolve blends no frame before into it. */
+    renderer.cameraCut();
     renderer.beginFrame([0, 0, 0]);
     this.art.end();
     this.light.end();
@@ -346,7 +374,7 @@ export class ScenePresenter {
     this.movieDrawn = false;
     if (this.dissolve === null) return;
     if (this.begin(width, height)) return;
-    this.drawDissolve(now);
+    this.drawDissolve(width, height, now);
     this.end();
   }
 }

@@ -44,6 +44,25 @@ user has installed them, on the user's own files.
   tools, platform and build tools (the Android Software Development Kit License Agreement), and
   Gradle (Apache-2.0); for an iPhone app, XcodeGen (MIT).
 
+## The remaster's tools
+
+Not part of this repository and never distributed with it: `npm run remaster` fetches them into
+`.cache/remaster/` on the user's machine (the binary and the weights each checked against its
+SHA-256) and runs them there on the user's own imported data. What they make stays on that machine.
+
+- **stable-diffusion.cpp** (<https://github.com/leejet/stable-diffusion.cpp>), MIT: runs the image
+  model that draws a floor's stones and a stage's detail anew (`scripts/remaster/generate.py`).
+- **Z-Image-Turbo** (Tongyi-MAI, <https://huggingface.co/Tongyi-MAI/Z-Image-Turbo>), Apache-2.0: that
+  image model, as GGUF quantized by stable-diffusion.cpp's author, and its autoencoder (FLUX.1's, by
+  Black Forest Labs, Apache-2.0), as Comfy-Org packages it; with **Qwen3-4B-Instruct-2507** (Qwen, Apache-2.0) as its text encoder, as GGUF
+  quantized by Unsloth.
+- **PBRify** (Kim2091, <https://github.com/Kim2091/PBRify_Remix>), CC0-1.0: the models that make an
+  atlas's normal, roughness and height maps; and its upscaler, 4x-PBRify_UpscalerV4, released in
+  <https://github.com/Kim2091/Kim2091-Models>, CC0-1.0, which enlarges an atlas four times
+  (`scripts/remaster/pbrify.py`).
+- **PyTorch** and **torchvision** (BSD-3-Clause), **spandrel** (MIT), **NumPy** (BSD-3-Clause) and
+  **Pillow** (MIT-CMU), in a Python that **uv** (Apache-2.0 or MIT) makes: what those models run in.
+
 ## Game content
 
 Tekken 3 (the PlayStation release and the arcade release on Namco System 12 hardware) and Tekken 4,
@@ -104,3 +123,19 @@ its contributors), checked against the data.
   and that each pair holds the even and the odd bytes of a 16-bit bus, as `npm run arcade` joins
   them (`scripts/lib/arcade/board.mjs`). No code from it is included.
 - **ISO 9660**: the disc's file system.
+- **Curved PN triangles** (Vlachos, Peters, Boyd and Mitchell, *Curved PN Triangles*, I3D 2001): the
+  patch each triangle of a fighter's mesh is rounded on (`scripts/lib/round/pn.mjs`).
+- **λ|μ smoothing** (Taubin, *A Signal Processing Approach to Fair Surface Design*, SIGGRAPH 1995):
+  how a rounded mesh's cut surface is evened out (`scripts/lib/round/fair.mjs`).
+- **The sky by single scattering** (Nishita, Sirai, Tadamura and Nakamae, *Display of the Earth Taking
+  into Account Atmospheric Scattering*, SIGGRAPH 1993), with the air's scattering coefficients and
+  heights given by Bruneton and Neyret (*Precomputed Atmospheric Scattering*, EGSR 2008), the haze's
+  phase function as Cornette and Shanks give it (*Physically reasonable analytic expression for the
+  single-scattering phase function*, Applied Optics 1992); its clouds lit by the **Henyey–Greenstein**
+  phase function (1941) and ray-marched through **Perlin's** improved noise (SIGGRAPH 2002), their
+  scattering's orders summed as Wrenninge, Kulla and Lundqvist sum them (*Oz: The Great and
+  Volumetric*, SIGGRAPH 2013 talks) and darkened at their edges as Schneider and Vos darken them
+  (*The Real-Time Volumetric Cloudscapes of Horizon Zero Dawn*, SIGGRAPH 2015 course)
+  (`scripts/remaster/sky.mjs`).
+- **mulberry32** (Tommy Ettinger), public domain: the seeded random numbers the versus screen's art,
+  the remaster's grass, wet floors and sky are laid out by.

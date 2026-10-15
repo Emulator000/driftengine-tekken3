@@ -442,7 +442,9 @@ export type OptionValue =
   | 'cloth'
   | 'picture'
   | 'frameRate'
-  | 'touchPad';
+  | 'touchPad'
+  | 'remaster'
+  | 'look';
 
 /**
  * An item of an Options list: what it changes, its label and its values' names, how left and

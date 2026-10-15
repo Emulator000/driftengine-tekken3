@@ -130,7 +130,7 @@ export function drawTeamResults(game: GameState, scenes: SceneTables, art: Scree
       }
       const beaten = k < r.beatenSoFar[side]!;
       const fighting = k === r.beatenSoFar[side]! && k < Math.min(team.size, 8);
-      drawIcon(art, smallIcons, x, y, Math.min(team.members[k]!, 0x58), beaten, true, fighting ? (side === 0 ? 2 : 1) : 0);
+      drawIcon(art, smallIcons, x, y, team.members[k]!, beaten, true, fighting ? (side === 0 ? 2 : 1) : 0);
     }
   });
   /* Each bout's line between its two members, the one being shown growing from its winner. */
@@ -168,7 +168,7 @@ export function drawTeamResults(game: GameState, scenes: SceneTables, art: Scree
       TEAM.list.minis.forEach((dx, side) => {
         const code = teams[side]!.members[r.boutMembers[side]![bout]!]!;
         const lost = winner === 3 ? false : winner !== side + 1;
-        drawMini(art, smallIcons, x + dx, y, Math.min(code, 0x58), lost);
+        drawMini(art, smallIcons, x + dx, y, code, lost);
       });
     } else {
       art.ramp([[0, 'rgba(0, 0, 0, 1)'], [1, 'rgb(64, 64, 64)']], x + line.x, y + line.y, line.w, line.h, true);

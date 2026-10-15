@@ -21,7 +21,7 @@ import { mapPads } from './menu.ts';
 import { print } from './printer.ts';
 import { playCount, sortPairs } from './records.ts';
 import { share } from './records-screen.ts';
-import { isRemakeSetting, REMAKE_ITEM, REMAKE_OPTIONS, REMAKE_PAGE, RESTART_LINE, restartWanted } from './remake-options.ts';
+import { isRemakeSetting, REMAKE_ITEM, REMAKE_PAGE, remakeOptions, REMASTER_LINE, remasterMissing, RESTART_LINE, restartWanted } from './remake-options.ts';
 import { restoreProgress, saveProgress } from './save.ts';
 import { buttonRow, draw, tile } from './draw.ts';
 import { Scene, type GameState, type KeySide } from './state.ts';
@@ -702,9 +702,13 @@ function pageFrame(game: GameState, data: OptionsData, scenes: SceneTables): voi
   const tables = scenes.options;
   const screen = game.optionsScreen;
   if (screen.page === REMAKE_PAGE) {
-    listInput(game, data, REMAKE_OPTIONS, screen.remake);
-    listDraw(game, REMAKE_OPTIONS, screen.remake);
-    if (restartWanted(game)) message(game, RESTART_LINE, 5);
+    /* The list as the remaster leaves it, the cursor kept on it where a line has gone. */
+    const remake = remakeOptions(game);
+    screen.remake.cursor = Math.min(screen.remake.cursor, remake.items.length - 1);
+    listInput(game, data, remake, screen.remake);
+    listDraw(game, remakeOptions(game), screen.remake);
+    if (remasterMissing(game)) message(game, REMASTER_LINE, 5);
+    else if (restartWanted(game)) message(game, RESTART_LINE, 5);
     return;
   }
   const page = tables.pages[screen.page];

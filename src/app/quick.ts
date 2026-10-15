@@ -7,14 +7,14 @@
 import { loadFightTables, loadMoveset } from '../assets/load.ts';
 import { Fight } from '../sim/fight/fight.ts';
 import { fightDataFor, matchMovesets, type MatchSetup } from '../sim/fight/match.ts';
-import { FightView, type ArcadeStageFiles, type DrawingFiles } from '../present/3d/fight-view.ts';
+import { FightView, type ArcadeStageFiles, type DrawingFiles, type FloorFiles, type MaterialMaps, type SkyFiles } from '../present/3d/fight-view.ts';
 import { parseManifest, type ArcadeObject, type ArcadePanorama } from '../assets/manifest.ts';
 import { parseArcadeFighters, withOwnAccessories } from '../assets/models.ts';
 import type { FightTables } from '../sim/fight/match.ts';
 import { Hud } from '../present/hud/hud.ts';
 import { PauseScreen } from '../present/hud/pause.ts';
 import { loadTypefaces } from '../present/2d/typefaces.ts';
-import { assetBytes, assetImage, dataBytes, image, json, pageQuality, pageRenderer, params, play, status, two } from './page.ts';
+import { assetBytes, assetImage, dataBytes, image, json, pageQuality, pageRenderer, params, play, remastered, status, two } from './page.ts';
 import { asked, settings } from './settings.ts';
 import { startSound } from './sound.ts';
 
@@ -67,8 +67,28 @@ export async function withArcadeFighters<T extends { readonly tables: FightTable
   for (const pack of [...own.keys()]) if (!fighters.has(pack)) own.delete(pack);
   return { ...loaded, tables: { ...loaded.tables, models: withOwnAccessories(loaded.tables.models, own) } };
 }
-/** A fighter's, an intro model's or a stage's texture atlas by its file's name: the enlarged one, or the original. */
-const atlas = (kind: string, name: string): Promise<ImageBitmap> => (smooth ? assetImage(`textures/${kind}/${name}.png`) : image(`${kind}/${name}.png`));
+const optional = (path: string): Promise<ImageBitmap | null> => assetImage(path).catch(() => null);
+/** A fighter's, an intro model's or a stage's texture atlas by its file's name: remastered, the one made for it; the enlarged one, or the original. */
+const atlas = async (kind: string, name: string): Promise<ImageBitmap> =>
+  (remastered() ? await optional(`remaster/${kind}/${name}.png`) : null) ?? (smooth ? assetImage(`textures/${kind}/${name}.png`) : image(`${kind}/${name}.png`));
+/** Remastered, an atlas's normal and ORM maps and its heights. */
+const mapsOf = async (kind: string, name: string): Promise<MaterialMaps | null> => {
+  if (!remastered()) return null;
+  const [normal, orm, height] = await Promise.all([optional(`remaster/${kind}/${name}.normal.png`), optional(`remaster/${kind}/${name}.orm.png`), optional(`remaster/${kind}/${name}.height.png`)]);
+  return normal === null && orm === null ? null : { normal, orm, height };
+};
+/** Remastered, a stage's sky made for it and its panorama's ridge. */
+const skyOf = async (id: number): Promise<SkyFiles | undefined> => {
+  if (!remastered()) return undefined;
+  const [picture, clouds, ridge] = await Promise.all([optional(`remaster/sky/${two(id)}.png`), optional(`remaster/sky/${two(id)}.clouds.png`), json(`remaster/sky/${two(id)}.ridge.json`).catch(() => null)]);
+  return picture === null ? undefined : { picture, clouds, ridge: ridge as SkyFiles['ridge'] };
+};
+/** Remastered, a stage's floor redrawn: its atlas of the ground's regions, its maps and where each region went. */
+const floorOf = async (id: number): Promise<FloorFiles | undefined> => {
+  if (!remastered()) return undefined;
+  const [texture, maps, layout] = await Promise.all([optional(`remaster/stages/${two(id)}.floor.png`), mapsOf('stages', `${two(id)}.floor`), json(`remaster/stages/${two(id)}.floor.json`).catch(() => null)]);
+  return texture === null || layout === null ? undefined : { texture, maps, layout: layout as FloorFiles['layout'] };
+};
 /**
  * Whether the fighters are drawn rounded, or with the console's meshes: `?models=psx` or
  * `?models=rounded`, else the console's on a very low page, whose GPU the rounded meshes' vertices
@@ -98,44 +118,51 @@ const arcadeOf = async (id: number): Promise<ArcadeStageFiles | undefined> => {
   if (!stages.has(id)) return undefined;
   const sky = panoramas.find((p) => p.stage === id);
   const own = objects.filter((o) => o.stage === id);
-  const [mesh, texture, picture, pieces] = await Promise.all([
+  const [mesh, texture, maps, picture, pieces] = await Promise.all([
     dataBytes(`arcade/stages/${two(id)}.stg`),
     atlas('arcade/stages', two(id)),
+    mapsOf('arcade/stages', two(id)),
     sky === undefined ? null : atlas('arcade/stages', `${two(id)}.sky`),
     Promise.all(own.map(async (o) => ({ ...o, mesh: await dataBytes(`arcade/stages/${two(id)}-${o.piece}.stg`), texture: await atlas('arcade/stages', `${two(id)}-${o.piece}`) }))),
   ]);
   const panorama = sky === undefined || picture === null ? undefined : { picture, layout: sky };
-  return { mesh, texture, objects: pieces, ...(panorama === undefined ? {} : { panorama }) };
+  return { mesh, texture, maps, objects: pieces, ...(panorama === undefined ? {} : { panorama }) };
 };
 
-const stage = async (id: number): Promise<{ mesh: ArrayBuffer; ground: ArrayBuffer; texture: ImageBitmap; backdrop?: ImageBitmap; arcade?: ArcadeStageFiles }> => {
-  const [mesh, ground, texture, backdrop, arcade] = await Promise.all([dataBytes(`stages/${two(id)}.stg`), dataBytes(`stages/${two(id)}.gnd`), atlas('stages', two(id)), backdropOf(id), arcadeOf(id)]);
-  return { mesh, ground, texture, ...(backdrop === undefined ? {} : { backdrop }), ...(arcade === undefined ? {} : { arcade }) };
+const stage = async (id: number): Promise<{ mesh: ArrayBuffer; ground: ArrayBuffer; texture: ImageBitmap; maps?: MaterialMaps | null; backdrop?: ImageBitmap; arcade?: ArcadeStageFiles; floor?: FloorFiles; sky?: SkyFiles }> => {
+  const [mesh, ground, texture, maps, backdrop, arcade, floor, sky] = await Promise.all([dataBytes(`stages/${two(id)}.stg`), dataBytes(`stages/${two(id)}.gnd`), atlas('stages', two(id)), mapsOf('stages', two(id)), backdropOf(id), arcadeOf(id), floorOf(id), skyOf(id)]);
+  return { mesh, ground, texture, maps, ...(backdrop === undefined ? {} : { backdrop }), ...(arcade === undefined ? {} : { arcade }), ...(floor === undefined ? {} : { floor }), ...(sky === undefined ? {} : { sky }) };
 };
 
 /** The fighters' and stages' drawing data, by pack and stage. */
 export const drawingFiles: DrawingFiles = {
   fighter: async (pack) => {
     const kind = (await arcadeStagesOf()).fighters.has(pack) ? 'arcade/fighters' : 'fighters';
-    const [mesh, texture] = await Promise.all([fighterMesh(kind, two(pack)), atlas(kind, two(pack))]);
-    return { mesh, texture };
+    const [mesh, texture, maps] = await Promise.all([fighterMesh(kind, two(pack)), atlas(kind, two(pack)), mapsOf(kind, two(pack))]);
+    return { mesh, texture, maps };
   },
   stage,
   picture: (name) => assetImage(`pictures/${name}.png`),
   smooth,
   cloth,
+  get remaster() {
+    return remastered();
+  },
 };
 
 /** An attract intro's drawing data: for each pack, the model its archive holds in the pair its table names; the stages as the fight's. */
 export const introFiles = (intro: number, pairs: readonly number[]): DrawingFiles => ({
   fighter: async (pack) => {
     const name = `${intro}-${two(pairs[pack]!)}`;
-    const [mesh, texture] = await Promise.all([fighterMesh('intro', name), atlas('intro', name)]);
-    return { mesh, texture };
+    const [mesh, texture, maps] = await Promise.all([fighterMesh('intro', name), atlas('intro', name), mapsOf('intro', name)]);
+    return { mesh, texture, maps };
   },
   stage,
   smooth,
   cloth,
+  get remaster() {
+    return remastered();
+  },
 });
 
 export async function playQuickMatch(): Promise<void> {

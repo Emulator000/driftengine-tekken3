@@ -3,7 +3,8 @@
  * and data fetches, the renderer, the pads (and on a touch screen the touch pad), and the fixed
  * 60 Hz loop that stops on a failure and says why.
  */
-import { createRenderer, describeGpu, ResolutionGovernor, startLoop, type RendererApi } from '@driftengine/core';
+import { createRenderer, describeGpu, ResolutionGovernor, startLoop, type RenderQualityOptions, type RendererApi } from '@driftengine/core';
+import { remasterGrade } from '../present/3d/grade.ts';
 import { entryLevelGpu, fightQuality, isQuality, type Quality } from '../present/3d/quality.ts';
 import { crashDetails, showCrash } from './crash.ts';
 import { FpsMeter } from './fps-meter.ts';
@@ -37,8 +38,17 @@ export const json = async (path: string): Promise<unknown> => JSON.parse(new Tex
 /** An asset's bytes (`public/assets/`). */
 export const assetBytes = (path: string): Promise<ArrayBuffer> => fetchBytes(ASSETS, path);
 /** An asset's picture (`public/assets/`). */
-export const assetImage = async (path: string): Promise<ImageBitmap> =>
+const decoded = async (path: string): Promise<ImageBitmap> =>
   createImageBitmap(new Blob([await fetchBytes(ASSETS, path)], { type: 'image/png' }), { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
+/** An imported picture; remastered, the one made on this machine where there is one. */
+export const assetImage = async (path: string): Promise<ImageBitmap> =>
+  (remastered() && path.startsWith('pictures/') ? await decoded(`remaster/${path}`).catch(() => null) : null) ?? decoded(path);
+
+/** Whether the remaster's assets were made on this machine (`npm run remaster`, which lists them in `remaster/manifest.json`); known once `pageRenderer` has looked. */
+let remasterMade = false;
+export const remasterMadeHere = (): boolean => remasterMade;
+/** Whether the game is remastered: REMASTER in REMAKE OPTION (or `?remaster=on`), its assets made, and the picture above its least quality. */
+export const remastered = (): boolean => remasterMade && quality !== 'verylow' && asked(params, 'remaster', settings.remaster, ['off', 'on']) === 'on';
 /** A file of the drawing data (`public/data/`), and a picture of it. */
 export const dataBytes = (path: string): Promise<ArrayBuffer> => fetchBytes(DATA, path);
 /** Where a data file (`public/data/`) is served, for what streams it itself (a movie's video). */
@@ -90,11 +100,54 @@ export async function pageRenderer(): Promise<{ renderer: RendererApi; backend: 
   const picked = await pickQuality();
   quality = picked.quality;
   console.log(`[tekken3 remake] quality ${quality}: ${picked.why}`);
-  const { renderer, backend, reason } = await createRenderer(canvas, fightQuality(quality));
+  remasterMade = (await json('remaster/manifest.json').catch(() => null)) !== null;
+  /*
+   * Remastered, the picture goes through a filmic curve steeper than the default through the mid
+   * tones with a short toe, so the shade the stages are painted with stays readable, with a
+   * reflection probe, its bloom only on what is well past white, and screen-space reflections at each
+   * surface's roughness, resolved with the edges over frames (one sample a pixel, which the
+   * reflections march through); and a look of its own: its colour graded (`grade.ts`), the lens's
+   * corners a little darker, a faint colour fringe toward the picture's edges, and its lights
+   * blooming a little more.
+   */
+  const chosen = fightQuality(quality);
+  const remaster: RenderQualityOptions = {
+    ...chosen,
+    outputTransform: 'filmic',
+    outputExposure: 1,
+    reflectionProbeSize: 256,
+    ...(chosen.bloom === undefined ? {} : { bloom: 0.26, bloomThreshold: 1.6 }),
+    screenSpaceReflections: { reachM: 20, maxRoughness: 0.6, blur: 0.05 },
+    sceneSamples: 1,
+    temporalAa: true,
+  };
+  const { renderer, backend, reason } = await createRenderer(canvas, remastered() ? remaster : chosen);
+  if (remastered()) {
+    renderer.setFilmicCurve({ slope: 1.2, toe: 0.3, shoulder: 0.26, blackClip: 0, whiteClip: 0.04 });
+    applyLook(renderer, lookAsked());
+  }
   console.log(`[tekken3 remake] ${backend}: ${reason}`);
   renderer.resize();
   addEventListener('resize', () => renderer.resize());
   return { renderer, backend };
+}
+
+/** The remaster's looks, light to strong: how much of its grade (`grade.ts`), how dark the lens's corners and how wide its colour fringe. */
+const LOOKS = [
+  { grade: 0.55, vignette: 0.1, fringe: 0.15 },
+  { grade: 1, vignette: 0.18, fringe: 0.3 },
+  { grade: 1.6, vignette: 0.26, fringe: 0.45 },
+] as const;
+
+/** The look asked for: LOOK in REMAKE OPTION, or the address's (`?look=light`, `normal` or `strong`). */
+const lookAsked = (): number => Math.max(0, ['light', 'normal', 'strong'].indexOf(asked(params, 'look', settings.look, ['light', 'normal', 'strong']) ?? 'normal'));
+
+/** Remastered, the picture's look (0 light, 1 normal, 2 strong), as the remaster draws it. */
+export function applyLook(renderer: RendererApi, look: number): void {
+  const { grade, vignette, fringe } = LOOKS[look] ?? LOOKS[1];
+  renderer.setColourGrade(remasterGrade(grade), 1);
+  renderer.setVignette(vignette);
+  renderer.setChromaticAberration(fringe, 0.6);
 }
 
 /** What a way of playing does each field and each frame. */

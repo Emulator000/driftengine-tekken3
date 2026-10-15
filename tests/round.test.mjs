@@ -205,6 +205,14 @@ test('a vertex without a normal joins its skin\'s point', () => {
   assert.equal(s.pointOf[0], s.pointOf[1]);
 });
 
+test('corners at one place facing in a chain, each within 120° of the next, are one point', () => {
+  /* Facing 0°, 90° and 190° about z: the last 170° from the first, but 100° from the second. */
+  const turn = (degrees) => [Math.cos((degrees * Math.PI) / 180), Math.sin((degrees * Math.PI) / 180), 0];
+  const s = surfaceFor([one([0, 0, 0], turn(0)), one([0, 0, 0], turn(90)), one([0, 0, 0], turn(190)), one([9, 0, 0], [0, 0, 1]), one([0, 9, 0], [0, 0, 1])], [0, 3, 4, 1, 3, 4, 2, 3, 4]);
+  assert.equal(s.pointOf[0], s.pointOf[1]);
+  assert.equal(s.pointOf[1], s.pointOf[2]);
+});
+
 /**
  * Two triangles sharing the edge from (0,0,0) to (0,100,0), the second folded up from flat by
  * `degrees`: the shared edge's vertices facing between the two faces, the others as their own face.
@@ -297,6 +305,40 @@ test('a patch along an edge is that edge\'s curve, and a patch of straight edges
   close(evaluate(round, 1 / 3, 1 / 3, 1 / 3).position, [400 / 9, 400 / 9, 400 / 9], 1e-9, 'the curved centre');
 });
 
+import { fair, neighboursOf } from '../scripts/lib/round/fair.mjs';
+
+test('a bump is made even along its normals: a place moves only along its own, and places not free stay', () => {
+  /* A 5 by 5 grid on z = 0, its middle raised 10; every place free to move up and down but its border. */
+  const at = [];
+  const triangles = [];
+  for (let y = 0; y < 5; y += 1) for (let x = 0; x < 5; x += 1) at.push(x * 10, y * 10, x === 2 && y === 2 ? 10 : 0);
+  for (let y = 0; y < 4; y += 1) for (let x = 0; x < 4; x += 1) triangles.push(y * 5 + x, y * 5 + x + 1, y * 5 + x + 5, y * 5 + x + 1, y * 5 + x + 6, y * 5 + x + 5);
+  const free = Uint8Array.from({ length: 25 }, (_, i) => (i % 5 === 0 || i % 5 === 4 || i < 5 || i >= 20 ? 0 : 1));
+  const even = fair(at, new Array(25).fill([0, 0, 1]).flat(), free, neighboursOf(25, triangles), 4);
+  assert.ok(even[12 * 3 + 2] > 0 && even[12 * 3 + 2] < 5, `the bump at ${even[12 * 3 + 2].toFixed(2)}`);
+  for (let i = 0; i < 25; i += 1) {
+    assert.deepEqual([even[i * 3], even[i * 3 + 1]], [at[i * 3], at[i * 3 + 1]], `place ${i} along its normal only`);
+    if (!free[i]) assert.equal(even[i * 3 + 2], 0, `place ${i} held`);
+  }
+});
+
+test('a ring\'s bumps even out at its size: every other place 10 further out, all come to the middle', () => {
+  const count = 12;
+  const at = [];
+  const outward = [];
+  for (let k = 0; k < count; k += 1) {
+    const a = (2 * Math.PI * k) / count;
+    const r = k % 2 === 0 ? 100 : 110;
+    at.push(r * Math.cos(a), r * Math.sin(a), 0);
+    outward.push(Math.cos(a), Math.sin(a), 0);
+  }
+  const ring = Array.from({ length: count }, (_, k) => [k, (k + 1) % count, (k + 1) % count]).flat();
+  const even = fair(at, outward, new Uint8Array(count).fill(1), neighboursOf(count, ring), 9);
+  const radii = Array.from({ length: count }, (_, k) => Math.hypot(even[k * 3], even[k * 3 + 1]));
+  assert.ok(Math.max(...radii) - Math.min(...radii) <= 1, `radii ${Math.min(...radii).toFixed(1)} to ${Math.max(...radii).toFixed(1)}`);
+  assert.ok(radii.every((r) => Math.abs(r - 105) <= 2), `radii ${radii.map((r) => r.toFixed(1))} about 105`);
+});
+
 import { roundFighter, roundMesh } from '../scripts/lib/round.mjs';
 
 /** A rounded mesh's vertices at the bind pose (one joint at rest: its points as they are), and its triangles. */
@@ -362,17 +404,67 @@ test('a prism stays a prism: sides 120° apart are creases, its sides flat, its 
   }
 });
 
-test('a square tube rounds across its 90° bends without bloating', () => {
+test('a square tube rounds across its 90° bends toward a round one of its size', () => {
   const { at } = rounded(tube(4).bytes);
-  /* Its sides lie 70.7 from the axis, its corners 100 out; rounded, nothing goes inside the flat sides or past the corners' circle. */
-  let most = 0;
+  /* Its sides lie 70.7 from the axis, its corners 100 out, and a round tube of its section 79.8 out; nothing goes past the corners' circle. */
+  for (const p of at) assert.ok(Math.hypot(p[0], p[1]) <= 100 + 1, `a point at ${p}, ${Math.hypot(p[0], p[1]).toFixed(1)} from the axis`);
+  const middle = at.filter((p) => p[2] > 50 && p[2] < 150).map((p) => Math.hypot(p[0], p[1]));
+  const [least, most] = [Math.min(...middle), Math.max(...middle)];
+  assert.ok(least >= 79.8 - 2 && most - least <= 10, `its middle ${least.toFixed(1)} to ${most.toFixed(1)} from the axis (flat, 70.7 to 100)`);
+});
+
+/**
+ * A finger: a three-sided tube along z through `section` (its corners about the axis, as [x, y]),
+ * `long` long, each side on vertices of its own facing out from it, its ends open.
+ */
+function finger(section, long) {
+  const vertices = [];
+  const triangles = [];
+  section.forEach(([x0, y0], k) => {
+    const [x1, y1] = section[(k + 1) % section.length];
+    const out = normalize([y1 - y0, x0 - x1, 0]);
+    const base = vertices.length;
+    for (const [x, y, z] of [[x0, y0, 0], [x1, y1, 0], [x0, y0, long], [x1, y1, long]]) vertices.push({ at: [{ joint: 0, point: [x, y, z] }], normal: out });
+    triangles.push([base, base + 1, base + 2], [base + 1, base + 3, base + 2]);
+  });
+  return ftr1(vertices, triangles);
+}
+/* A section whose sides bend 130°, 130° and 100° (a thin finger's), its corners' sides facing as far apart. */
+const THIN = [[-10, 0], [10, 0], [0, 12]];
+
+test('a finger\'s sides, bent past 120° and facing too far apart to weld, are welded and round across their small folds', () => {
+  const source = readFtr(finger(THIN, 60));
+  const s = surfaceOf(source.vertices, source.indices, bindPose(source.vertices, ROOT, source.indices));
+  /* Vertices 0 and 9: the corner at (-10, 0) of the bottom side and of the side up from it, 130° apart. */
+  assert.equal(s.pointOf[0], s.pointOf[9], 'one point');
+  assert.equal(s.smooth(edgeKey(s.pointOf[0], s.pointOf[2])), true, 'its fold rounds');
+  /* Rounded, its flat bottom (y = 0) bulges out between its corners. */
+  const { at } = rounded(finger(THIN, 60));
+  const bottom = Math.min(...at.filter((p) => p[2] > 15 && p[2] < 45).map((p) => p[1]));
+  assert.ok(bottom <= -1, `its bottom reaches ${bottom.toFixed(1)} (flat, 0)`);
+});
+
+test('a large piece of a finger\'s section keeps its folds: past 100°, only a small part rounds', () => {
+  const big = THIN.map(([x, y]) => [x * 10, y * 10]);
+  const source = readFtr(finger(big, 600));
+  const s = surfaceOf(source.vertices, source.indices, bindPose(source.vertices, ROOT, source.indices));
+  assert.notEqual(s.pointOf[0], s.pointOf[9], 'two points, the fold an open crease');
+  const { at } = rounded(finger(big, 600));
+  assert.ok(at.every((p) => p[1] >= -0.5), 'its flat bottom stays flat');
+});
+
+test('a horn keeps its tip, its edges running into it straight, whichever way its faces lean', () => {
+  /* Four sides from a 30 by 12 base up to a tip 300 up and leaning 12 along x, each corner shared, facing out. */
+  const tip = [12, 0, 300];
+  const base = [[15, 6], [-15, 6], [-15, -6], [15, -6]];
+  const vertices = [...base.map(([x, y]) => ({ at: [{ joint: 0, point: [x, y, 0] }], normal: normalize([x, y, 0]) })), { at: [{ joint: 0, point: tip }], normal: [0, 0, 1] }];
+  const { mesh, at } = rounded(ftr1(vertices, base.map((_, k) => [k, (k + 1) % 4, 4])));
+  assert.ok(mesh.vertices.some((v) => v.influences[0].point.join() === tip.join()), 'the tip where it was');
   for (const p of at) {
-    const r = Math.hypot(p[0], p[1]);
-    const side = Math.max(Math.abs(p[0] + p[1]), Math.abs(p[0] - p[1])) / Math.SQRT2;
-    assert.ok(side >= 70.7 - 1 && r <= 100 + 1, `a point at ${p}: ${side.toFixed(1)} from its side's line, ${r.toFixed(1)} from the axis`);
-    most = Math.max(most, side);
+    const left = 1 - p[2] / 300;
+    assert.ok(p[2] <= 300.5, `a point at ${p} past the tip`);
+    assert.ok(Math.abs(p[0] - 12 * (p[2] / 300)) <= 15 * left + 2 && Math.abs(p[1]) <= 6 * left + 2, `a point at ${p} off the horn (half ${(15 * left).toFixed(1)} by ${(6 * left).toFixed(1)} there)`);
   }
-  assert.ok(most >= 75, `the sides bulge out (furthest ${most.toFixed(1)}, flat 70.7)`);
 });
 
 test('a thin block (a sandal) keeps its broad faces flat: its 90° folds onto narrow sides stay creases', () => {

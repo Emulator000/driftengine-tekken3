@@ -9,6 +9,7 @@
 | `npm run import` | Writes the game's typed assets, under `public/assets/` |
 | `npm run t4 -- "<image>"` | Reads your Tekken 4 disc image (`.iso`, or a `.7z` holding one) for Kazuya; then run `npm run extract` again |
 | `npm run arcade -- "<folder>"` | Reads the dump of your own Tekken 3 arcade board (its chips' files, in one folder) for the arcade's stages, into `.cache/arcade/`; then run `npm run extract` again ([Tekken 3 Arcade assets](../README.md#tekken-3-arcade-assets-optional)) |
+| `npm run remaster` | On Linux, makes the remaster's assets on this machine, on its GPU where it has one (`-- --cpu`, `-- --rocm`, `-- --cuda` to choose), into `public/assets/remaster/`; then REMASTER in REMAKE OPTION draws with them ([The remaster](../README.md#the-remaster-optional)) |
 | `npm run dev` | Serves the game on `localhost:5190` (or the next free port), running `extract` and `import` first when their output is missing |
 | `npm run dev:lan` | Serves the game to your own devices on your home network, over HTTPS ([In a phone's browser](#in-a-phones-browser)) |
 | `npm run desktop` | Builds the game as an app for this computer (Windows, macOS or Linux), with your disc's data in it, into `out/<target>/`; `-- mac-arm64` or `-- mac-x64` builds a Mac's on Linux ([As an app](#as-an-app)) |
@@ -63,6 +64,8 @@ address's.
 | `quality=verylow` | The picture for an entry-level phone: the scene drawn straight to the screen with no pass after it, one pixel to the CSS pixel and no more pixels than a 640 by 480 picture, thirty pictures a second (the game still runs sixty fields), and the fighters with the console's meshes. It is the default on a phone whose GPU the browser names as an entry-level part (a Mali-G31, G51, G52 or G57, an Adreno 5xx or 600s to 610s, or a PowerVR), and on any device whose fight ran too slow even at its least density on a start before ([A slow device](#a-slow-device)) |
 | `budget=N` | The frame time, in milliseconds, the picture's density is held to (20 by default): while most of a fight's frames take longer, the picture steps down toward half its pixels each way, and back up as the frames allow; `0` holds it still |
 | `touch=1`, `touch=0` | The touch pad over the picture anywhere, or nowhere (by default on a touch screen or a phone) |
+| `remaster=on`, `remaster=off` | The fight remastered or not (as REMASTER in REMAKE OPTION), once `npm run remaster` has made its assets |
+| `look=light`, `look=normal`, `look=strong` | The remaster's look (as LOOK in REMAKE OPTION) |
 | `stop=N` | Holds the game after `N` fields (sixtieths of a second), for comparing pictures |
 | `viewer` | Opens the viewer for every fighter and move instead of the game (`fighter`, `move` and `paused=1` set where it starts) |
 
@@ -141,6 +144,8 @@ or the app) for every start after.
 | PICTURE | AUTO (by the device), HIGH, LOW, VERY LOW (as `quality=`) |
 | FRAME RATE | OFF, ON (as `F`) |
 | TOUCH PAD | AUTO (on a touch screen or a phone), ON, OFF |
+| REMASTER | OFF, ON (the fight drawn with the engine's lighting, the stage's own sky, light and 3D floor, and the assets `npm run remaster` made; until it has, the page says RUN NPM RUN REMASTER FIRST; off at the lowest picture quality) |
+| LOOK | LIGHT, NORMAL, STRONG (listed while REMASTER is on: how strongly the remastered picture is graded, its shadows toward teal and its lights toward magenta, its corners darkened and its edges fringed; changed at once) |
 
 The frame rate shows or hides at once. The others change what the game loads: while one differs
 from the start's, the page says LEAVING RESTARTS THE GAME, and leaving it starts the game again

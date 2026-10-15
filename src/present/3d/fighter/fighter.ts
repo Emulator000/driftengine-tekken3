@@ -28,7 +28,7 @@
  * hips on joints of their own are kept off the thighs (`garment.ts`): each of their points is
  * placed on the CPU and handed over as a joint of its own.
  */
-import type { MeshHandle, PointSkinData, PointSkinHandle, RendererApi, SurfaceMaterial, SurfaceTextureHandle } from '@driftengine/core';
+import { createMover, type MeshHandle, type Mover, type PointSkinData, type PointSkinHandle, type RendererApi, type SurfaceMaterial, type SurfaceTextureHandle } from '@driftengine/core';
 import type { Rotation } from '../../../motion/motion.ts';
 import { HelperRig, type Frame, type RigNode } from '../../../mod/kazuya/tekken4.ts';
 import { hingesOf, HIPS, keepClothOff, LEGS, newLimb, placeLimb, profileOf, unturn, type LimbNow } from './garment.ts';
@@ -223,6 +223,8 @@ const STILL: Frame = { r: [1, 0, 0, 0, 1, 0, 0, 0, 1], t: [0, 0, 0] };
 export class Fighter {
   readonly handle: MeshHandle;
   readonly material: SurfaceMaterial<SurfaceTextureHandle>;
+  /** Which object its draws are, frame to frame, for a reconstructing renderer. */
+  readonly mover: Mover = createMover();
   /** Light added over its own colours, linear: the hit flash (`light`). */
   private readonly glow: [number, number, number] = [0, 0, 0];
   private readonly renderer: RendererApi;
@@ -250,7 +252,15 @@ export class Fighter {
    * hung from the hips whose points are kept clear of the legs, as the garment's are; null keeps
    * none clear, the garment's posed as the hips.
    */
-  constructor(renderer: RendererApi, mesh: FighterMesh, texture: SurfaceTextureHandle, white: SurfaceTextureHandle | null = null, tails: readonly number[] | null = []) {
+  constructor(
+    renderer: RendererApi,
+    mesh: FighterMesh,
+    texture: SurfaceTextureHandle,
+    white: SurfaceTextureHandle | null = null,
+    tails: readonly number[] | null = [],
+    /** A highlight on the skin and cloth, and the atlas's maps where it has them. */
+    look: { readonly normal: SurfaceTextureHandle | null; readonly orm: SurfaceTextureHandle | null } | null = null,
+  ) {
     this.renderer = renderer;
     this.mesh = mesh;
     this.texture = texture;
@@ -271,8 +281,8 @@ export class Fighter {
         normals,
         colors: new Float32Array(n * 3).fill(1),
         emissive: new Float32Array(n).fill(1),
-        specular: new Float32Array(n),
-        roughness: new Float32Array(n).fill(1),
+        specular: new Float32Array(n).fill(look === null ? 0 : 0.12),
+        roughness: new Float32Array(n).fill(look === null ? 1 : 0.7),
         uvs: mesh.uv,
         indices: mesh.indices,
       },
@@ -282,7 +292,14 @@ export class Fighter {
     for (let i = 0; i < n; i += 1) this.skinVertex(i);
     this.skin = renderer.createPointSkin(this.handle, this.data);
     /* Emission through a white map, so its scale is the glow's colour over the fighter's own. */
-    this.material = { albedo: texture, cutout: 0.5, doubleSided: true, ...(white === null ? {} : { emissive: white, emissiveScale: this.glow }) };
+    this.material = {
+      albedo: texture,
+      cutout: 0.5,
+      doubleSided: true,
+      ...(white === null ? {} : { emissive: white, emissiveScale: this.glow }),
+      ...(look?.normal == null ? {} : { normal: look.normal, normalStrength: 0.8 }),
+      ...(look?.orm == null ? {} : { orm: look.orm }),
+    };
   }
 
   /** The light a blow throws on it this frame, added over its colours (linear; 0 is none). */

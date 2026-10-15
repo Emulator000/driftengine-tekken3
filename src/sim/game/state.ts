@@ -111,7 +111,7 @@ export interface Sparkle {
 /**
  * A side of the versus select: its state, whether a kick chose its team's size, its cursor's column and row, its cursor's, name's and
  * slot's kinds, the characters it may still choose (roster bits), how many it chooses and has
- * chosen, its choices (codes, 0x58 none), its handicap and its gauge's place and where that is
+ * chosen, its choices (codes, 0xfc none), its handicap and its gauge's place and where that is
  * going, its last choice, its choice as two are kept apart (with whether it counts as chosen and as
  * a human's), and the bar under its name (its left, line and width, 0 none, and costume).
  */
@@ -439,6 +439,9 @@ export interface RemakeSettings {
   picture: number;
   frameRate: number;
   touchPad: number;
+  remaster: number;
+  /** The remaster's look: light, normal (the default) or strong. */
+  look: number;
 }
 
 /**
@@ -564,8 +567,8 @@ export interface GameState {
     readonly display: { x: number; y: number };
   };
   readonly earned: { ball: number; theater: number };
-  /** The remake's own settings (its page in the Options), as set and as the page started with them. */
-  readonly remake: { readonly settings: RemakeSettings; readonly started: RemakeSettings };
+  /** The remake's own settings (its page in the Options), as set and as the page started with them; and whether the remaster's assets were made on this machine. */
+  readonly remake: { readonly settings: RemakeSettings; readonly started: RemakeSettings; remasterMade: boolean };
   /** The progress as last saved, which a load brings back (null: none saved), as the memory card holds it. */
   kept: Progress | null;
   practice: PracticeState;
@@ -910,7 +913,7 @@ export function blankGameState(): GameState {
       display: { x: 0, y: 0 },
     },
     earned: { ball: 0, theater: 0 },
-    remake: { settings: { ...REMAKE_DEFAULTS }, started: { ...REMAKE_DEFAULTS } },
+    remake: { settings: { ...REMAKE_DEFAULTS }, started: { ...REMAKE_DEFAULTS }, remasterMade: false },
     kept: null,
     practice: blankPractice(),
     optionsScreen: {

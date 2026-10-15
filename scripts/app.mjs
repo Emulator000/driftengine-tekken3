@@ -103,6 +103,8 @@ const version = (dir) => (existsSync(path.join(dir, 'package.json')) ? JSON.pars
 run(process.execPath, ['scripts/extract.mjs', '--if-missing']);
 run(process.execPath, ['scripts/import.mjs', '--if-missing']);
 run(process.execPath, [path.join(root, 'node_modules', 'vite', 'bin', 'vite.js'), 'build']);
+/* The remaster's assets (gigabytes, made on this machine) stay out of the app: it plays the game as the disc and the board give it. */
+rmSync(path.join(root, 'dist', 'assets', 'remaster'), { recursive: true, force: true });
 
 const engine = version(path.join(root, 'node_modules', '@driftengine', 'core'));
 if (version(packager) !== engine) {

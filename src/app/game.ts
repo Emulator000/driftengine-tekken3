@@ -27,7 +27,7 @@ import { PauseScreen } from '../present/hud/pause.ts';
 import { loadTypefaces } from '../present/2d/typefaces.ts';
 import { ScenePresenter } from '../present/scenes/scenes.ts';
 import { SCREEN } from '../present/scenes/screen.ts';
-import { assetImage, canvas, controllers, dataUrl, json, pageRenderer, params, play, status, two } from './page.ts';
+import { applyLook, assetImage, canvas, controllers, dataUrl, json, pageRenderer, params, play, remasterMadeHere, remastered, status, two } from './page.ts';
 import { controlWords } from '../present/2d/controls.ts';
 import { drawingFiles, introFiles, withArcadeFighters } from './quick.ts';
 import { readProgress, writeProgress } from './save.ts';
@@ -130,13 +130,16 @@ export async function playGame(): Promise<void> {
   /* REMAKE OPTION's settings as the page started with them. */
   Object.assign(game.state.remake.settings, settings);
   Object.assign(game.state.remake.started, settings);
+  game.state.remake.remasterMade = remasterMadeHere();
   /*
    * REMAKE OPTION's settings: kept as they change, the frame rate shown or hidden at once (and `F`'s
-   * switch shown on the page), and on leaving the page with one a restart applies changed, the
-   * progress saved where auto save keeps it, then the page started again.
+   * switch shown on the page), the remaster's look changed at once, and on leaving the page with one
+   * a restart applies changed, the progress saved where auto save keeps it, then the page started
+   * again.
    */
   let keptSettings = { ...settings };
   let meterOn = settings.frameRate;
+  let lookOn = settings.look;
   let restarting = false;
   const settle = (): void => {
     const state = game.state;
@@ -145,6 +148,8 @@ export async function playGame(): Promise<void> {
     if (shown !== meterOn) remake.frameRate = shown;
     else if (remake.frameRate !== meterOn) showFrameRate(remake.frameRate === 1);
     meterOn = remake.frameRate;
+    if (remake.look !== lookOn && remastered()) applyLook(renderer, remake.look);
+    lookOn = remake.look;
     if ((Object.keys(remake) as (keyof typeof remake)[]).some((key) => remake[key] !== keptSettings[key])) {
       keptSettings = { ...remake };
       writeSettings(keptSettings);

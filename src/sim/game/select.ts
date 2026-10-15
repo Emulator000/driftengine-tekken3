@@ -61,7 +61,8 @@ const COIN_Y = 0x22;
 
 /** The added character holding roster id `roster`, if any. */
 const addedOf = (scenes: SceneTables, roster: number): AddedCharacter | undefined => scenes.select.added.find((a) => a.roster === roster);
-const isCharacter = (scenes: SceneTables, roster: number): boolean => (roster >= 0 && roster < ROSTER) || addedOf(scenes, roster) !== undefined;
+/** Whether a roster id is a character: one of the game's or an added one. */
+export const isCharacter = (scenes: SceneTables, roster: number): boolean => (roster >= 0 && roster < ROSTER) || addedOf(scenes, roster) !== undefined;
 
 /** A roster id and costume's look word; out of range, the empty one's. */
 export function lookOf(scenes: SceneTables, roster: number, costume: number): number {

@@ -52,7 +52,15 @@ export class ArcadeBackground {
   private readonly white: { u0: number; v0: number; u1: number; v1: number };
   private readonly colours: { readonly cell: number[]; readonly above: number[]; readonly below: number[]; readonly sky: number[] };
 
-  constructor(renderer: RendererApi, files: ArcadePanoramaFiles) {
+  /**
+   * `ownSky` (remastered): above the panorama always its sky going on up, a little deeper toward the
+   * top of the picture, in place of the colour above.
+   */
+  constructor(
+    renderer: RendererApi,
+    files: ArcadePanoramaFiles,
+    private readonly ownSky = false,
+  ) {
     this.renderer = renderer;
     const layout = files.layout;
     this.layout = layout;
@@ -112,8 +120,14 @@ export class ArcadeBackground {
       return;
     }
 
-    if (top > 0 && layout.drawn.above && !skyOn) this.fill(0, 0, width, top, this.colours.above);
-    if (skyOn) this.fill(0, 0, width, top, this.colours.sky);
+    if (top > 0 && layout.drawn.above && !skyOn && !this.ownSky) this.fill(0, 0, width, top, this.colours.above);
+    if (skyOn && !this.ownSky) this.fill(0, 0, width, top, this.colours.sky);
+    if (top > 0 && this.ownSky) {
+      for (let y = 0; y < top; y += BAND) {
+        const deep = 1 - 0.45 * Math.min(1, (top - y) / LINES);
+        this.fill(0, y, width, BAND, this.colours.sky.map((c) => c * deep));
+      }
+    }
     /* The pixel of the panorama at the screen's left edge, as the game counts it from the turn, then as far again as the picture is wider. */
     const unit = Math.trunc((layout.degrees * TURN) / 360);
     const scrolled = Math.trunc((mod(sceneryYaw - look.yaw, TURN) * SCREEN) / unit);

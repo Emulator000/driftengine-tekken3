@@ -241,6 +241,37 @@ own and are permitted to use under the laws applicable to you.
 The importer parses the dump's data as it is stored: it does not run the board's program, and it
 reads, bypasses and emulates no security hardware.
 
+### The remaster (optional)
+
+REMASTER in REMAKE OPTION draws the fights as a modern game would: the engine's lighting and
+shadows, each stage's own sky and light, wet floors reflecting the fighters, floors and scenery
+in 3D relief, grass that sways and is trampled, and the textures enlarged with their normal,
+roughness and height maps, with a look of its own (LOOK: light, normal or strong). It is off by
+default, and experimental: REMAKE OPTION asks you to run `npm run remaster` first until its assets
+have been made on your machine, and the lowest picture quality leaves it off.
+
+- **Made on your machine, from your data.** `npm run remaster` runs open models over what
+  `npm run import` made from your disc (and your arcade dump, where you have one): PBRify's
+  enlargement and material models, and Z-Image-Turbo through stable-diffusion.cpp for the floors'
+  grain, the floors it draws anew and some stages' detail
+  ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md#the-remasters-tools) lists them and their
+  licences). Nothing is downloaded but the tools and their weights, into `.cache/remaster/`.
+- **What it needs.** Linux (for now), uv (<https://docs.astral.sh/uv/>) for its Python, curl, unzip
+  and sha256sum to fetch its tools, a Vulkan driver for Z-Image (stable-diffusion.cpp's Vulkan
+  build: a GPU's driver, or Mesa's lavapipe on the CPU), about 25 GB of disk, and a GPU to be quick:
+  an AMD one (ROCm) or an NVIDIA one (CUDA, untried) runs PBRify's models, found by itself
+  (`--cpu`, `--rocm` or `--cuda` names it); on the CPU they take many hours.
+- **Like everything converted from your disc and your board**, what it makes is in an ignored
+  folder (`public/assets/remaster/`) and is for your own devices: never commit, upload or share it.
+  An app built with `npm run desktop`, `npm run android` or `npm run ios` leaves it out.
+
+```sh
+npm run remaster
+```
+
+A run that stops picks up where it was. Then turn REMASTER on (or open the game with
+`?remaster=on`).
+
 ## Where It Stands
 
 The game plays from power-on through a whole Arcade run, its fight the original's on every
@@ -253,7 +284,7 @@ field. What is done and what is not yet:
 | The attract cycle: the in-engine intros, the demo fights, the other movie | Done | |
 | The mode menu | Done | Every mode starts |
 | The character select | Done | Both its layouts: one row, and two once more characters are earned (`?unlock` earns them all); Kazuya in a cell of his own when his files are built |
-| The versus select: both players at once, the handicaps, the record of wins and draws | Done | Also Arcade's, with start and both shoulders held as it is chosen; `?versus` starts Versus |
+| The versus select: both players at once, the handicaps, the record of wins and draws | Done | Also Arcade's, with start and both shoulders held as it is chosen; `?versus` starts Versus; Kazuya in a column of his own when his files are built |
 | The versus screen | Done | |
 | Arcade: its ten opponents, Ogre's change into True Ogre, the continue, game over | Done | `?arcade=ROSTER` starts it at Ogre's stage |
 | The endings: each character's movie and captions, the credits | Done | |
@@ -280,7 +311,7 @@ field. What is done and what is not yet:
 | Hands opening and clenching, eyes blinking | Done | Each hand's shapes from the model, rounded alike; the costume's closed eyes over its face. Gon's face colours not yet |
 | **The picture and the sound** | | |
 | The stages' floors, shaded by depth or lit around the fighters | Done | |
-| The fighters rounded into curved surfaces | Done | `?models=psx` draws the console's meshes, as an entry-level phone does |
+| The fighters rounded into curved surfaces | Done | Their sharp edges and small parts kept, their fingers round; `?models=psx` draws the console's meshes, as an entry-level phone does |
 | The textures enlarged and smoothed | Done | `?textures=psx` draws the originals |
 | The 2D (HUD, calls, menus) drawn at the display's resolution | Done | |
 | The movies | Done | Converted from the disc when FFmpeg is installed |
@@ -306,7 +337,7 @@ field. What is done and what is not yet:
 
 | Path | What |
 | --- | --- |
-| `scripts/` | Reading the disc image (and, optionally, an arcade board's dump) and importing their data, the only code that knows their formats; and building the apps (`app.mjs`) |
+| `scripts/` | Reading the disc image (and, optionally, an arcade board's dump) and importing their data, the only code that knows their formats; building the apps (`app.mjs`); and making the remaster's assets (`remaster.mjs`, `remaster/`) |
 | `src/sim/` | The game: a typed, deterministic simulation, with no engine, browser or I/O in it |
 | `src/assets/` | The imported assets' types and validating loaders |
 | `src/present/` | The presentation on DriftEngine: the 3D, the 2D, the effects, the sound |

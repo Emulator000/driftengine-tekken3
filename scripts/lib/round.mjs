@@ -1,29 +1,37 @@
 /**
  * A fighter's mesh rounded: each triangle made a curved patch through its corners (PN triangles) at
  * the model's bind pose and cut `steps` by `steps`, creases and open borders running straight, so
- * neighbouring faces meet exactly. An original vertex keeps its skin and texture coordinates (its
- * normal becomes the surface's). A new vertex hangs on its corners' joints: for each joint, the
- * weighted mean of the corners' own points on it, so it moves exactly as the flat triangle does in
- * every pose, then pushed out by the patch's bulge turned into each joint's frame; its texture
- * coordinates are its corners', interpolated flat. A face the bind pose cannot hold as the model
- * does (`surface.mjs`) stays flat, its new vertices taking their nearest corner's own normal.
+ * neighbouring faces meet exactly; then the cut surface made even (`round/fair.mjs`), each place
+ * off a crease, a border or a tip moved along its normal only, so a low-poly finger, limb or head's
+ * corners and facets even out into a round shape of its size. An original vertex keeps its skin and
+ * texture coordinates, its points moved with its place (its normal becomes the surface's). A new
+ * vertex hangs on its corners' joints: for each joint, the weighted mean of the corners' own points
+ * on it, so it moves exactly as the flat triangle does in every pose, then pushed out by its place's
+ * offset from the flat triangle turned into each joint's frame; its texture coordinates are its
+ * corners', interpolated flat. A round vertex's normal lies halfway between the patch's and the cut
+ * surface's own. A face the bind pose cannot hold as the model does (`surface.mjs`) stays flat, its
+ * new vertices taking their nearest corner's own normal.
  *
  * A hand's other shapes are rounded the same way on the same surface: its welded points, creases
  * and groups as the mesh has them, each face whose corners a shape moves made again from the
- * shape's places and normals, so every shape has the same vertices and triangles. A face's
- * pictures (its closed eyes) are rounded once, as the face is loaded, and each picture's triangles
- * made from those on vertices of their own, their texture coordinates moved to its region.
+ * shape's places and normals and the cut surface made even again, so every shape has the same
+ * vertices and triangles. A face's pictures (its closed eyes) are rounded once, as the face is
+ * loaded, and each picture's triangles made from those on vertices of their own, their texture
+ * coordinates moved to its region.
  */
 import { bindPose } from './round/bind.mjs';
 import { readFtr, writeFtr5 } from './ftr.mjs';
+import { fair, neighboursOf } from './round/fair.mjs';
 import { edgePoint, evaluate, patchOf } from './round/pn.mjs';
 import { edgeKey, surfaceOf } from './round/surface.mjs';
-import { add, applyT, lerp, scale, sub } from './round/vec.mjs';
+import { add, applyT, dot, lerp, normalize, scale, sub } from './round/vec.mjs';
 
 /** Each triangle cut into this many by this many. */
 export const STEPS = 3;
 
-const unit = (n) => n.map((x) => Math.round(x * 4096));
+/** A whole number, never -0 (so a shape's record compares equal to one made directly). */
+const whole = (x) => Math.round(x) + 0;
+const unit = (n) => n.map((x) => whole(x * 4096));
 const NO_BULGE = [0, 0, 0];
 const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
 
@@ -49,7 +57,7 @@ function blended(frames, terms, bulge, normal, uv) {
   const influences = kept.map(([joint, sum]) => ({
     joint,
     weight: sum.weight / total,
-    point: add(scale(sum.point, 1 / sum.weight), applyT(frames[joint].r, bulge)).map(Math.round),
+    point: add(scale(sum.point, 1 / sum.weight), applyT(frames[joint].r, bulge)).map(whole),
   }));
   if (normal.bind === undefined) return { influences, normalJoint: normal.joint, normal: normal.local, uv };
   return { influences, normalJoint: influences[0].joint, normal: unit(applyT(frames[influences[0].joint].r, normal.bind)), uv };
@@ -98,97 +106,203 @@ export function roundMesh(mesh, skeleton, steps = STEPS) {
   const core = coreOf({ shapes: [], pictures: [], ...mesh });
   const frames = bindPose(core.vertices, skeleton, core.indices);
   const surface = surfaceOf(core.vertices, core.indices, frames);
+  const { faces } = surface;
+  const edgeOf = (f, s) => edgeKey(faces[f].points[s], faces[f].points[(s + 1) % 3]);
 
-  /**
-   * A face's n² triangles, its vertices made through `put(key, make)` (a key shared by the faces
-   * that make the same vertex, or null for one of the face's own), from `geometry`: the vertices,
-   * their places and the corners' normals.
+  /*
+   * The cut surface: each face's grid, each of its points a vertex made once (by a key the faces that
+   * reach it alike share) by the first face to reach it, lying at a place (which every vertex there
+   * shares) and taking its normal from a side (the vertices there on one side of a crease).
    */
-  const emit = (f, geometry, put) => {
-    const face = surface.faces[f];
+  const made = [];
+  const keys = new Map();
+  const places = new Map();
+  const sides = new Map();
+  const idOf = (map, key) => {
+    if (!map.has(key)) map.set(key, map.size);
+    return map.get(key);
+  };
+  const grids = faces.map(() => []);
+  const triangles = faces.map((face, f) => {
     const c = face.corners;
-    const corner = (s) => geometry.vertices[c[s]];
-    const p = c.map((i) => geometry.position[i]);
-    const normals = [0, 1, 2].map((s) => geometry.normal(f, s));
-    const straight = [0, 1, 2].map((s) => !surface.smooth(edgeKey(face.points[s], face.points[(s + 1) % 3])));
-    const patch = patchOf(p, normals, straight);
-    /* A flat face's new vertex takes the normal of the corner it lies nearest. */
-    const own = (s) => ({ joint: corner(s).normalJoint, local: corner(s).normal });
-
     /* The grid point `a` steps toward corner 1 and `b` toward corner 2. */
-    const at = (a, b) => {
+    const make = (a, b) => {
       const which = a === 0 && b === 0 ? 0 : a === n && b === 0 ? 1 : a === 0 && b === n ? 2 : -1;
+      /* On an edge: from its lower surface point up, so both its faces make it alike. */
+      const edge = which >= 0 ? null : b === 0 ? [0, 1, a] : a + b === n ? [1, 2, b] : a === 0 ? [2, 0, n - b] : null;
+      let key = null;
+      let point;
+      let place;
+      let side;
       if (which >= 0) {
-        const original = corner(which);
-        if (!face.round) return put(`c:${c[which]}:${surface.group(f, which)}`, () => original);
-        return put(`c:${c[which]}:${surface.group(f, which)}`, () => ({ ...original, normal: unit(applyT(frames[original.normalJoint].r, normals[which])) }));
-      }
-      /* On an edge: computed from its lower surface point up, so both its faces compute it alike. */
-      const edge = b === 0 ? [0, 1, a] : a + b === n ? [1, 2, b] : a === 0 ? [2, 0, n - b] : null;
-      if (edge !== null) {
+        const group = surface.group(f, which);
+        key = `c:${c[which]}:${group}`;
+        place = `p:${face.points[which]}`;
+        side = `${place}:${group}`;
+        point = { which };
+      } else if (edge !== null) {
         const [i, j, k] = edge;
         const forward = face.points[i] < face.points[j] || (face.points[i] === face.points[j] && c[i] < c[j]);
         const [lo, hi, step] = forward ? [i, j, k] : [j, i, n - k];
         const t = step / n;
-        const uv = [0, 1].map((m) => Math.round(corner(lo).uv[m] * (1 - t) + corner(hi).uv[m] * t));
-        const key = `e:${face.points[lo]}:${face.points[hi]}:${step}:${surface.group(f, lo)}:${surface.group(f, hi)}:${uv}`;
-        return put(key, () => {
-          const terms = [{ vertex: corner(lo), weight: 1 - t }, { vertex: corner(hi), weight: t }];
-          if (!face.round) return blended(frames, terms, NO_BULGE, own(t < 0.5 ? lo : hi), uv);
-          const point = edgePoint(p[lo], p[hi], normals[lo], normals[hi], straight[i], t);
-          return blended(frames, terms, sub(point.position, lerp(p[lo], p[hi], t)), { bind: point.normal }, uv);
-        });
+        const uv = [0, 1].map((m) => Math.round(core.vertices[c[lo]].uv[m] * (1 - t) + core.vertices[c[hi]].uv[m] * t));
+        place = `e:${face.points[lo]}:${face.points[hi]}:${step}`;
+        side = `${place}:${surface.group(f, lo)}:${surface.group(f, hi)}`;
+        key = `${side}:${uv}`;
+        point = { edge: i, forward, lo, hi, t, uv };
+      } else {
+        const weights = [(n - a - b) / n, a / n, b / n];
+        place = side = `i:${f}:${a}:${b}`;
+        point = { weights, uv: [0, 1].map((m) => Math.round(weights.reduce((s, w, k) => s + core.vertices[c[k]].uv[m] * w, 0))) };
       }
-      const weights = [(n - a - b) / n, a / n, b / n];
-      const uv = [0, 1].map((m) => Math.round(weights.reduce((s, w, k) => s + corner(k).uv[m] * w, 0)));
-      const terms = weights.map((weight, s) => ({ vertex: corner(s), weight }));
-      return put(null, () => {
-        if (!face.round) return blended(frames, terms, NO_BULGE, own(weights.indexOf(Math.max(...weights))), uv);
-        const point = evaluate(patch, ...weights);
-        const flat = weights.reduce((s, w, k) => add(s, scale(p[k], w)), [0, 0, 0]);
-        return blended(frames, terms, sub(point.position, flat), { bind: point.normal }, uv);
-      });
+      let v = key === null ? undefined : keys.get(key);
+      if (v === undefined) {
+        v = made.length;
+        made.push({ f, ...point, place: idOf(places, place), side: idOf(sides, side) });
+        if (key !== null) keys.set(key, v);
+      }
+      grids[f].push({ a, b, v });
+      return v;
     };
-
     const grid = new Map();
     const id = (a, b) => {
       const key = a * (n + 1) + b;
-      if (!grid.has(key)) grid.set(key, at(a, b));
+      if (!grid.has(key)) grid.set(key, make(a, b));
       return grid.get(key);
     };
-    const triangles = [];
+    const list = [];
     for (let a = 0; a < n; a += 1) {
       for (let b = 0; b < n - a; b += 1) {
-        triangles.push([id(a, b), id(a + 1, b), id(a, b + 1)]);
-        if (a + b + 2 <= n) triangles.push([id(a + 1, b), id(a + 1, b + 1), id(a, b + 1)]);
+        list.push([id(a, b), id(a + 1, b), id(a, b + 1)]);
+        if (a + b + 2 <= n) list.push([id(a + 1, b), id(a + 1, b + 1), id(a, b + 1)]);
       }
     }
-    return triangles;
-  };
-
-  /* The mesh as loaded: each face's vertices, shared by key, and the order each face made them in. */
-  const vertices = [];
-  const indices = [];
-  const slots = [];
-  const shared = new Map();
-  const loaded = { vertices: core.vertices, position: surface.position, normal: surface.normal };
-  surface.faces.forEach((_, f) => {
-    const made = [];
-    const put = (key, make) => {
-      let index = key === null ? undefined : shared.get(key);
-      if (index === undefined) {
-        index = vertices.length;
-        vertices.push(make());
-        if (key !== null) shared.set(key, index);
-      }
-      made.push(index);
-      return index;
-    };
-    for (const t of emit(f, loaded, put)) indices.push(...t);
-    slots.push(made);
+    return list;
   });
 
-  /* Each shape of each group: the faces its moved corners touch made again into the same vertices. */
+  /*
+   * The places free to be made even: on round faces only, off creases, borders and tips, with every
+   * vertex there on one side.
+   */
+  const free = new Uint8Array(places.size).fill(1);
+  const sideAt = new Int32Array(places.size).fill(-1);
+  for (const m of made) {
+    if (sideAt[m.place] < 0) sideAt[m.place] = m.side;
+    else if (sideAt[m.place] !== m.side) free[m.place] = 0;
+  }
+  faces.forEach((face, f) => {
+    for (const { a, b, v } of grids[f]) {
+      const on = [b === 0, a + b === n, a === 0];
+      const which = a === 0 && b === 0 ? 0 : a === n && b === 0 ? 1 : a === 0 && b === n ? 2 : -1;
+      if (!face.round || on.some((edge, s) => edge && !surface.smooth(edgeOf(f, s))) || (which >= 0 && surface.cusp(f, which))) free[made[v].place] = 0;
+    }
+  });
+  const neighbours = neighboursOf(places.size, triangles.flat(2).map((v) => made[v].place));
+  const passes = n * n;
+
+  /*
+   * The cut surface as `geometry` shapes it (the vertices, their places, the corners' and faces'
+   * normals): for the faces in `list`, each vertex's place on the flat triangle and on the patch and
+   * the patch's normal there (the others' as `base` has them); the places made even; and each round
+   * vertex's normal, halfway between the patch's and its side's triangles' (weighted by their area).
+   */
+  const shapeOf = (geometry, list, base = null) => {
+    const flat = base === null ? [] : base.flat.slice();
+    const at = base === null ? [] : base.at.slice();
+    const bent = base === null ? [] : base.bent.slice();
+    for (const f of list) {
+      const face = faces[f];
+      const p = face.corners.map((i) => geometry.position[i]);
+      const normals = [0, 1, 2].map((s) => geometry.normal(f, s));
+      const straight = [0, 1, 2].map((s) => !surface.smooth(edgeOf(f, s)));
+      /* Each edge's normals at its ends, and each corner's within the face: a tip's its two edges' mean. */
+      const ends = [0, 1, 2].map((s) => [geometry.along(f, s, (s + 1) % 3), geometry.along(f, (s + 1) % 3, s)]);
+      const inner = [0, 1, 2].map((s) => (geometry.cusp(f, s) ? normalize(add(ends[s][0], ends[(s + 2) % 3][1])) : normals[s]));
+      const patch = patchOf(p, inner, straight, ends);
+      for (const { v } of grids[f]) {
+        const m = made[v];
+        if (m.f !== f) continue;
+        let point;
+        if (m.which !== undefined) {
+          flat[v] = p[m.which];
+          point = { position: p[m.which], normal: normals[m.which] };
+        } else if (m.edge !== undefined) {
+          flat[v] = lerp(p[m.lo], p[m.hi], m.t);
+          const [lo, hi] = m.forward ? ends[m.edge] : [ends[m.edge][1], ends[m.edge][0]];
+          point = edgePoint(p[m.lo], p[m.hi], lo, hi, straight[m.edge], m.t);
+        } else {
+          flat[v] = m.weights.reduce((s, w, k) => add(s, scale(p[k], w)), [0, 0, 0]);
+          point = evaluate(patch, ...m.weights);
+        }
+        at[v] = face.round ? point.position : flat[v];
+        bent[v] = face.round ? point.normal : [0, 0, 0];
+      }
+    }
+    const start = new Float64Array(places.size * 3);
+    const direction = new Float64Array(places.size * 3);
+    made.forEach((m, v) => {
+      start.set(at[v], m.place * 3);
+      direction.set(bent[v], m.place * 3);
+    });
+    const even = fair(start, direction, free, neighbours, passes);
+    const placeOf = (v) => [0, 1, 2].map((k) => even[made[v].place * 3 + k]);
+    const sums = new Float64Array(sides.size * 3);
+    const across = [0, 0, 0];
+    faces.forEach((face, f) => {
+      if (!face.round) return;
+      const facing = geometry.facing(f);
+      for (const t of triangles[f]) {
+        const [a, b, c] = t.map((v) => made[v].place * 3);
+        for (let k = 0; k < 3; k += 1) {
+          const [i, j] = [(k + 1) % 3, (k + 2) % 3];
+          across[k] = (even[b + i] - even[a + i]) * (even[c + j] - even[a + j]) - (even[b + j] - even[a + j]) * (even[c + i] - even[a + i]);
+        }
+        const sign = dot(across, facing) < 0 ? -1 : 1;
+        for (const v of t) for (let k = 0; k < 3; k += 1) sums[made[v].side * 3 + k] += sign * across[k];
+      }
+    });
+    const normal = made.map((m, v) => {
+      const k = m.side * 3;
+      const sum = Math.hypot(sums[k], sums[k + 1], sums[k + 2]);
+      return sum > 1e-9 ? normalize(add([sums[k] / sum, sums[k + 1] / sum, sums[k + 2] / sum], bent[v])) : bent[v];
+    });
+    return { flat, at, bent, even, placeOf, normal };
+  };
+
+  /* A vertex's record from its shape: an original one's skin moved with its place, a new one hung on its corners' joints. */
+  const recordOf = (v, geometry, shape) => {
+    const m = made[v];
+    const face = faces[m.f];
+    const corner = (s) => geometry.vertices[face.corners[s]];
+    const here = shape.placeOf(v);
+    if (m.which !== undefined) {
+      const original = corner(m.which);
+      if (!face.round) return original;
+      const move = sub(here, shape.at[v]);
+      return {
+        ...original,
+        influences: original.influences.map((f) => ({ ...f, point: add(f.point, applyT(frames[f.joint].r, move)).map(whole) })),
+        normal: unit(applyT(frames[original.normalJoint].r, shape.normal[v])),
+      };
+    }
+    /* A flat face's new vertex takes the normal of the corner it lies nearest. */
+    const own = (s) => ({ joint: corner(s).normalJoint, local: corner(s).normal });
+    const weights = m.edge !== undefined ? [0, 1, 2].map((s) => (s === m.lo ? 1 - m.t : s === m.hi ? m.t : 0)) : m.weights;
+    const terms = weights.flatMap((weight, s) => (weight > 0 ? [{ vertex: corner(s), weight }] : []));
+    if (!face.round) return blended(frames, terms, NO_BULGE, own(weights.indexOf(Math.max(...weights))), m.uv);
+    return blended(frames, terms, sub(here, shape.flat[v]), { bind: shape.normal[v] }, m.uv);
+  };
+
+  /* The mesh as loaded. */
+  const loaded = { vertices: core.vertices, position: surface.position, normal: surface.normal, cusp: surface.cusp, along: surface.along, facing: surface.facing };
+  const base = shapeOf(loaded, faces.map((_, f) => f));
+  const vertices = made.map((_, v) => recordOf(v, loaded, base));
+  const indices = triangles.flat(2);
+
+  /*
+   * Each shape of each group: the faces its moved corners touch shaped again, the surface made even
+   * again, and every vertex that comes out otherwise made again.
+   */
   const forms = vertices.map(() => null);
   const groups = (mesh.shapes ?? []).map((group, g) => {
     const shapes = group.shapes.map((_, s) => {
@@ -200,18 +314,21 @@ export function roundMesh(mesh, skeleton, steps = STEPS) {
       });
       if (moved.every((v, i) => v === core.vertices[i] || (same(v.normal, core.vertices[i].normal) && v.influences.every((f, k) => same(f.point, core.vertices[i].influences[k].point))))) return vertices;
       const geometry = { vertices: moved, ...surface.reshape(moved) };
-      const out = vertices.slice();
-      surface.faces.forEach((face, f) => {
-        const changed = face.corners.some((c, s) => moved[c] !== core.vertices[c] || !same(geometry.position[c], surface.position[c]) || !same(geometry.normal(f, s), surface.normal(f, s)));
-        if (!changed) return;
-        let k = 0;
-        emit(f, geometry, (_, make) => {
-          const index = slots[f][k++];
-          out[index] = make();
-          return index;
-        });
+      const changed = faces.map((face, f) =>
+        face.corners.some(
+          (c, s) =>
+            moved[c] !== core.vertices[c] ||
+            !same(geometry.position[c], surface.position[c]) ||
+            !same(geometry.normal(f, s), surface.normal(f, s)) ||
+            [1, 2].some((k) => !same(geometry.along(f, s, (s + k) % 3), surface.along(f, s, (s + k) % 3))),
+        ),
+      );
+      const shape = shapeOf(geometry, faces.flatMap((_, f) => (changed[f] ? [f] : [])), base);
+      return vertices.map((record, v) => {
+        const m = made[v];
+        const unmoved = [0, 1, 2].every((k) => shape.even[m.place * 3 + k] === base.even[m.place * 3 + k]) && same(shape.normal[v], base.normal[v]);
+        return !changed[m.f] && unmoved ? record : recordOf(v, geometry, shape);
       });
-      return out;
     });
     const formOf = (v, s) => ({ points: shapes[s][v].influences.map((f) => f.point), normal: shapes[s][v].normal });
     vertices.forEach((_, v) => {

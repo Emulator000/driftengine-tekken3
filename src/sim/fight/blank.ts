@@ -4,6 +4,7 @@
  * starts from it (`fight.ts`).
  */
 import { newMusic } from '../sound/music.ts';
+import { newLook } from './look.ts';
 import type { BallState, FightState, Fighter, ForceState } from './state.ts';
 
 /** A fighter's record, blank. */
@@ -820,6 +821,7 @@ export function blankFightState(): FightState {
         pull: new Array<number>(3).fill(0),
         colour: new Array<number>(3).fill(0),
       },
+      looks: [newLook(), newLook()],
       sparks: {
         slots: Array.from({ length: 3 }, () => ({
           frame: 0,
@@ -927,7 +929,7 @@ export function blankFightState(): FightState {
         survivalWins: 0,
         teams: Array.from({ length: 2 }, () => ({ members: new Array<number>(8).fill(0), current: 0, next: 0, chosen: 0, kick: 0, size: 0 })),
         ball: { replaysShown: 0, replaysWanted: 0, server: 0, kind: 0 },
-        force: { score: 0, kills: 0, side: 0, newRecord: 0, flags: 0, bosses: new Array<number>(4).fill(0x58) },
+        force: { score: 0, kills: 0, side: 0, newRecord: 0, flags: 0, bosses: new Array<number>(4).fill(0xfc) },
       },
       input: {
         fresh: new Array<number>(2).fill(0),

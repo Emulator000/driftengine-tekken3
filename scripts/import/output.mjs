@@ -1,12 +1,14 @@
 /**
  * Where the importer writes: each file rewritten in place, so a running dev server keeps serving
- * the directory, and at the end every file under the root that this run did not write removed.
+ * the directory, and at the end every file under the root that this run did not write removed,
+ * but for the remaster's folder (`npm run remaster` makes it, from what the importer made).
  */
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 export function createOutput(root) {
   const written = new Set();
+  const remaster = path.join(root, 'remaster');
   const put = (relative, data) => {
     const target = path.join(root, relative);
     mkdirSync(path.dirname(target), { recursive: true });
@@ -26,7 +28,7 @@ export function createOutput(root) {
       put('manifest.json', JSON.stringify(manifest, null, 2));
       for (const entry of readdirSync(root, { recursive: true, withFileTypes: true })) {
         const file = path.join(entry.parentPath, entry.name);
-        if (entry.isFile() && !written.has(file)) rmSync(file);
+        if (entry.isFile() && !written.has(file) && !file.startsWith(remaster + path.sep)) rmSync(file);
       }
     },
   };

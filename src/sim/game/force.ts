@@ -7,6 +7,7 @@
  */
 import type { FightTables } from '../fight/match.ts';
 import { bossCode, SOLDIERS, soldierCode } from '../fight/force-stage.ts';
+import { NO_CHOICE } from './menu.ts';
 import { drBEarned } from './records.ts';
 import type { GameState } from './state.ts';
 
@@ -18,8 +19,8 @@ const DOCTOR_B = 0x13 * 4;
 const STANDING_BY = SOLDIERS * 4;
 /** The run's flags: Dr. B earned before it began. */
 const DR_B_EARNED = 0x10;
-/** No boss met on a stage yet. */
-const NO_BOSS = 0x58;
+/** No boss met on a stage yet (no choice's code, past an added character's). */
+const NO_BOSS = NO_CHOICE;
 /** The four buttons, and the shoulders that may be the target switch (L1, L2, R1, R2; L2 if none). */
 const BUTTONS = 0xf0;
 const SHOULDERS = [4, 1, 8, 2] as const;

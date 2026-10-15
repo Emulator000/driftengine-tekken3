@@ -15,7 +15,7 @@ import { FightStep, versusResult } from '../src/sim/game/fight-scene.ts';
 import { Game } from '../src/sim/game/game.ts';
 import { MenuMode, startMode } from '../src/sim/game/menu.ts';
 import { blankGameState, Scene } from '../src/sim/game/state.ts';
-import { VsSideState } from '../src/sim/game/vs-select.ts';
+import { NO_CHOICE, VsSideState } from '../src/sim/game/vs-select.ts';
 
 const assets = path.join(path.dirname(fileURLToPath(import.meta.url)), '../public/assets');
 const imported = existsSync(path.join(assets, 'manifest.json'));
@@ -83,7 +83,7 @@ test('select takes a choice back while the handicap is set', { skip }, async () 
   press(game, 0x100, 0);
   assert.equal(side.state, VsSideState.CHOOSING);
   assert.equal(side.count, 0);
-  assert.equal(side.chosen[0], 0x58, 'no choice');
+  assert.equal(side.chosen[0], NO_CHOICE, 'no choice');
 });
 
 test('a versus match\'s end counts its wins or its draw, and both choose again', { skip }, async () => {

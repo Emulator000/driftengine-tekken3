@@ -15,10 +15,16 @@ import { handPart, wingsPart } from '../../sim/fight/hands.ts';
 import type { FightData, FightState, Fighter as FighterState } from '../../sim/fight/state.ts';
 import { Fighter, readFighterMesh, type JointTransform } from './fighter/fighter.ts';
 import { HIPS } from './fighter/garment.ts';
+import { HEAD as HEAD_JOINT, HeadEase } from './fighter/head-ease.ts';
 import { FIRST_ACCESSORY } from '../../sim/fight/accessories.ts';
 import { Ground } from './stage/ground.ts';
+import { floorLookOf, floorTint, type RedrawnFloor } from './stage/floor-look.ts';
+import { Grass, type Caster } from './stage/grass.ts';
+import { Puddles } from './stage/puddles.ts';
+import { lookOfStage, pixelsOf } from './stage/looks.ts';
+import { Backdrop, type Ridge } from './stage/backdrop.ts';
 import { createStage, stageAtlasSize, type Stage } from './stage/stage.ts';
-import { ACCESSORIES, FEET, layGround, layScenery, liftOnto, newGround, newHeldScenery, newScenery } from './layout.ts';
+import { ACCESSORIES, FEET, GROUND_TILE, layGround, layScenery, liftOnto, newGround, newHeldScenery, newScenery } from './layout.ts';
 import { Effects } from './effects/effects.ts';
 import { BallView } from './ball.ts';
 import { Beach, BEACH_STAGE, beachClear } from './stage/beach.ts';
@@ -35,19 +41,39 @@ import { stageCodes } from '../../sim/fight/force-stage.ts';
  * are the enlarged ones, drawn smoothly (filtered, with mipmaps), or the originals, each texel sharp.
  */
 export interface DrawingFiles {
-  fighter(pack: number): Promise<{ mesh: ArrayBuffer; texture: ImageBitmap }>;
+  fighter(pack: number): Promise<{ mesh: ArrayBuffer; texture: ImageBitmap; maps?: MaterialMaps | null }>;
   /**
    * A stage's scenery, ground and atlas, and Tekken Ball's beach's panorama or a Tekken Force
    * stage's backdrop with them; and the arcade's scenery and its atlas, drawn in place of the
    * disc's, when the arcade has the stage and it is wanted.
    */
-  stage(stage: number): Promise<{ mesh: ArrayBuffer; ground: ArrayBuffer; texture: ImageBitmap; backdrop?: ImageBitmap; arcade?: ArcadeStageFiles }>;
+  stage(stage: number): Promise<{ mesh: ArrayBuffer; ground: ArrayBuffer; texture: ImageBitmap; maps?: MaterialMaps | null; backdrop?: ImageBitmap; arcade?: ArcadeStageFiles; floor?: FloorFiles; sky?: SkyFiles }>;
   /** One of the original pictures by name (Tekken Force's item and its shadow). */
   picture?(name: string): Promise<ImageBitmap>;
   readonly smooth: boolean;
   /** Whether a board's model's cloth is kept clear of the legs (its garment and the accessories it hangs from the hips). */
   readonly cloth: boolean;
+  /** Whether the fight is remastered: drawn with the engine's lighting, the stage's own sky and light, and the assets made on this machine. */
+  readonly remaster?: boolean;
 }
+
+/** An atlas's normal and ORM maps, and its heights, made on this machine for the remaster. */
+export interface MaterialMaps {
+  readonly normal: ImageBitmap | null;
+  readonly orm: ImageBitmap | null;
+  readonly height?: ImageBitmap | null;
+}
+
+/** A stage's sky made for the remaster, and its panorama's ridge. */
+export interface SkyFiles {
+  readonly picture: ImageBitmap;
+  /** The clouds over it, their colour and how much they cover, drawn turning with the wind. */
+  readonly clouds: ImageBitmap | null;
+  readonly ridge: Ridge | null;
+}
+
+/** A floor redrawn for the remaster: its atlas, its maps and where the ground's regions went. */
+export type FloorFiles = RedrawnFloor;
 
 /** An arcade stage's background: its picture (its panorama's tiles over a few white rows) and how the stage lays it out. */
 export interface ArcadePanoramaFiles {
@@ -59,6 +85,7 @@ export interface ArcadePanoramaFiles {
 export interface ArcadeStageFiles {
   readonly mesh: ArrayBuffer;
   readonly texture: ImageBitmap;
+  readonly maps?: MaterialMaps | null;
   readonly panorama?: ArcadePanoramaFiles;
   readonly objects?: readonly ArcadePieceFiles[];
 }
@@ -79,7 +106,14 @@ interface StageDrawing {
   readonly force: ForceBackdrop | null;
   readonly background: ArcadeBackground | null;
   readonly objects: readonly { readonly stage: Stage; readonly motion: ArcadePieceFiles; readonly placed: Float32Array[] }[];
+  readonly grass: Grass | null;
+  readonly puddles: Puddles | null;
+  readonly sky: Backdrop | null;
 }
+
+/** Remastered, how bright the lit scenery is against its own colours where the sun misses it, and how much brighter where it falls full on it. */
+const SHADE = 0.78;
+const SUNLIT = 0.75;
 
 /**
  * An arcade stage's scenery grid; how far the fighters' midpoint (mm) and the scenery's turn
@@ -124,6 +158,13 @@ const SHADOW_STRENGTH = 1;
  */
 const OFFSET = 0.05;
 const SHEAR = 0.03;
+/** How far the reflection probe's camera sees (the engine's 200 metres, less a margin): its sky is drawn within it. */
+const PROBE_SIGHT = 180;
+/** Remastered, the stage each renderer's reflection probe holds: one probe a renderer, whichever view baked it. */
+const PROBE_HOLDS = new WeakMap<RendererApi, number>();
+/** Remastered, the frames a stage is drawn before its probe is baked; and the air between the arena and a sky's far world. */
+const PROBE_WAIT = 4;
+const HAZE = { density: 0.00017, falloff: 0.0006, baseY: -40 } as const;
 /** How far around the fighters the shadow map reaches (metres): a wider square, softer edges. */
 const SHADOW_RADIUS = 4;
 
@@ -186,11 +227,19 @@ export class FightView {
   private readonly sceneryModel = new Float32Array(16);
   private readonly fighterModel = new Float32Array(16);
   private readonly casting: Fighter[] = [];
+  /** Per side, its head's easing (`head-ease.ts`). */
+  private readonly heads: HeadEase[] = [];
   /** Per fighter cast, how far it is lifted onto the floor (metres), and its shadow's model. */
   private readonly lifts: number[] = [];
   private readonly low = { body: 0, feet: 0 };
   private readonly casterModels: Float32Array[] = [];
   private readonly effects: Effects;
+  /** Remastered, where the camera stood and looked last frame, to tell a cut from a move. */
+  private readonly lastEye = new Float64Array(3);
+  private readonly lastForward = new Float64Array(3);
+  private seen = false;
+  /** Remastered, the frames drawn of a stage the probe does not hold yet. */
+  private probeWait = 0;
   /** The fighters' packs and stage `prepare` found ready, and those it waits on the compiles of. */
   private prepared = '';
   private preparing = '';
@@ -204,6 +253,11 @@ export class FightView {
     this.camera.far = 400;
     this.env.lightViewProj = this.lightMatrix;
     this.env.shadowStrength = 0;
+    if (files.remaster === true) {
+      /* The sky's light a little bluer, as bright as the game's; the far world (sky, sea, mountains) in sight. */
+      ([0.13, 0.145, 0.17] as const).forEach((v, k) => (this.env.ambient[k] = v));
+      this.camera.far = 9000;
+    }
     const up = Math.max(0, this.env.directionalDir[1]!);
     this.groundTint = [0, 1, 2].map((c) => 1 / (this.env.ambient[c]! + this.env.directionalColor[c]! * up)) as [number, number, number];
     this.white = renderer.createSurfaceTexture(new ImageData(new Uint8ClampedArray([255, 255, 255, 255]), 1, 1), { colorSpace: 'linear', filter: 'nearest', mipmap: false, wrap: 'clamp' });
@@ -226,11 +280,12 @@ export class FightView {
     if (found !== undefined) return found.fighter;
     const next: { fighter: Fighter | null } = { fighter: null };
     models.set(pack, next);
-    void this.files.fighter(pack).then(({ mesh, texture }) => {
+    void this.files.fighter(pack).then(({ mesh, texture, maps }) => {
       const handle = this.renderer.createSurfaceTexture(texture, this.textureOptions(false));
+      const look = this.files.remaster === true ? this.mapTextures(maps ?? null) : null;
       /* A board's model's accessories hung from the hips are kept clear of the legs, as its garment is. */
       const tails = this.files.cloth ? (this.data.models[pack]?.accessories ?? []).flatMap((a, k) => (a !== null && a.parent === HIPS ? [FIRST_ACCESSORY + k] : [])) : null;
-      const fighter = new Fighter(this.renderer, readFighterMesh(mesh), handle, this.white, tails);
+      const fighter = new Fighter(this.renderer, readFighterMesh(mesh), handle, this.white, tails, look);
       if (models.get(pack) === next) next.fighter = fighter;
       else fighter.dispose();
     });
@@ -253,27 +308,53 @@ export class FightView {
   /**
    * How a fighter's or a stage's texture is sampled: smoothly from the enlarged atlas, or each
    * original texel sharp. A stage has no mipmaps: its backdrop is seen far off, where the smaller
-   * levels would blend its regions across their gutters into seams.
+   * levels would blend its regions across their gutters into seams. `remastered`: whether it is the
+   * atlas the remaster made (with its maps), whose gutters are wide enough at four times for them.
    */
-  private textureOptions(stage: boolean): { colorSpace: 'srgb'; filter: 'linear' | 'nearest'; mipmap: boolean; wrap: 'clamp' } {
+  private textureOptions(stage: boolean, remastered = this.files.remaster === true): { colorSpace: 'srgb'; filter: 'linear' | 'nearest'; mipmap: boolean; wrap: 'clamp'; anisotropy?: number } {
+    if (remastered) return { colorSpace: 'srgb', filter: 'linear', mipmap: true, wrap: 'clamp', anisotropy: 16 };
     return this.files.smooth ? { colorSpace: 'srgb', filter: 'linear', mipmap: !stage, wrap: 'clamp' } : { colorSpace: 'srgb', filter: 'nearest', mipmap: false, wrap: 'clamp' };
+  }
+
+  /** An atlas's maps on the device, sampled as data. */
+  private mapTextures(maps: MaterialMaps | null): { normal: SurfaceTextureHandle | null; orm: SurfaceTextureHandle | null } {
+    const options = { colorSpace: 'linear', filter: 'linear', mipmap: true, wrap: 'clamp' } as const;
+    return { normal: maps?.normal == null ? null : this.renderer.createSurfaceTexture(maps.normal, options), orm: maps?.orm == null ? null : this.renderer.createSurfaceTexture(maps.orm, options) };
   }
 
   /** The stage's scenery and ground, loaded the first time it is asked for (null until then). */
   private stageFor(id: number): StageDrawing | null {
     if (!this.stages.has(id)) {
       this.stages.set(id, null);
-      void this.files.stage(id).then(({ mesh, ground, texture, backdrop, arcade }) => {
-        const handle = this.renderer.createSurfaceTexture(texture, this.textureOptions(true));
+      void this.files.stage(id).then(({ mesh, ground, texture, maps: ownMaps, backdrop, arcade, floor, sky }) => {
+        const remaster = this.files.remaster === true;
+        const handle = this.renderer.createSurfaceTexture(texture, this.textureOptions(true, remaster && ownMaps != null));
         /* The ground's cells are in the disc's atlas, whichever scenery is drawn. */
         const atlas = stageAtlasSize(mesh);
-        const stage = arcade === undefined ? createStage(this.renderer, mesh, handle) : createStage(this.renderer, arcade.mesh, this.renderer.createSurfaceTexture(arcade.texture, this.textureOptions(true)));
+        const stageLook = lookOfStage(id);
+        /* The scenery's maps: the arcade board's where its scenery is drawn, the disc's otherwise. */
+        const sceneryMaps = (arcade === undefined ? ownMaps : arcade.maps) ?? null;
+        const heights = remaster && stageLook.relief > 0 && sceneryMaps?.height != null ? pixelsOf(sceneryMaps.height) : null;
+        const look = remaster ? { light: { dir: stageLook.sun, sun: stageLook.sunColour, sky: stageLook.ambient, ground: stageLook.ambientGround, shade: SHADE, sunlit: SUNLIT }, ...this.mapTextures(sceneryMaps), height: heights, relief: stageLook.relief, ragged: stageLook.ragged === true } : null;
+        const stage = arcade === undefined ? createStage(this.renderer, mesh, handle, look) : createStage(this.renderer, arcade.mesh, this.renderer.createSurfaceTexture(arcade.texture, this.textureOptions(true, remaster && arcade.maps != null)), look);
+        const floorLook = remaster ? floorLookOf(this.renderer, texture, atlas, floor, stageLook) : null;
+        const tint = remaster ? floorTint(stageLook) : this.groundTint;
+        const laid = new Ground(this.renderer, ground, atlas.width, atlas.height, handle, tint, floorLook);
+        let grass: Grass | null = null;
+        if (remaster) {
+          const canvas = new OffscreenCanvas(texture.width, texture.height);
+          const context = canvas.getContext('2d')!;
+          context.drawImage(texture, 0, 0);
+          grass = new Grass(this.renderer, context.getImageData(0, 0, texture.width, texture.height), laid.sourceUvs);
+        }
         const force = backdrop !== undefined && FORCE_STAGES.first <= id && id <= FORCE_STAGES.last;
         const beach = backdrop === undefined || force ? null : new Beach(this.renderer, backdrop, this.white);
         const forceBackdrop = force ? new ForceBackdrop(this.renderer, backdrop) : null;
-        const background = arcade?.panorama === undefined ? null : new ArcadeBackground(this.renderer, arcade.panorama);
-        const objects = (arcade?.objects ?? []).map((o) => ({ stage: createStage(this.renderer, o.mesh, this.renderer.createSurfaceTexture(o.texture, this.textureOptions(true))), motion: o, placed: [] }));
-        this.stages.set(id, { stage, ground: new Ground(this.renderer, ground, atlas.width, atlas.height, handle, this.groundTint), beach, force: forceBackdrop, background, objects });
+        const background = arcade?.panorama === undefined ? null : new ArcadeBackground(this.renderer, arcade.panorama, remaster);
+        const objects = (arcade?.objects ?? []).map((o) => ({ stage: createStage(this.renderer, o.mesh, this.renderer.createSurfaceTexture(o.texture, this.textureOptions(true, remaster && arcade?.maps != null))), motion: o, placed: [] }));
+        const built = sky === undefined ? null : new Backdrop(this.renderer, sky.picture, sky.clouds, sky.ridge, stageLook.ownMountains === true ? null : (arcade?.panorama ?? null), this.white, id, stageLook);
+        const puddles = remaster && stageLook.puddles !== undefined ? new Puddles(this.renderer, stageLook.puddles, id) : null;
+        this.stages.set(id, { stage, ground: laid, beach, force: forceBackdrop, background, objects, grass, puddles, sky: built });
       });
     }
     return this.stages.get(id) ?? null;
@@ -314,7 +395,9 @@ export class FightView {
     for (const fighter of fighters) this.renderer.prepareMesh(fighter!.handle, fighter!.material);
     for (const cell of drawn.stage.cells) for (const piece of cell) this.renderer.prepareMesh(piece.mesh, piece.oneSided ? drawn.stage.oneSidedMaterial : drawn.stage.material, { translucent: true });
     for (const object of drawn.objects) for (const cell of object.stage.cells) for (const piece of cell) this.renderer.prepareMesh(piece.mesh, object.stage.material, { translucent: true });
-    drawn.ground.prepare();
+    /* A sunk floor's grids made, and their pipelines compiled, before the fight shows. */
+    drawn.ground.prepare(state.mode === TEKKEN_FORCE ? undefined : GROUND_TILE);
+    if (drawn.puddles !== null) this.renderer.prepareMesh(drawn.puddles.mesh, drawn.puddles.material);
     void this.renderer.ready().then(() => {
       if (this.preparing === key) this.prepared = key;
     });
@@ -322,6 +405,20 @@ export class FightView {
   }
 
   /** A fighter's joints from its hung parts: each world rotation (4.12) and position (mm). */
+  /** The joints that hang from the head, however far down. */
+  private belowHead(f: FighterState): number[] {
+    const joints = f.skeleton.joints;
+    const below: number[] = [];
+    joints.forEach((_, j) => {
+      for (let p = joints[j]!.parent; p !== null && p >= 0; p = joints[p]!.parent) {
+        if (p !== HEAD_JOINT) continue;
+        below.push(j);
+        break;
+      }
+    });
+    return below;
+  }
+
   private jointsOf(f: FighterState): (JointTransform | undefined)[] {
     const joints: (JointTransform | undefined)[] = [];
     f.parts.forEach((part, i) => {
@@ -345,7 +442,8 @@ export class FightView {
       renderer.setMaterial(oneSided ? drawn.stage.oneSidedMaterial : drawn.stage.material);
       drawn.stage.cells.forEach((cell, i) => {
         if (!(0 < this.scenery.cells[i]!)) return;
-        for (const piece of cell) if (piece.oneSided === oneSided && piece.cut === cut) renderer.drawTranslucentMesh(piece.mesh, model, 1, { lit: false, fog: false, depthLayer: piece.layer });
+        /* The sky over the stage a picture, unlit as the game draws it. */
+        for (const piece of cell) if (piece.oneSided === oneSided && piece.cut === cut) renderer.drawTranslucentMesh(piece.mesh, model, 1, { lit: drawn.stage.lit && piece.far !== true, fog: false, depthLayer: piece.layer });
       });
     }
     for (const object of drawn.objects) {
@@ -417,6 +515,58 @@ export class FightView {
     fighter.light(glow(0), glow(1), glow(2));
   }
 
+  /**
+   * Remastered, a new shot where the camera jumped since the last frame (more than a metre, or
+   * turned more than 20 degrees), so a temporal resolve does not blend the last shot into it.
+   */
+  private cutIfJumped(): void {
+    const eye = this.camera.position as unknown as ArrayLike<number>;
+    const forward = this.camera.forward as unknown as ArrayLike<number>;
+    const moved = Math.hypot(eye[0]! - this.lastEye[0]!, eye[1]! - this.lastEye[1]!, eye[2]! - this.lastEye[2]!);
+    const turned = forward[0]! * this.lastForward[0]! + forward[1]! * this.lastForward[1]! + forward[2]! * this.lastForward[2]!;
+    if (this.seen && (moved > 1 || turned < Math.cos((20 * Math.PI) / 180))) this.renderer.cameraCut();
+    this.seen = true;
+    for (let k = 0; k < 3; k += 1) {
+      this.lastEye[k] = eye[k]!;
+      this.lastForward[k] = forward[k]!;
+    }
+  }
+
+  /**
+   * Remastered, the stage seen from the middle of the fight, a metre up, into the reflection probe a
+   * wet floor or its puddles mirror: its sky, mountains, scenery (all of it, not what the game's camera keeps) and
+   * floor; a few frames after the stage is laid, and again whenever the probe holds another stage.
+   */
+  private bakeProbe(state: FightState): void {
+    const drawn = this.stages.get(state.stage);
+    const look = lookOfStage(state.stage);
+    if (drawn == null || PROBE_HOLDS.get(this.renderer) === state.stage || (look.floor.reflectivity === 0 && look.puddles === undefined)) {
+      this.probeWait = 0;
+      return;
+    }
+    this.probeWait += 1;
+    if (this.probeWait < PROBE_WAIT) return;
+    this.probeWait = 0;
+    PROBE_HOLDS.set(this.renderer, state.stage);
+    const f = state.fighters.slice(0, 2);
+    const x = f.reduce((sum, g) => sum + g.skeleton.base.translation[0]!, 0) / f.length / 1000;
+    const z = -f.reduce((sum, g) => sum + g.skeleton.base.translation[2]!, 0) / f.length / 1000;
+    const cells = this.scenery.cells.slice();
+    const renderer = this.renderer;
+    renderer.bakeReflectionProbe([x, 1, z], [0, 0, 0], (camera) => {
+      renderer.bindMeshPass(camera, this.env);
+      drawn.sky?.draw(camera, state.frameCount / 60, lookOfStage(state.stage).wind, this.scenery.yaw, PROBE_SIGHT);
+      this.scenery.cells.fill(1);
+      this.drawScenery(state, drawn, false);
+      renderer.setMaterial(drawn.ground.material);
+      for (const mesh of [drawn.ground.mesh, drawn.ground.farMesh]) if (mesh !== null) renderer.drawMesh(mesh, IDENTITY);
+      drawn.ground.drawRelief();
+      renderer.setMaterial(null);
+      this.drawScenery(state, drawn, true);
+      this.scenery.cells.set(cells);
+    }, { irradiance: false });
+  }
+
   /** The fighters' shadow map this field, around their midpoint (in Tekken Force the midpoint of those drawn). */
   private castShadows(state: FightState, drawn: readonly FighterState[]): void {
     const casting = this.casting;
@@ -480,6 +630,7 @@ export class FightView {
     const widening = Math.max(1, aspect / (4 / 3));
     this.adoptCamera(state, aspect);
     if (freeView.active) freeView.apply(this.camera, 0.6 * aspect);
+    if (this.files.remaster === true) this.cutIfJumped();
     this.casting.length = 0;
     const posed: FighterState[] = [];
     const sides = this.sidesOf(state);
@@ -499,13 +650,32 @@ export class FightView {
       for (let hand = 0; hand < 2; hand += 1) fighter.shape(handPart(f.roster, hand), f.hands.drawn[hand]!);
       fighter.shape(wingsPart(f.roster), f.trueOgre.wingDrawn);
       fighter.face(f.eyesShut !== 0 ? 1 : 0);
-      fighter.pose(this.jointsOf(f));
+      const joints = this.jointsOf(f);
+      /* The head eased where the game switches its turn toward the opponent on or off. */
+      (this.heads[i] ??= new HeadEase()).apply(joints, this.belowHead(f), state.looks[f.movesetSlot]!.turned, state.frameCount);
+      fighter.pose(joints);
       this.light(state, fighter, f);
       fighter.lowest(FEET, ACCESSORIES, this.low);
       this.lifts[this.casting.length] = liftOnto(this.low);
       this.casting.push(fighter);
     }
+    if (this.files.remaster === true) {
+      /* Remastered, the stage's own light. */
+      const look = lookOfStage(state.stage);
+      const l = Math.hypot(...look.sun);
+      look.sun.forEach((v, k) => (this.env.directionalDir[k] = v / l));
+      look.sunColour.forEach((v, k) => (this.env.directionalColor[k] = v));
+      look.ambient.forEach((v, k) => (this.env.ambient[k] = v));
+      look.ambientGround.forEach((v, k) => (this.env.ambientGround![k] = v));
+      /* The air between the arena and a sky's far world, in its colour at the horizon; none without one. */
+      const haze = this.stages.get(state.stage)?.sky?.haze;
+      if (haze !== undefined) for (let k = 0; k < 3; k += 1) this.env.fogColor[k] = haze[k]!;
+      this.env.fogDensity = haze === undefined ? 0 : HAZE.density;
+      this.env.fogHeightFalloff = HAZE.falloff;
+      this.env.fogBaseY = HAZE.baseY;
+    }
     this.castShadows(state, posed);
+    if (this.files.remaster === true) this.bakeProbe(state);
     if (!stageAlone && only.effects) this.effects.prepare(state, this.data, this.env, this.view, this.camera.position);
     else this.env.lightCount = 0;
     const sky = state.stage === SKY_STAGE && state.match.trueOgres === 0;
@@ -519,7 +689,8 @@ export class FightView {
     /* The free camera sees every cell: the game's culling is its own camera's. */
     if (scenery && freeView.active) this.scenery.cells.fill(1);
     /* An arcade stage's background, behind everything drawn after it. */
-    if (drawn?.background != null && only.scenery && state.match.trueOgres === 0) drawn.background.draw(lookOf(this.camera), aspect, this.scenery.yaw, this.floorEnd(), sky);
+    if (drawn?.sky != null && only.scenery && state.match.trueOgres === 0) drawn.sky.draw(this.camera, state.frameCount / 60, lookOfStage(state.stage).wind, this.scenery.yaw);
+    else if (drawn?.background != null && only.scenery && state.match.trueOgres === 0) drawn.background.draw(lookOf(this.camera), aspect, this.scenery.yaw, this.floorEnd(), sky);
     const ball = state.mode === TEKKEN_BALL && !stageAlone;
     /* Tekken Force's backdrop is the farthest thing drawn: everything after it lies over it. */
     if (drawn?.force != null && state.mode === TEKKEN_FORCE) drawn.force.draw(state, this.data, aspect);
@@ -538,11 +709,41 @@ export class FightView {
       layGround(state, this.data, this.arena, layout, { widening }, this.ground, drawn.stage.grid === ARCADE_GRID);
       const edge = drawn.stage.grid === ARCADE_GRID ? EDGED.get(state.stage) : undefined;
       drawn.ground.update(this.ground, edge === undefined ? null : { x: this.scenery.x, z: this.scenery.z, yaw: this.scenery.yaw, half: edge * 8 });
-      if (drawn.ground.mesh !== null || drawn.ground.farMesh !== null) {
-        renderer.setMaterial(drawn.ground.material);
-        if (drawn.ground.mesh !== null) renderer.drawMesh(drawn.ground.mesh, IDENTITY);
-        if (drawn.ground.farMesh !== null) renderer.drawMesh(drawn.ground.farMesh, IDENTITY);
+      renderer.setMaterial(drawn.ground.material);
+      drawn.ground.drawRelief();
+      for (const mesh of [drawn.ground.mesh, drawn.ground.farMesh]) if (mesh !== null) renderer.drawMesh(mesh, IDENTITY);
+      renderer.setMaterial(null);
+      if (drawn.puddles !== null) {
+        renderer.setMaterial(drawn.puddles.material);
+        renderer.drawMesh(drawn.puddles.mesh, IDENTITY);
         renderer.setMaterial(null);
+      }
+      if (drawn.grass !== null) {
+        drawn.grass.plant(this.ground);
+        /* The fighters press the grass where a joint of theirs is near the floor: their feet, and all of them when they are down. */
+        for (const f of posed) for (const joint of f.skeleton.joints) {
+          const t = joint.world.translation;
+          if (-t[1]! / 1000 < 0.25) drawn.grass.press(t[0]! / 1000, -t[2]! / 1000);
+        }
+        /* Their bones' shadows on the floor, cast along the light, darken the grass under them. */
+        const [lx, ly, lz] = this.env.directionalDir as unknown as [number, number, number];
+        const casters: Caster[] = [];
+        const onFloor = (t: ArrayLike<number>): [number, number] => {
+          const y = Math.max(0, -t[1]! / 1000);
+          return [t[0]! / 1000 - (lx * y) / Math.max(0.05, ly), -t[2]! / 1000 - (lz * y) / Math.max(0.05, ly)];
+        };
+        for (const f of posed) {
+          for (const joint of f.skeleton.joints) {
+            if (joint.parent === null || joint.parent < 0) continue;
+            const parent = f.skeleton.joints[joint.parent];
+            if (parent === undefined) continue;
+            const [x0, z0] = onFloor(parent.world.translation);
+            const [x1, z1] = onFloor(joint.world.translation);
+            casters.push({ x0, z0, x1, z1, radius: 0.085 });
+          }
+        }
+        drawn.grass.shade(casters);
+        drawn.grass.draw(this.camera, this.env, state.frameCount / 60, lookOfStage(state.stage).wind);
       }
       if (drawn.beach !== null) {
         if (ball) drawn.beach.drawCourt(state, (this.data.ball.kinds[state.match.ball.kind] ?? this.data.ball.kinds[0]!).strip);
@@ -551,10 +752,16 @@ export class FightView {
     }
     /* The cut-out scenery, over the solid scenery and the floor: its soft edges blend with what lies behind it. */
     if (drawn !== null && layout != null && scenery) this.drawScenery(state, drawn, true);
-    behind?.();
+    /*
+     * What goes behind the fighters (the gauges, the names, the time), as the game layers it; but
+     * remastered, over the finished picture, after the frame's antialiasing over time, which would
+     * blend its last positions into its text.
+     */
+    const remastered = this.files.remaster === true;
+    if (!remastered) behind?.();
     this.casting.forEach((fighter, i) => {
       renderer.setMaterial(fighter.material);
-      renderer.drawMesh(fighter.handle, this.fighterMatrix(state, this.lifts[i]!));
+      renderer.drawMesh(fighter.handle, this.fighterMatrix(state, this.lifts[i]!), undefined, null, fighter.mover);
       renderer.setMaterial(null);
     });
     if (ball) {
@@ -565,6 +772,7 @@ export class FightView {
     if (!stageAlone && only.effects) this.effects.draw(this.camera, this.env, state.frameCount / 60);
     if (ball) this.ball?.drawBeams(state, aspect);
     renderer.endFrame();
+    if (remastered) behind?.();
     after?.();
   }
 }

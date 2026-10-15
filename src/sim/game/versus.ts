@@ -8,7 +8,7 @@
 import type { FightTables } from '../fight/match.ts';
 import type { SceneTables, VersusPlace } from '../data/scenes.ts';
 import { holdPicture } from './logo.ts';
-import { MenuMode } from './menu.ts';
+import { MenuMode, NO_CHOICE } from './menu.ts';
 import { print } from './printer.ts';
 import { lookOf } from './select.ts';
 import type { GameState, VersusRecord } from './state.ts';
@@ -110,8 +110,8 @@ function drawVersus(game: GameState): void {
 
 /** The icons' box: each icon's width with the line between, and its height. */
 const TEAM_BOX = { across: 0x21, h: 0x3e } as const;
-/** No character: an icon not yet shown. */
-const NO_CHARACTER = 0x58;
+/** No character: an icon not yet shown (no choice's code, past an added character's). */
+const NO_CHARACTER = NO_CHOICE;
 
 /**
  * A team's row on the versus screen: the members still to come after the one sent in (those

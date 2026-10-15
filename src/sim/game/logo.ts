@@ -36,6 +36,12 @@ const ATTRACT_SONG = 0;
 /** Start newly pressed on either pad. */
 export const startPressed = (game: GameState): boolean => ((game.world.input.fresh[0]! | game.world.input.fresh[1]!) & START) !== 0;
 
+/** On to the attract overlay's intro at once, the attract cycle put on the step that shows it (the next intro in turn). */
+export function goToIntro(game: GameState): void {
+  game.attract.step = ATTRACT_DEMO;
+  goToLogo(game, Scene.TITLE);
+}
+
 /** The picture held as last drawn (1) or let go (0). */
 export function holdPicture(game: GameState, held: number): void {
   game.held = held;

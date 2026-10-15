@@ -2,16 +2,17 @@
  * The versus select, drawn new on the original's design across the whole window: black under the
  * mode's two colours (bars at the title's ends, a floor rising to near white, and two columns of
  * light added beside the grid), the game's name in gold and the tournament's line scrolling
- * behind, the grid's characters in their frames as the original has their icons, each side's
- * cursor and tag, its slot, the bar of its costume under its name, versus's panel and each side's
- * handicap gauge, the printer's lines (kept to the original's screen, where its gauges and lines
- * slide in from beyond its edges), and the fade in.
+ * behind, the grid's characters in their frames as the original has their icons (with an added
+ * character eight a row, the columns of light moved out with it and its empty cells dark), each
+ * side's cursor and tag, its slot, the bar of its costume under its name, versus's panel and each
+ * side's handicap gauge, the printer's lines (kept to the original's screen, where its gauges and
+ * lines slide in from beyond its edges), and the fade in.
  */
 import type { SceneTables, VsSelectQuad } from '../../sim/data/scenes.ts';
 import { MenuMode } from '../../sim/game/menu.ts';
 import { printRuns } from '../../sim/game/printer.ts';
 import type { GameState, VsSelectSide } from '../../sim/game/state.ts';
-import { codeUnder, NO_CHOICE, slotOf, TAKEN, VsSideState } from '../../sim/game/vs-select.ts';
+import { cellOf, codeUnder, gridOf, NO_CHOICE, slotOf, TAKEN, VsSideState } from '../../sim/game/vs-select.ts';
 import { lightAcross, type LightLayer, type Rgb } from '../2d/light.ts';
 import type { TypeStyle } from '../2d/type.ts';
 import { DISPLAY } from '../2d/typefaces.ts';
@@ -29,6 +30,8 @@ const PARTNER_SET = 3;
 const CURSOR = { choosing: 1, chosen: 2, partner: 3, partnerChosen: 4 } as const;
 /** A tag over a cursor: its size and how far above the cell it sits. */
 const TAG = { w: 0x14, h: 0x10, above: 4 } as const;
+/** An empty cell: dark inside its frame, the frame at a quarter of a cell's. */
+const EMPTY = { inside: [0.03, 0.03, 0.05, 1], frame: 0x20 } as const;
 /** The costumes' bars under a name: its height, and the colours by costume. */
 const BAR = { h: 10, colours: ['#e03850', '#408088', '#e0a008', '#506070'] } as const;
 /** The game's name: its seven letters, a cell each, the strip's line, height and period. */
@@ -131,25 +134,31 @@ function drawBackdrop(game: GameState, scenes: SceneTables, art: ScreenLayer, li
     }
   }
   drawScrolls(art, t.tournament, vs.line, vs.strip);
-  /* The columns of light beside the grid, in the mode's second colour. */
+  /* The columns of light beside the grid, in the mode's second colour, each moved out by as much as the grid widened on its side. */
   const added = rgb(second);
+  const { shift } = gridOf(scenes);
   t.added.forEach((quad) => {
     const { x: x0, y: y0 } = quad.corners[0]!;
     const { x: x1, y: y1 } = quad.corners[3]!;
     const fullAtRight = quad.colours[1] === 0xffffffff;
-    lightAcross(light, 'add', x0, y0, x1 - x0, y1 - y0, added, fullAtRight);
+    lightAcross(light, 'add', x0 + (fullAtRight ? -shift : shift), y0, x1 - x0, y1 - y0, added, fullAtRight);
   });
 }
 
-/** The grid: each cell's character, or the empty icon where not earned; a cell whose character a choosing cursor's side has chosen already, darker. */
+/** The grid: each cell's character, or the empty icon where not earned, or an empty cell dark; a cell whose character a choosing cursor's side has chosen already, darker. */
 function drawGrid(game: GameState, scenes: SceneTables, art: ScreenLayer, smallIcons: ImageBitmap): void {
-  const t = scenes.vsSelect;
-  const under = game.vsSelect.sides.map((side) => (side.cursor === CURSOR.choosing ? { code: t.grid[side.column + side.row * 7]!.code, seen: codeUnder(game, scenes, side) } : { code: TAKEN, seen: TAKEN }));
+  const grid = gridOf(scenes);
+  const under = game.vsSelect.sides.map((side) => (side.cursor === CURSOR.choosing ? { code: cellOf(scenes, side)!.code, seen: codeUnder(game, scenes, side) } : { code: TAKEN, seen: TAKEN }));
   if (under[0]!.code === under[1]!.code && (under[0]!.seen !== TAKEN || under[1]!.seen !== TAKEN)) for (const u of under) u.code = TAKEN;
   const dimmed = under.map((u) => (u.seen === TAKEN ? u.code : TAKEN));
-  for (const cell of t.grid) {
-    const earned = (game.records.earnedRoster & (1 << (cell.code >> 2))) !== 0;
-    drawIcon(art, smallIcons, cell.x, cell.y, earned ? cell.code : TAKEN, dimmed.includes(cell.code));
+  const earned = (game.records.earnedRoster | grid.added) >>> 0;
+  for (const cell of grid.cells) {
+    if (cell.code === NO_CHOICE) {
+      art.fill(cell.x, cell.y, FRAME.w, FRAME.h, EMPTY.inside);
+      drawFrame(art, cell.x, cell.y, 0, EMPTY.frame);
+      continue;
+    }
+    drawIcon(art, smallIcons, cell.x, cell.y, (earned & (1 << (cell.code >> 2))) !== 0 ? cell.code : TAKEN, dimmed.includes(cell.code));
   }
 }
 
@@ -205,7 +214,7 @@ function drawCursors(game: GameState, scenes: SceneTables, text: ScreenLayer): v
   vs.sides.forEach((side, n) => {
     const look = cursorLook(game, scenes, side, n);
     if (look === null) return;
-    const cell = t.grid[side.column + side.row * 7]!;
+    const cell = cellOf(scenes, side)!;
     const level = look.pulsing ? triangle(game.world.vsyncSeen << 4) : 0x80;
     if (shared && vs.sides[(n + 1) & 1]!.cursor !== 0) text.clipAcross(cell.x + (n === 0 ? 0 : FRAME.w / 2), cell.x + (n === 0 ? FRAME.w / 2 : FRAME.w));
     drawFrame(text, cell.x, cell.y, look.set, Math.max(0x40, level));

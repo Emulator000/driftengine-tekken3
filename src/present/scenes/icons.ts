@@ -3,15 +3,15 @@
  * lines (an outer line, a stripe and an inner line, in one of four colour sets), or the frame alone,
  * as a grid's cell, a slot or a cursor.
  */
-import { NO_CHOICE, TAKEN } from '../../sim/game/vs-select.ts';
+import { TAKEN } from '../../sim/game/vs-select.ts';
 import type { ScreenLayer } from './screen.ts';
 
 /** A grid cell's frame and the icon set in it (the small icons' sheet: a column a roster id, then a taken cell's blue question mark and no choice's orange one). */
 export const FRAME = { w: 36, h: 64, left: 2, top: 3 } as const;
 export const ICON = { w: 0x20, h: 0x3a, empty: 23, none: 24 } as const;
 
-/** The small icons' column a code shows: its character's, no choice's orange question mark, or a taken cell's blue one. */
-export const iconColumn = (code: number): number => (code < NO_CHOICE ? code >> 2 : code === TAKEN ? ICON.empty : ICON.none);
+/** The small icons' column a code shows: its character's (the game's and an added one's, the columns before the empty one), a taken cell's blue question mark, or else the orange one. */
+export const iconColumn = (code: number): number => (code >= 0 && code >> 2 < ICON.empty ? code >> 2 : code === TAKEN ? ICON.empty : ICON.none);
 /** The frame's colour sets: its outer line, its stripe, its inner line (the first the grid's and the slots', the others the cursors'). */
 export const SETS: readonly (readonly [string, string, string])[] = [
   ['#000000', '#f888c0', '#e0e0e0'],

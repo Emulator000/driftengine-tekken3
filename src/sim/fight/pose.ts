@@ -12,9 +12,11 @@
  * much as joint 6 stands high (to 512 mm), and leans as his elbow bends; his arm's stretch
  * (`hands.ts`) quiets the beat and lengthens them, and shortens the last.
  *
+ * The head turns toward the opponent as its joint is placed (`look.ts`); Gon's own step before it
+ * is not remade.
+ *
  * The rest of the original's pose is drawing only: the light matrix, the back colour, the stage's
- * light; the presentation makes those. Not remade, as in the current port: the head turning to the
- * opponent.
+ * light; the presentation makes those.
  */
 import { angle4096, sine } from '../math/angles.ts';
 import { div, s16, s8 } from '../math/integers.ts';
@@ -22,6 +24,8 @@ import { copyMatrix, multiply, type Matrix } from '../math/matrix.ts';
 import { projectPoint } from '../math/projection.ts';
 import { tableRoot } from '../math/roots.ts';
 import { FIRST_ACCESSORY, swingAccessory } from './accessories.ts';
+import { HEAD, NECK, headMayTurn, turnHead } from './look.ts';
+import { targetOf } from './body.ts';
 import { blink, stepHands, trueOgreArm } from './hands.ts';
 import { sampleMotion } from './motion.ts';
 import { motionOf, moveAt, moveById, sameMove } from './moves.ts';
@@ -422,6 +426,21 @@ function trueOgreLocal(state: FightState, data: FightData, f: Fighter, j: number
   return { local, beat };
 }
 
+/** The head turned toward the point between the target's neck and head, as both were last placed, where the move lets it. */
+function lookAtTarget(state: FightState, data: FightData, f: Fighter): void {
+  const look = state.looks[f.movesetSlot]!;
+  if (!headMayTurn(state.status, moveAt(data, f.move!), f.frame)) {
+    look.turned = 0;
+    return;
+  }
+  const target = targetOf(state, f).skeleton.joints;
+  const a = target[NECK]!.world.translation;
+  const b = target[HEAD]!.world.translation;
+  const aim = [0, 1, 2].map((k) => (a[k]! + ((b[k]! - a[k]!) >> 1)) | 0);
+  const joints = f.skeleton.joints;
+  turnHead(data.math, look, f.roster, joints[NECK]!.world, joints[HEAD]!.world, aim, f.skeleton.locals[HEAD]!.rotation);
+}
+
 /** Every joint's world and camera-space matrix; while the game runs, the locals from this frame's channels, blended while a blend runs. */
 function buildSkeleton(state: FightState, data: FightData, f: Fighter): void {
   const sk = f.skeleton;
@@ -430,6 +449,7 @@ function buildSkeleton(state: FightState, data: FightData, f: Fighter): void {
     localRotations(data.math, data.skeleton, state.channels.all, sk.locals);
     if (f.blend.kind !== Blend.NONE) blendLocals(data.skeleton, sk.locals, sk.deltas, f.blend.weight);
     for (let j = 1; j < 0x12; j += 1) copyMatrix(sk.locals[j]!, sk.blended[j - 1]!);
+    if (f.lookFixed === 0) lookAtTarget(state, data, f);
   }
   const trueOgre = f.roster === TRUE_OGRE;
   /* His beat leans as his forearm turns: the angle of its local's first row. */

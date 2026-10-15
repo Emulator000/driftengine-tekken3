@@ -26,6 +26,7 @@ import type { SkeletonTables } from '../data/skeleton.ts';
 import type { FighterModels } from '../data/models.ts';
 import type { MathTables } from '../data/tables.ts';
 import type { Matrix } from '../math/matrix.ts';
+import type { Look } from './look.ts';
 import type { Screen } from '../math/projection.ts';
 
 /** The game's modes the fight tells apart. */
@@ -1116,6 +1117,8 @@ export interface FightState {
   readonly channels: { readonly root: number[]; readonly all: number[] };
   /** A flash's light: where it is, its strength counting down, its pull on the fighter posed, and its colour (a spark's, each part 16 times). */
   readonly flash: { readonly at: number[]; left: number; readonly pull: number[]; readonly colour: number[] };
+  /** Per moveset slot, the head turning toward the opponent (`look.ts`). */
+  readonly looks: readonly Look[];
   /** Per moveset slot, a hit's flash on the fighter's colour, counting to 32. */
   readonly hitFlash: number[];
   /** The blend's working poses, kept between blends: a limb whose target is too close keeps what was there. */
@@ -1240,7 +1243,7 @@ export interface FightState {
      * Tekken Force's run: its score (once cleared), the soldiers the player beat, the human's own
      * pad, whether the score passed the best, its flags (1, 2, 4 the keys held after this run's,
      * 8 the final stage cleared, 0x10 Dr. B earned before it began) and each stage's boss (roster
-     * code; 0x58 none).
+     * code; 0xfc none, past every character's code).
      */
     readonly force: { score: number; kills: number; side: number; newRecord: number; flags: number; readonly bosses: number[] };
   };

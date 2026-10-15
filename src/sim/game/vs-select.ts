@@ -1,17 +1,18 @@
 /**
  * The versus select (scene 10): both players choose at once from a grid of seven characters by
- * three. Each side's cursor steps across the grid (a row's ends wrap, the rows do not), its slot
- * shows the character under it, and a button chooses (a kick the second costume, the fourth
- * button the third where it is earned), the two choices kept apart. In versus each side then sets
- * its handicap on its gauge, select taking the choice back, and a button settles it. The title
- * alternates with the way out once the pads rest, and the game's name and the tournament's line
- * scroll behind. In Team Battle each side first sets its team's size (one to eight), then
- * chooses its members (select takes one back, or goes back to the size; start ends the choosing,
- * the rest drawn later); a side not in takes the other's size. Arcade and the one-player modes
- * come here too when start and both shoulders are held as the mode is chosen. In Tekken Ball the
- * first side to choose its character chooses the ball (left and right slide the next one in, a
- * button takes it, select goes back to the character) and is served from; the other waits, select
- * taking its choice back.
+ * three, eight by three with an added character (the new column's cells past the added ones empty,
+ * the cursor never on them). Each side's cursor steps across the grid (a row's ends wrap, the rows
+ * do not), its slot shows the character under it, and a button chooses (a kick the second
+ * costume, the fourth button the third where it is earned), the two choices kept apart. In versus
+ * each side then sets its handicap on its gauge, select taking the choice back, and a button
+ * settles it. The title alternates with the way out once the pads rest, and the game's name and
+ * the tournament's line scroll behind. In Team Battle each side first sets its team's size (one
+ * to eight), then chooses its members (select takes one back, or goes back to the size; start
+ * ends the choosing, the rest drawn later); a side not in takes the other's size. Arcade and the
+ * one-player modes come here too when start and both shoulders are held as the mode is chosen. In
+ * Tekken Ball the first side to choose its character chooses the ball (left and right slide the
+ * next one in, a button takes it, select goes back to the character) and is served from; the
+ * other waits, select taking its choice back.
  */
 import type { FightTables } from '../fight/match.ts';
 import { keyOffVoices, playSong, voiceLine } from '../fight/voices.ts';
@@ -19,18 +20,18 @@ import type { SceneTables } from '../data/scenes.ts';
 import { softReset } from './fight-scene.ts';
 import { joinWithStart } from './join.ts';
 import { holdPicture } from './logo.ts';
-import { MenuMode } from './menu.ts';
+import { MenuMode, NO_CHOICE } from './menu.ts';
 import { print } from './printer.ts';
-import { keepApart, printCoinLine, standing } from './select.ts';
+import { isCharacter, keepApart, printCoinLine, standing } from './select.ts';
 import type { GameState, VsSelectSide } from './state.ts';
 import { fade } from './title.ts';
 
-/** The grid: seven cells a row, three rows. */
+/** The grid: seven cells a row (eight with an added character), three rows. */
 const COLUMNS = 7;
 const ROWS = 3;
-/** No choice, and a character earned but not to be chosen (taken already); the codes past the characters'. */
-export const NO_CHOICE = 0x58;
-export const TAKEN = 0x59;
+/** No choice (an empty cell's code too), and a character earned but not to be chosen (taken already); the codes past every character's, an added one's included. */
+export { NO_CHOICE };
+export const TAKEN = NO_CHOICE + 1;
 /** The side states this scene plays. */
 export const VsSideState = { SET_UP: 0, TEAM_SIZE: 1, TEAM_CHOOSING: 2, CHOOSING: 3, HANDICAP: 4, WAITING: 6, PARTNER: 7, COMPUTER: 8, TEAM_COMPUTER: 9, OUT: 10, CHOSEN: 0xb, SETTLED: 0xc, PARTNER_CHOSEN: 0xd, BALL_WAIT: 0xe, BALL_CHOICE: 0xf } as const;
 /** A team's size, one to eight; the buttons that settle it. */
@@ -94,15 +95,68 @@ const SINGLE_SLOT = 0;
 const VERSUS_SLOT = 1;
 const TEAM_SLOT = 2;
 
-/** The cell at a side's cursor. */
-const cellOf = (side: VsSelectSide): number => side.column + side.row * COLUMNS;
+/** A cell of the grid: its place and its character's code (no choice's in an empty one). */
+export interface VsSelectCell {
+  readonly x: number;
+  readonly y: number;
+  readonly code: number;
+}
 
-/** The code of the character under a side's cursor; one not in its pool reads as taken where earned, else as none. */
+/**
+ * The grid as laid: its columns, its cells row by row, how many characters each row has from its
+ * left, the added characters' roster bits, and how far it moved left to stay centred.
+ */
+export interface VsSelectGrid {
+  readonly columns: number;
+  readonly cells: readonly VsSelectCell[];
+  readonly widths: readonly number[];
+  readonly added: number;
+  readonly shift: number;
+}
+
+const grids = new WeakMap<SceneTables, VsSelectGrid>();
+
+/**
+ * The grid: the tables' seven a row, or with an added character eight, a cell more at each row's
+ * end and the whole moved left by half a cell; the added characters down the new column from the
+ * top, its cells past them empty.
+ */
+export function gridOf(scenes: SceneTables): VsSelectGrid {
+  const laid = grids.get(scenes);
+  if (laid !== undefined) return laid;
+  const table = scenes.vsSelect.grid;
+  const added = scenes.select.added.slice(0, ROWS);
+  let grid: VsSelectGrid = { columns: COLUMNS, cells: table, widths: new Array<number>(ROWS).fill(COLUMNS), added: 0, shift: 0 };
+  if (added.length !== 0) {
+    const step = table[1]!.x - table[0]!.x;
+    const shift = step >> 1;
+    const cells: VsSelectCell[] = [];
+    for (let row = 0; row < ROWS; row += 1) {
+      const first = row * COLUMNS;
+      for (const cell of table.slice(first, first + COLUMNS)) cells.push({ ...cell, x: cell.x - shift });
+      const last = table[first + COLUMNS - 1]!;
+      cells.push({ x: last.x + step - shift, y: last.y, code: row < added.length ? added[row]!.roster << 2 : NO_CHOICE });
+    }
+    const widths = Array.from({ length: ROWS }, (_, row) => (row < added.length ? COLUMNS + 1 : COLUMNS));
+    grid = { columns: COLUMNS + 1, cells, widths, added: added.reduce((bits, a) => bits | (1 << (a.roster & 0x1f)), 0) >>> 0, shift };
+  }
+  grids.set(scenes, grid);
+  return grid;
+}
+
+/** The grid's cell at a side's cursor. */
+export function cellOf(scenes: SceneTables, side: VsSelectSide): VsSelectCell | undefined {
+  const grid = gridOf(scenes);
+  return grid.cells[side.column + side.row * grid.columns];
+}
+
+/** The code of the character under a side's cursor; one not in its pool reads as taken where earned (or added), else as none. */
 export function codeUnder(game: GameState, scenes: SceneTables, side: VsSelectSide): number {
-  const code = scenes.vsSelect.grid[cellOf(side)]?.code ?? NO_CHOICE;
+  const code = cellOf(scenes, side)?.code ?? NO_CHOICE;
+  if (code === NO_CHOICE) return NO_CHOICE;
   const bit = 1 << ((code >> 2) & 0x1f);
   if ((side.pool & bit) !== 0) return code;
-  return (game.records.earnedRoster & bit) !== 0 ? TAKEN : NO_CHOICE;
+  return ((game.records.earnedRoster | gridOf(scenes).added) & bit) !== 0 ? TAKEN : NO_CHOICE;
 }
 
 /** The slot a mode shows a side's choices in. */
@@ -110,13 +164,14 @@ export const slotOf = (mode: number): number => (mode === MenuMode.TEAM_BATTLE ?
 
 /* ---- A side's choosing. ---- */
 
-/** A side's cursor put on the cell of `code` (its side's first cell for none); where none has it, left where it was. */
+/** A side's cursor put on the cell of `code` (its side's first cell for none, or a code past the characters with none added there); where none has it, left where it was. */
 function placeCursor(scenes: SceneTables, side: VsSelectSide, n: number, code: number): void {
-  const wanted = code < NO_CHOICE ? code & ~3 : scenes.vsSelect.sides[n]!.firstCode;
-  const at = scenes.vsSelect.grid.findIndex((cell) => cell.code === wanted);
+  const grid = gridOf(scenes);
+  const wanted = isCharacter(scenes, code >> 2) ? code & ~3 : scenes.vsSelect.sides[n]!.firstCode;
+  const at = grid.cells.findIndex((cell) => cell.code === wanted);
   if (at < 0) return;
-  side.column = at % COLUMNS;
-  side.row = Math.floor(at / COLUMNS);
+  side.column = at % grid.columns;
+  side.row = Math.floor(at / grid.columns);
 }
 
 /** A side set up to choose one character: its choice so far (the one it has, or none), its cursor on it, its last choice, or where it starts. */
@@ -193,18 +248,24 @@ function takeBack(game: GameState, tables: FightTables, side: VsSelectSide): voi
 const across = (repeats: number): number => ((repeats >> 13) & 1) - ((repeats >> 15) & 1);
 const down = (repeats: number): number => ((repeats >> 14) & 1) - ((repeats >> 12) & 1);
 
-/** A side's cursor moved by a pad's repeats: across first, wrapping at a row's ends; else up or down, within the rows. */
-function steer(game: GameState, tables: FightTables, side: VsSelectSide, pad: number): void {
+/**
+ * A side's cursor moved by a pad's repeats: across first, wrapping at a row's ends (its last
+ * character, past which its cells are empty); else up or down, within the rows, onto a row's last
+ * character from above or below an empty cell.
+ */
+function steer(game: GameState, tables: FightTables, scenes: SceneTables, side: VsSelectSide, pad: number): void {
+  const { columns, widths } = gridOf(scenes);
   const repeats = game.pads.repeats[pad]!;
-  let column = COLUMNS - 1 < side.column ? 0 : side.column;
   let row = ROWS - 1 < side.row ? 0 : side.row;
+  let column = columns - 1 < side.column ? 0 : Math.min(side.column, widths[row]! - 1);
   const dx = across(repeats);
   if (dx === 0) {
     const next = row + down(repeats);
     if (0 <= next && next < ROWS) row = next;
+    column = Math.min(column, widths[row]! - 1);
   } else {
     const next = column + dx;
-    column = 0 <= next && next < COLUMNS ? next : COLUMNS - 1 - column;
+    column = 0 <= next && next < widths[row]! ? next : widths[row]! - 1 - column;
   }
   if (side.column !== column || side.row !== row) voiceLine(game.world, tables, 0, MOVE_SOUND, 0);
   side.column = column;
@@ -288,7 +349,7 @@ function stepSide(game: GameState, tables: FightTables, scenes: SceneTables, n: 
   let done = false;
   switch (side.state) {
     case VsSideState.SET_UP: {
-      side.pool = game.records.earnedRoster;
+      side.pool = (game.records.earnedRoster | gridOf(scenes).added) >>> 0;
       const joined = game.world.joined[n] !== 0;
       switch (vs.mode) {
         case MenuMode.ARCADE:
@@ -343,7 +404,7 @@ function stepSide(game: GameState, tables: FightTables, scenes: SceneTables, n: 
       break;
     }
     case VsSideState.TEAM_CHOOSING:
-      steer(game, tables, side, n);
+      steer(game, tables, scenes, side, n);
       if ((pressed(n) & START) !== 0) {
         voiceLine(game.world, tables, 0, CHOOSE_SOUND, 0);
         side.state = VsSideState.OUT;
@@ -369,7 +430,7 @@ function stepSide(game: GameState, tables: FightTables, scenes: SceneTables, n: 
       done = true;
       break;
     case VsSideState.CHOOSING:
-      steer(game, tables, side, n);
+      steer(game, tables, scenes, side, n);
       if (choose(game, tables, scenes, n, pressed(n))) break;
       if (vs.mode === MenuMode.VERSUS) side.state = VsSideState.HANDICAP;
       else if (vs.mode !== MenuMode.TEKKEN_BALL) side.state = VsSideState.CHOSEN;
@@ -427,7 +488,7 @@ function stepSide(game: GameState, tables: FightTables, scenes: SceneTables, n: 
       break;
     case VsSideState.PARTNER: {
       const pad = (n + 1) & 1;
-      steer(game, tables, side, pad);
+      steer(game, tables, scenes, side, pad);
       if ((pressed(pad) & CANCEL) === 0) {
         if (!choose(game, tables, scenes, n, pressed(pad))) side.state = VsSideState.PARTNER_CHOSEN;
       } else {

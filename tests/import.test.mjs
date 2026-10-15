@@ -21,3 +21,14 @@ test('a run rewrites its files in place, removes what it did not write and keeps
   assert.equal(statSync(path.join(root, 'tables')).ino, directory);
   assert.deepEqual(JSON.parse(readFileSync(path.join(root, 'manifest.json'), 'utf8')), { format: 1, movesets: [], kazuya: false });
 });
+
+test("a run keeps the remaster's folder, which it does not make", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'tekken3-import-'));
+  mkdirSync(path.join(root, 'remaster/stages'), { recursive: true });
+  writeFileSync(path.join(root, 'remaster/stages/04.floor.png'), 'made');
+  writeFileSync(path.join(root, 'remaster-stale.json'), '{}');
+  const output = createOutput(root);
+  output.finish({ format: 1, movesets: [], kazuya: false });
+  assert.equal(readFileSync(path.join(root, 'remaster/stages/04.floor.png'), 'utf8'), 'made');
+  assert.equal(existsSync(path.join(root, 'remaster-stale.json')), false, 'only the folder itself is kept');
+});

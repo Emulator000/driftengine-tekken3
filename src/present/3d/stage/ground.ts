@@ -7,9 +7,12 @@
  * frame, are rewritten in place.
  */
 import type { MeshHandle, RendererApi, SurfaceMaterial, SurfaceTextureHandle } from '@driftengine/core';
+import { FlatTiles, ReliefTiles, type FloorRelief } from './relief.ts';
 
 /** The display's gamma, which the game's colour arithmetic works in. */
 const DISPLAY_GAMMA = 2.2;
+/** Each shade over 128, taken into linear light. */
+const LINEAR_SHADES = Float32Array.from({ length: 256 }, (_, k) => (k / 128) ** DISPLAY_GAMMA);
 
 const GND_MAGIC = 0x31444e47;
 const CELLS = 100;
@@ -27,6 +30,8 @@ export interface GroundState {
 
 /** How far under the floor a far tile is laid (metres): below an arcade stage's own floors, which show over it. */
 const UNDER = 0.04;
+/** The far tiles a kind's batch is made for before the fight (more make it again larger). */
+const FAR_CAPACITY = 4096;
 
 /** A square the patch is cut to, in the scenery's frame: the scenery's place (mm) and turn (4096ths), and the square's half-width (mm). */
 export interface GroundClip {
@@ -56,22 +61,60 @@ function cut(outline: readonly Corner[], axis: 0 | 1, sign: number, limit: numbe
   return out;
 }
 
+/** A floor redrawn, each of the atlas's ground regions (`size` texels square from its corner) a `cell`-texel square in rows of `columns`. */
+export interface FloorLayout {
+  readonly cell: number;
+  readonly columns: number;
+  readonly regions: readonly (readonly [number, number])[];
+  readonly size: number;
+  /** Whether the regions were drawn anew (their stones sharp), so the floor's own maps carry its relief: what they were drawn from, or true. */
+  readonly drawn?: boolean | readonly (string | number)[];
+}
+
+/** The redrawn floor's atlas and maps, where each region went, and the atlas's size. */
+export interface FloorLook {
+  readonly texture: SurfaceTextureHandle;
+  readonly normal: SurfaceTextureHandle | null;
+  readonly orm: SurfaceTextureHandle | null;
+  readonly layout: FloorLayout | null;
+  readonly width: number;
+  readonly height: number;
+  /** How wet it is: how much it mirrors, its maps' roughness scaled, and its reflectance at the vertices. */
+  readonly wet: { readonly reflectivity: number; readonly roughnessScale: number; readonly specular: number; readonly grain: number } | null;
+  /** Its stones' heights, which the tiles round the fight are cut finer and sunk by. */
+  readonly relief?: FloorRelief | null;
+  /** Whether its picture has holes the floor is seen through (a grating, or the game's own picture), cut out where it is clear. */
+  readonly seeThrough: boolean;
+}
+
 export class Ground {
   mesh: MeshHandle | null = null;
+  /** The near tiles sunk where their floor's joints lie (`FloorLook.relief`), each an instance of its cell's grid. */
+  private readonly reliefTiles: ReliefTiles | null;
+  /** On a lit floor, the far tiles drawn as instances, made the first time there are any. */
+  private farTiles: FlatTiles | null = null;
   /** The tiles past the near ones, an arcade stage's floor to its far end: made again only as they move. */
   farMesh: MeshHandle | null = null;
   private lastFar = { count: 0, x: new Int32Array(0), z: new Int32Array(0), cell: new Int16Array(0) };
   readonly material: SurfaceMaterial<SurfaceTextureHandle>;
   private readonly uvs: Float32Array;
+  /** The corners' coordinates in the stage's atlas, whatever the floor is drawn with. */
+  readonly sourceUvs: Float32Array;
   private readonly renderer: RendererApi;
   private last = { count: 0, x: new Int32Array(0), z: new Int32Array(0), shade: new Uint8Array(0), cell: new Int16Array(0) };
   /** The patch's colours, rewritten when its shades change. */
   private colors = new Float32Array(0);
   private readonly tint: readonly [number, number, number];
+  /** A wet floor's reflectance, at every vertex. */
+  private readonly specular: number | null;
+  /** A lit floor (a redrawn one) takes no shade from the game, which brightens it round the fighters where the scene's own light now falls; every corner at 128. */
+  private readonly steady: boolean;
+  private unshaded = new Uint8Array(0);
   /** The tiles `prepare` compiles the patch's pipelines with. */
   private warm: MeshHandle[] | null = null;
+  /** For each of the flat tiles' vertices, its tile and where it lies across it (0 to 1 each way), which its shade is mixed by. */
 
-  constructor(renderer: RendererApi, buffer: ArrayBuffer, atlasWidth: number, atlasHeight: number, texture: SurfaceTextureHandle, tint: readonly [number, number, number] = [1, 1, 1]) {
+  constructor(renderer: RendererApi, buffer: ArrayBuffer, atlasWidth: number, atlasHeight: number, texture: SurfaceTextureHandle, tint: readonly [number, number, number] = [1, 1, 1], floor: FloorLook | null = null) {
     this.renderer = renderer;
     this.tint = tint;
     const view = new DataView(buffer);
@@ -81,14 +124,51 @@ export class Ground {
       this.uvs[i * 2] = view.getUint16(8 + i * 4, true) / atlasWidth;
       this.uvs[i * 2 + 1] = view.getUint16(8 + i * 4 + 2, true) / atlasHeight;
     }
-    this.material = { albedo: texture, cutout: 0.5, doubleSided: true };
+    this.sourceUvs = this.uvs.slice();
+    if (floor !== null && floor.layout !== null) {
+      const { cell, columns, regions, size } = floor.layout;
+      /* A cell's region is the one at its corners' least u and v (regions may touch, so not each corner's own). */
+      for (let c = 0; c < CELLS; c += 1) {
+        const corners = [0, 1, 2, 3].map((k) => [view.getUint16(8 + (c * 4 + k) * 4, true), view.getUint16(8 + (c * 4 + k) * 4 + 2, true)] as const);
+        const low = [Math.min(...corners.map(([u]) => u)), Math.min(...corners.map(([, v]) => v))];
+        const k = regions.findIndex(([x, y]) => x === low[0] && y === low[1]);
+        if (k < 0) continue;
+        const [x, y] = regions[k]!;
+        corners.forEach(([u, v], j) => {
+          this.uvs[(c * 4 + j) * 2] = ((k % columns) * cell + ((u - x) * cell) / size) / floor.width;
+          this.uvs[(c * 4 + j) * 2 + 1] = (Math.floor(k / columns) * cell + ((v - y) * cell) / size) / floor.height;
+        });
+      }
+    }
+    this.material =
+      floor === null
+        ? { albedo: texture, cutout: 0.5, doubleSided: true }
+        : {
+            albedo: floor.texture,
+            ...(floor.seeThrough ? { cutout: 0.5 } : {}),
+            doubleSided: true,
+            ...(floor.normal === null ? {} : { normal: floor.normal, normalStrength: floor.wet?.grain ?? 1 }),
+            ...(floor.orm === null ? {} : { orm: floor.orm }),
+            ...(floor.wet === null ? {} : { reflectivity: floor.wet.reflectivity, roughnessScale: floor.wet.roughnessScale }),
+          };
+    this.specular = floor?.wet?.specular ?? null;
+    this.steady = floor !== null;
+    this.reliefTiles = floor?.relief == null ? null : new ReliefTiles(renderer, floor.relief, this.uvs, tint, this.specular);
   }
 
   /**
    * Has the pipelines a patch is drawn with compiled before the fight shows: a tile made the two
    * ways a patch is (its colours rewritten in place, and cut to a square), never drawn.
    */
-  prepare(): void {
+  prepare(side?: number): void {
+    /* A sunk floor's grids and the far tiles' quads, all made now, `side` mm to a tile, as many as a wide picture's patch has. */
+    if (side !== undefined) {
+      this.reliefTiles?.ready(side, 10, 1024);
+      if (this.steady) {
+        this.farTiles ??= new FlatTiles(this.renderer, this.uvs, -UNDER, this.tint, this.specular);
+        this.farTiles.ready(side, FAR_CAPACITY);
+      }
+    }
     const tile = (): Parameters<RendererApi['createMesh']>[0] => ({
       positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 1]),
       normals: new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0]),
@@ -99,12 +179,20 @@ export class Ground {
     });
     this.warm ??= [this.renderer.createMesh(tile(), { dynamicColors: true }), this.renderer.createMesh(tile())];
     for (const mesh of this.warm) this.renderer.prepareMesh(mesh, this.material);
+    this.reliefTiles?.prepare(this.material);
+    this.farTiles?.prepare(this.material);
   }
 
   /** Lays the patch the fight placed this frame, cut to `clip` where there is one; drops it when the fight draws no ground. */
-  update(state: GroundState, clip: GroundClip | null = null): void {
+  update(given: GroundState, clip: GroundClip | null = null): void {
+    let state = given;
+    if (this.steady) {
+      if (this.unshaded.length !== given.shade.length) this.unshaded = new Uint8Array(given.shade.length).fill(128);
+      state = { ...given, shade: this.unshaded };
+    }
     if (!state.drawn) {
       this.drop();
+      this.dropRelief();
       this.dropFar();
       this.lastFar = { count: 0, x: new Int32Array(0), z: new Int32Array(0), cell: new Int16Array(0) };
       return;
@@ -116,16 +204,17 @@ export class Ground {
     this.layFar(state);
     const n = state.near;
     const placed =
-      this.mesh !== null &&
+      (this.mesh !== null || this.reliefTiles?.laid === true) &&
       n === this.last.count &&
       this.last.x.every((v, i) => v === state.x[i]) &&
       this.last.z.every((v, i) => v === state.z[i]) &&
       this.last.cell.every((v, i) => v === state.cell[i]);
-    if (placed && this.last.shade.every((v, i) => v === state.shade[i])) return;
     if (placed) {
-      this.last.shade.set(state.shade.subarray(0, n * 4));
-      this.shade(n);
-      this.renderer.updateMeshColors(this.mesh!, this.colors);
+      if (!this.last.shade.every((v, i) => v === state.shade[i])) {
+        this.last.shade.set(state.shade.subarray(0, n * 4));
+        this.shadeFlat(n);
+        if (this.mesh !== null) this.renderer.updateMeshColors(this.mesh, this.colors);
+      }
       return;
     }
     this.last = {
@@ -135,10 +224,30 @@ export class Ground {
       shade: state.shade.slice(0, n * 4),
       cell: state.cell.slice(0, n),
     };
-    this.colors = new Float32Array(n * 12);
-    this.shade(n);
+    this.layNear(state, n);
+  }
+
+  /** The near tiles: on a floor with relief each an instance of its cell's sunk grid; otherwise one mesh of quads. */
+  private layNear(state: GroundState, n: number): void {
+    if (this.reliefTiles !== null) {
+      this.reliefTiles.lay({ x: state.x, z: state.z, cell: state.cell, count: n });
+      this.drop();
+      return;
+    }
+    this.layFlat(state, n);
+  }
+
+  /** The sunk tiles and the far ones drawn as instances, with the ground's material set. */
+  drawRelief(): void {
+    this.reliefTiles?.draw();
+    this.farTiles?.draw();
+  }
+
+  /** The near tiles, one quad each, in one mesh. */
+  private layFlat(state: GroundState, n: number): void {
     const positions = new Float32Array(n * 12);
     const uvs = new Float32Array(n * 8);
+    const normals = new Float32Array(n * 12);
     const indices = new Uint32Array(n * 6);
     for (let q = 0; q < n; q += 1) {
       indices.set([q * 4, q * 4 + 1, q * 4 + 2, q * 4 + 1, q * 4 + 3, q * 4 + 2], q * 6);
@@ -146,17 +255,15 @@ export class Ground {
       for (let k = 0; k < 4; k += 1) {
         const v = q * 4 + k;
         /* Game axes to the player's: millimetres to metres, and a half turn about X. */
-        positions[v * 3] = state.x[v]! / 1000;
-        positions[v * 3 + 1] = 0;
-        positions[v * 3 + 2] = -state.z[v]! / 1000;
-        uvs[v * 2] = this.uvs[(cell * 4 + k) * 2]!;
-        uvs[v * 2 + 1] = this.uvs[(cell * 4 + k) * 2 + 1]!;
+        positions.set([state.x[v]! / 1000, 0, -state.z[v]! / 1000], v * 3);
+        uvs.set([this.uvs[(cell * 4 + k) * 2]!, this.uvs[(cell * 4 + k) * 2 + 1]!], v * 2);
+        normals[v * 3 + 1] = 1;
       }
     }
-    const normals = new Float32Array(n * 12);
-    for (let v = 0; v < n * 4; v += 1) normals[v * 3 + 1] = 1;
+    this.colors = new Float32Array(n * 12);
+    this.shadeFlat(n);
     this.drop();
-    this.mesh = this.renderer.createMesh({ positions, normals, colors: this.colors, emissive: new Float32Array(n * 4), uvs, indices }, { dynamicColors: true });
+    if (n > 0) this.mesh = this.renderer.createMesh({ positions, normals, colors: this.colors, emissive: new Float32Array(n * 4), uvs, indices, ...this.wetAt(n * 4) }, { dynamicColors: true });
   }
 
   /** The patch made again, every tile cut to the square: what lies outside it is not drawn. */
@@ -187,30 +294,34 @@ export class Ground {
       for (const corner of outline) {
         positions.push(corner[2] / 1000, 0, -corner[3] / 1000);
         uvs.push(corner[4], corner[5]);
-        const k = (corner[6] / 128) ** DISPLAY_GAMMA;
+        const k = LINEAR_SHADES[corner[6]]!;
         colors.push(k * r, k * g, k * b);
       }
       for (let i = 1; i + 1 < outline.length; i += 1) indices.push(base, base + i, base + i + 1);
     }
     this.drop();
+    this.dropRelief();
     this.last = { count: 0, x: new Int32Array(0), z: new Int32Array(0), shade: new Uint8Array(0), cell: new Int16Array(0) };
     if (indices.length === 0) return;
     const n = positions.length / 3;
     const normals = new Float32Array(n * 3);
     for (let v = 0; v < n; v += 1) normals[v * 3 + 1] = 1;
-    this.mesh = this.renderer.createMesh({ positions: new Float32Array(positions), normals, colors: new Float32Array(colors), emissive: new Float32Array(n), uvs: new Float32Array(uvs), indices: new Uint32Array(indices) });
+    this.mesh = this.renderer.createMesh({ positions: new Float32Array(positions), normals, colors: new Float32Array(colors), emissive: new Float32Array(n), uvs: new Float32Array(uvs), indices: new Uint32Array(indices), ...this.wetAt(n) });
   }
 
   /**
-   * Each corner's colour, its shade over 128 times the tint, for the first `n` tiles: the game
-   * scales the texel's displayed colour by the shade, so the scale is taken into linear light.
+   * The near tiles' colours: each corner's shade over 128 times the tint (the game scales the
+   * texel's displayed colour by the shade, so the scale is taken into linear light), for the first
+   * `n` tiles.
    */
-  private shade(n: number): void {
+  private shadeFlat(n: number): void {
     const shades = this.last.shade;
     const [r, g, b] = this.tint;
     for (let v = 0; v < n * 4; v += 1) {
-      const k = (shades[v]! / 128) ** DISPLAY_GAMMA;
-      this.colors.set([k * r, k * g, k * b], v * 3);
+      const k = LINEAR_SHADES[shades[v]!]!;
+      this.colors[v * 3] = k * r;
+      this.colors[v * 3 + 1] = k * g;
+      this.colors[v * 3 + 2] = k * b;
     }
   }
 
@@ -218,6 +329,11 @@ export class Ground {
   private layFar(state: GroundState): void {
     const from = state.near;
     const n = state.count - from;
+    if (this.steady) {
+      if (n > 0) this.farTiles ??= new FlatTiles(this.renderer, this.uvs, -UNDER, this.tint, this.specular);
+      this.farTiles?.lay(state.x, state.z, state.cell, from, state.count);
+      return;
+    }
     const last = this.lastFar;
     const same =
       n === last.count &&
@@ -234,19 +350,37 @@ export class Ground {
     const uvs = new Float32Array(n * 8);
     const indices = new Uint32Array(n * 6);
     const normals = new Float32Array(n * 12);
+    /* Written in place, a number at a time: there are thousands of these tiles. */
     for (let q = 0; q < n; q += 1) {
-      indices.set([q * 4, q * 4 + 1, q * 4 + 2, q * 4 + 1, q * 4 + 3, q * 4 + 2], q * 6);
+      const i = q * 6;
+      const o = q * 4;
+      indices[i] = o;
+      indices[i + 1] = o + 1;
+      indices[i + 2] = o + 2;
+      indices[i + 3] = o + 1;
+      indices[i + 4] = o + 3;
+      indices[i + 5] = o + 2;
       const cell = state.cell[from + q]!;
       for (let k = 0; k < 4; k += 1) {
-        const v = q * 4 + k;
-        positions.set([state.x[from * 4 + v]! / 1000, -UNDER, -state.z[from * 4 + v]! / 1000], v * 3);
-        uvs.set([this.uvs[(cell * 4 + k) * 2]!, this.uvs[(cell * 4 + k) * 2 + 1]!], v * 2);
-        const shade = (state.shade[from * 4 + v]! / 128) ** DISPLAY_GAMMA;
-        colors.set([shade * r, shade * g, shade * b], v * 3);
+        const v = o + k;
+        positions[v * 3] = state.x[from * 4 + v]! / 1000;
+        positions[v * 3 + 1] = -UNDER;
+        positions[v * 3 + 2] = -state.z[from * 4 + v]! / 1000;
+        uvs[v * 2] = this.uvs[(cell * 4 + k) * 2]!;
+        uvs[v * 2 + 1] = this.uvs[(cell * 4 + k) * 2 + 1]!;
+        const shade = LINEAR_SHADES[state.shade[from * 4 + v]!]!;
+        colors[v * 3] = shade * r;
+        colors[v * 3 + 1] = shade * g;
+        colors[v * 3 + 2] = shade * b;
         normals[v * 3 + 1] = 1;
       }
     }
-    this.farMesh = this.renderer.createMesh({ positions, normals, colors, emissive: new Float32Array(n * 4), uvs, indices });
+    this.farMesh = this.renderer.createMesh({ positions, normals, colors, emissive: new Float32Array(n * 4), uvs, indices, ...this.wetAt(n * 4) });
+  }
+
+  /** A wet floor's reflectance for `n` vertices, or nothing. */
+  private wetAt(n: number): { specular?: Float32Array } {
+    return this.specular === null ? {} : { specular: new Float32Array(n).fill(this.specular) };
   }
 
   private drop(): void {
@@ -254,8 +388,14 @@ export class Ground {
     this.mesh = null;
   }
 
+  /** The sunk tiles unlaid. */
+  private dropRelief(): void {
+    this.reliefTiles?.lay({ x: new Int32Array(0), z: new Int32Array(0), cell: new Int16Array(0), count: 0 });
+  }
+
   private dropFar(): void {
     if (this.farMesh !== null) this.renderer.disposeMesh(this.farMesh);
     this.farMesh = null;
+    this.farTiles?.lay(new Int32Array(0), new Int32Array(0), new Int16Array(0), 0, 0);
   }
 }
