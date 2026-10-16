@@ -201,7 +201,9 @@ data (with Kazuya or without, or any fighter one of you lacks): players who diff
 `npm run dev` and `npm run dev:lan` run the server beside the page, so two players on your home
 network (`npm run dev:lan`) play with nothing else to run. Over the internet, one of you runs the
 server where the other can reach it (`npm run relay`, or the `server/` folder on a machine of its
-own, [server/README.md](server/README.md)) and both set its address as SERVER on ONLINE MODE's page.
+own, [server/README.md](server/README.md)), opening its one TCP port (8790 by default) on the
+router and the firewall, and both set its address as SERVER on ONLINE MODE's page; nobody else
+opens anything ([how to host it](server/README.md#opening-it-to-the-internet)).
 [docs/USAGE.md](docs/USAGE.md#online) says more.
 
 ### Kazuya (optional)

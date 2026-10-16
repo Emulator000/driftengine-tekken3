@@ -229,6 +229,14 @@ Players whose games differ (the version, the fighters whose data is in, or the g
 never paired, and a room of another game is not joined; ONLINE MODE says which differs (the
 fighters one of you lacks by name).
 
+**A server to play over.** `npm run dev` runs one beside the page for players on the same machine,
+`npm run dev:lan` for players on the same home network. Over the internet, one of you runs
+`npm run relay` (or the `server/` folder on a machine of its own) and opens its one TCP port, 8790
+by default, on the router and the firewall; everyone sets SERVER to its public address and port
+(`203.0.113.7:8790`), the host `localhost:8790`. The players open nothing: where their games cannot
+reach each other directly, the presses go through the server. [server/README.md](../server/README.md#opening-it-to-the-internet)
+says more.
+
 ## When the game stops
 
 Should the game stop on an error, it says so in a window over the picture: what went wrong and
