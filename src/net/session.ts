@@ -75,6 +75,12 @@ export interface SessionOptions<S> {
   /** Both players' input delay, in fields; the larger is used. */
   readonly inputDelay: readonly [number, number];
   readonly relayed?: boolean;
+  /**
+   * The match's number, the same on both sides and another for each match the two play on one link:
+   * its packets carry it, and a packet of another match (the last one's, still arriving, or sent
+   * again as it ended) is passed over.
+   */
+  readonly match?: number;
 }
 
 export class MatchSession<S> {
@@ -118,7 +124,7 @@ export class MatchSession<S> {
       fixedDt: FIELD,
       depth: ROLLBACK_DEPTH,
     });
-    this.transport = new KeepingTransport(options.transport);
+    this.transport = new KeepingTransport(new MatchTransport(options.transport, options.match ?? 0));
     this.session = new LockstepSession<S>({
       transport: this.transport,
       loop: this.loop,
@@ -272,6 +278,42 @@ export class MatchSession<S> {
 function clampDelay(fields: number): number {
   if (!Number.isFinite(fields)) return DEFAULT_INPUT_DELAY;
   return Math.max(0, Math.min(MAX_INPUT_DELAY, Math.trunc(fields)));
+}
+
+/** A transport whose packets each carry the match's number first, those of another match passed over. */
+class MatchTransport implements Transport {
+  private readonly inner: Transport;
+  private readonly match: number;
+
+  constructor(inner: Transport, match: number) {
+    this.inner = inner;
+    this.match = match & 0xff;
+  }
+
+  get state(): TransportState {
+    return this.inner.state;
+  }
+
+  get self(): PeerId {
+    return this.inner.self;
+  }
+
+  send(to: PeerId, message: Uint8Array): void {
+    const out = new Uint8Array(message.length + 1);
+    out[0] = this.match;
+    out.set(message, 1);
+    this.inner.send(to, out);
+  }
+
+  drain(into: MessageSink): void {
+    this.inner.drain((from, message) => {
+      if (message.length > 1 && message[0] === this.match) into(from, message.subarray(1));
+    });
+  }
+
+  close(): void {
+    this.inner.close();
+  }
 }
 
 /** A transport that keeps the last packet of words it sent, to send it again as it was. */

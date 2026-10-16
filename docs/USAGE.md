@@ -169,7 +169,7 @@ ONLINE MODE, after VS MODE in the mode menu, lists:
 | QUICK MATCH | Waits for the next player of the same game, who is offered to you |
 | CREATE ROOM | Opens a room and shows its code, to give the other player; with ROOM set to LISTED it shows in the server's room list too |
 | JOIN ROOM | The room with the code you enter |
-| ROOM LIST | The rooms the server lists; those of another game are greyed |
+| ROOM LIST | The rooms the server lists; those you cannot join (another version, or a host playing a fighter you lack) greyed, CANNOT JOIN |
 | INPUT DELAY | The fields your presses wait before they count, 0 to 6 (2 by default): the larger of both players' is the match's |
 | ROOM | PRIVATE (by its code alone) or LISTED |
 | SIDE | The side your fighter is seen on in the match, LEFT (the default) or RIGHT, whichever the server seats you on |
@@ -225,9 +225,13 @@ close, or a wait over it last half a second, the presses go through the server a
 of the match. `?netlag=MS` holds each of the
 other side's presses that many milliseconds more, to try a match over a slower link.
 
-Players whose games differ (the version, the fighters whose data is in, or the game's data) are
-never paired, and a room of another game is not joined; ONLINE MODE says which differs (the
-fighters one of you lacks by name).
+Two players are paired, and a room is joined, only where they can play each other: the same
+version, and each one's fighter one whose data the other has. A player without Kazuya, say, is
+paired with one who has him unless either of you chose him, and a room whose host plays him shows
+greyed in the room list. ONLINE MODE says why a pairing cannot be made (THE OTHER PLAYER HAS
+VERSION 0.6.0, YOU LACK KAZUYA, THE OTHER PLAYER LACKS KAZUYA). The rest of the game's data may
+differ between the two (a disc ripped without its cue sheet, an arcade board's models); should it
+make the two games play differently, the match ends as they part (THE GAMES DIFFERED).
 
 **A server to play over.** `npm run dev` runs one beside the page for players on the same machine,
 `npm run dev:lan` for players on the same home network. Over the internet, one of you runs

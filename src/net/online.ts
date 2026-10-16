@@ -23,8 +23,9 @@ export type OnlineState = 'off' | 'connecting' | 'lobby' | 'queued' | 'offered' 
 /** What a side says of itself once paired. */
 export interface Hello {
   readonly k: 'hello';
-  /** The game's data and version, which must be the other's. */
-  readonly build: string;
+  /** The game's version, which must be the other's, and the fighters whose data this side has (`rosterWord`). */
+  readonly version: string;
+  readonly roster: string;
   readonly name: string;
   /** The input delay asked for, in fields. */
   readonly delay: number;
@@ -47,12 +48,16 @@ export interface Start {
   readonly delay: number;
   readonly keys: readonly [readonly number[], readonly number[]];
   readonly fighters: readonly [Fighter, Fighter];
+  /** The match's number on this pairing: one, then one more for each rematch (`MatchSession`'s `match`). */
+  readonly match: number;
 }
 
 /** The game an online match plays, as the page gives it. */
 export interface OnlineGame<S> {
-  /** The game's data and version, as one string both sides must share (`buildDiffers`'s three words). */
-  readonly build: string;
+  /** The game's version, which both sides must share. */
+  readonly version: string;
+  /** The fighters whose data this side has, by roster id: the other's chosen fighter must be one of them. */
+  readonly roster: readonly number[];
   /** A fighter's name, for saying which one a side lacks. */
   readonly fighterName?: (fighter: number) => string;
   /** The match's options, as the host decides them. */
@@ -111,7 +116,7 @@ const WHY: Readonly<Record<string, string>> = {
   'no room': 'NO ROOM WITH THAT CODE',
   full: 'THAT ROOM IS FULL',
   password: 'WRONG PASSWORD',
-  'different game': 'THEIR GAME DATA DIFFERS',
+  'different game': 'THEIR GAME DIFFERS',
   'own room': 'THAT IS YOUR OWN ROOM',
   busy: 'THE SERVER IS FULL',
   protocol: 'THE SERVER SPEAKS ANOTHER VERSION',
@@ -147,30 +152,34 @@ const rosterOf = (word: string | undefined): bigint => {
   }
 };
 
-/** Some fighters by name: two at most, then how many more. */
-function named(bits: bigint, name: (fighter: number) => string): string {
-  const fighters: number[] = [];
-  for (let fighter = 0; bits >> BigInt(fighter) !== 0n; fighter += 1) if (((bits >> BigInt(fighter)) & 1n) !== 0n) fighters.push(fighter);
-  const shown = fighters.slice(0, 2).map(name).join(' AND ');
-  return fighters.length > 2 ? `${shown} AND ${fighters.length - 2} MORE` : shown;
+/** A player as another is matched against them: their game's version, the fighters whose data they have (`rosterWord`), and the fighter they chose (its roster id; -1 none yet). */
+export interface Side {
+  readonly version: string;
+  readonly roster: string;
+  readonly fighter: number;
 }
 
+/** Whether a side has this fighter's data (any, for no fighter). */
+const hasFighter = (side: Side, fighter: number): boolean => fighter < 0 || ((rosterOf(side.roster) >> BigInt(fighter)) & 1n) === 1n;
+
 /**
- * Why two builds cannot play each other, as a player is shown it. A build is three words: the
- * version, the roster (`rosterWord`: the fighters whose data the side has) and the fingerprint of
- * the game's data; a roster that differs names the fighters one side lacks.
+ * Why two players cannot play each other, as a player is shown it, or the empty string where they
+ * can: the same version, and each one's fighter one whose data the other has. Their rosters may
+ * differ otherwise, and their games' data too: should it make the two games play differently, the
+ * match's own comparison ends it.
  */
-export function buildDiffers(ours: string, theirs: string, name: (fighter: number) => string = (fighter) => `FIGHTER ${fighter}`): string {
-  const [version, roster] = ours.split(' ');
-  const [theirVersion, theirRoster] = theirs.split(' ');
-  if (version !== theirVersion) return `THE OTHER PLAYER HAS VERSION ${theirVersion ?? '?'}`;
-  if (roster !== theirRoster) {
-    const mine = rosterOf(roster);
-    const other = rosterOf(theirRoster);
-    const theyLack = mine & ~other;
-    return theyLack !== 0n ? `THE OTHER PLAYER LACKS ${named(theyLack, name)}` : `YOU LACK ${named(other & ~mine, name)}`;
-  }
-  return whyLine('different game');
+export function cannotPlay(ours: Side, theirs: Side, name: (fighter: number) => string = (fighter) => `FIGHTER ${fighter}`): string {
+  if (ours.version !== theirs.version) return `THE OTHER PLAYER HAS VERSION ${theirs.version || '?'}`;
+  if (!hasFighter(theirs, ours.fighter)) return `THE OTHER PLAYER LACKS ${name(ours.fighter)}`;
+  if (!hasFighter(ours, theirs.fighter)) return `YOU LACK ${name(theirs.fighter)}`;
+  return '';
+}
+
+/** A side as another sent it (its fighter a number, its roster a word), or null. */
+function sideOf(value: unknown): Side | null {
+  if (value === null || typeof value !== 'object') return null;
+  const { version, roster, fighter } = value as Record<string, unknown>;
+  return { version: String(version ?? ''), roster: typeof roster === 'string' ? roster : '0', fighter: Number.isInteger(fighter) ? (fighter as number) : -1 };
 }
 
 export class Online<S> {
@@ -224,6 +233,18 @@ export class Online<S> {
     this.options = options;
   }
 
+  /** This player as another is matched against them: the version, the fighters whose data this side has, the fighter chosen. */
+  private get side(): Side {
+    const fighter = this.options.player().fighter?.roster;
+    return { version: this.options.game.version, roster: rosterWord(this.options.game.roster), fighter: Number.isInteger(fighter) ? fighter! : -1 };
+  }
+
+  /** Why this player cannot play the side another sent (`cannotPlay`), or the empty string (also where it sent none). */
+  private whyNot(theirs: unknown): string {
+    const side = sideOf(theirs);
+    return side === null ? '' : cannotPlay(this.side, side, this.options.game.fighterName);
+  }
+
   private get now(): number {
     return this.options.now?.() ?? Date.now();
   }
@@ -248,26 +269,26 @@ export class Online<S> {
       this.stop(this.state === 'connecting' ? 'unreachable' : 'closed');
       this.state = 'off';
     };
-    relay.say({ do: 'hello', game: GAME, protocol: PROTOCOL, name: this.options.player().name, build: this.options.game.build });
+    relay.say({ do: 'hello', game: GAME, protocol: PROTOCOL, name: this.options.player().name, build: this.options.game.version, roster: rosterWord(this.options.game.roster) });
     return true;
   }
 
   /** The quick match's queue: paired with the next player of the same game. */
   quickMatch(): void {
-    this.lobbyCommand('queued', { do: 'queue' });
+    this.lobbyCommand('queued', { do: 'queue', fighter: this.side.fighter });
   }
 
   /** A room of this player's own, its code to give the other player; listed in the server's room list or not. */
   host(listed: boolean, pass = ''): void {
     /* Its code is the server's to give: none until then. */
     this.code = '';
-    this.lobbyCommand('hosting', { do: 'host', listed, pass });
+    this.lobbyCommand('hosting', { do: 'host', listed, pass, fighter: this.side.fighter });
   }
 
   /** The room with this code. */
   join(code: string, pass = ''): void {
     this.code = code;
-    this.lobbyCommand('joining', { do: 'join', code, pass });
+    this.lobbyCommand('joining', { do: 'join', code, pass, fighter: this.side.fighter });
   }
 
   /** The server's room list, asked for now and every few seconds while `listing`. */
@@ -308,7 +329,7 @@ export class Online<S> {
   /** Both asked for a rematch: the host starts the same two fighters again, on a stage drawn anew. */
   private maybeRematch(): void {
     if (this.state !== 'result' || this.rematchMine !== true || this.rematchTheirs !== true || this.seat !== 0 || this.lastStart === null) return;
-    const start: Start = { ...this.lastStart, options: this.options.game.options() };
+    const start: Start = { ...this.lastStart, options: this.options.game.options(), match: this.lastStart.match + 1 };
     this.relay?.toPeer(start);
     this.begin(start);
   }
@@ -463,7 +484,7 @@ export class Online<S> {
         else if (this.state === 'greeting' || this.state === 'playing') this.stop(event.why === 'gone' ? 'gone' : 'left');
         return;
       case 'refused':
-        this.ended = event.why === 'different game' && typeof event.theirs === 'string' ? buildDiffers(this.options.game.build, event.theirs, this.options.game.fighterName) : whyLine(event.why);
+        this.ended = (event.why === 'different game' && this.whyNot(event.theirs)) || whyLine(event.why);
         this.state = this.relay === null ? 'off' : 'lobby';
         return;
       case 'pong':
@@ -487,7 +508,7 @@ export class Online<S> {
     const transport = new WebSocketTransport({ socket: this.wire.socket, self: seat });
     this.transport = (this.options.lagMs ?? 0) > 0 ? new LateTransport(transport, this.options.lagMs!, () => this.now) : transport;
     const { name, delay, keys, fighter } = this.options.player();
-    const hello: Hello = { k: 'hello', build: this.options.game.build, name, delay, keys, fighter };
+    const hello: Hello = { k: 'hello', version: this.options.game.version, roster: rosterWord(this.options.game.roster), name, delay, keys, fighter };
     this.relay!.toPeer(hello);
   }
 
@@ -508,9 +529,9 @@ export class Online<S> {
         return;
       }
       case 'refuse': {
-        const { why, build } = body as { why?: unknown; build?: unknown };
+        const { why, side } = body as { why?: unknown; side?: unknown };
         this.stop(String(why ?? 'different game'));
-        if (typeof build === 'string') this.ended = buildDiffers(this.options.game.build, build, this.options.game.fighterName);
+        this.ended = this.whyNot(side) || this.ended;
         return;
       }
       case 'signal': {
@@ -548,10 +569,11 @@ export class Online<S> {
   private hello(theirs: Hello): void {
     if (this.state !== 'greeting') return;
     this.theirs = theirs;
-    if (theirs.build !== this.options.game.build) {
-      this.relay?.toPeer({ k: 'refuse', why: 'different game', build: this.options.game.build });
+    const why = this.whyNot({ version: theirs.version, roster: theirs.roster, fighter: theirs.fighter?.roster });
+    if (why !== '') {
+      this.relay?.toPeer({ k: 'refuse', why: 'different game', side: this.side });
       this.stop('different game');
-      this.ended = buildDiffers(this.options.game.build, String(theirs.build), this.options.game.fighterName);
+      this.ended = why;
       return;
     }
     if (this.seat !== 0) return;
@@ -559,7 +581,7 @@ export class Online<S> {
     const delay = Math.max(ours.delay, Number.isFinite(theirs.delay) ? theirs.delay : DEFAULT_INPUT_DELAY);
     const keys = (k: readonly number[]): readonly number[] => (Array.isArray(k) && k.length === 8 && k.every((n) => Number.isInteger(n) && 0 <= n && n < 8) ? [...k] : [0, 1, 2, 3, 4, 5, 6, 7]);
     const fighter = (f: Fighter | undefined): Fighter => ({ roster: Number.isInteger(f?.roster) ? f!.roster : 0, costume: Number.isInteger(f?.costume) ? f!.costume & 3 : 0 });
-    const start: Start = { k: 'start', options: this.options.game.options(), delay, keys: [keys(ours.keys), keys(theirs.keys)], fighters: [fighter(ours.fighter), fighter(theirs.fighter)] };
+    const start: Start = { k: 'start', options: this.options.game.options(), delay, keys: [keys(ours.keys), keys(theirs.keys)], fighters: [fighter(ours.fighter), fighter(theirs.fighter)], match: 1 };
     this.starting = { start, at: this.now + GREETING_HOLD_MS };
   }
 
@@ -569,7 +591,7 @@ export class Online<S> {
     /* What the last match left in the transport is no word of this one's. */
     this.transport?.drain(() => {});
     const { step, snapshotter } = this.options.game.begin(start, this.seat);
-    this.session = new MatchSession({ step, snapshotter, transport: this.transport!, self: this.seat, inputDelay: [start.delay, start.delay] });
+    this.session = new MatchSession({ step, snapshotter, transport: this.transport!, self: this.seat, inputDelay: [start.delay, start.delay], match: Number.isInteger(start.match) ? start.match : 0 });
     this.state = 'playing';
     this.ended = '';
     /* A rematch keeps the way its words already go. */

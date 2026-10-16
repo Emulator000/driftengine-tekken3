@@ -4,16 +4,19 @@
  * goes through here is the pads' words, the match's setup and the connection's own messages, never
  * any of the game's data.
  *
- * A player says hello, then hosts a room (a code to give the other player, listed in the server's
- * room list or not, with a password or not), joins one by its code, or waits in the quick match's
- * queue for the next player of the same game. Two players the queue brings together, or a room's
- * host and the player joining it, are offered each other first: both must say yes within the
- * offer's seconds. In the queue a no puts both back in it, kept apart from each other a while, and
+ * A player says hello (their game's version, the fighters whose data they have), then hosts a room
+ * (a code to give the other player, listed in the server's room list or not, with a password or
+ * not), joins one by its code, or waits in the quick match's queue, each with the fighter they
+ * chose. Two players are brought together only where they can play each other: the same version,
+ * and each one's fighter one whose data the other has. Two players the queue brings together, or
+ * a room's host and the player joining it, are offered each other first: both must say yes within
+ * the offer's seconds. In the queue a no puts both back in it, kept apart from each other a while, and
  * an offer not answered in time puts both back to look again; at a room a no or no answer sends the
- * guest away, the room waiting on. Two players in a room are paired: text messages
- * between them (`peer`) and binary ones (the pads' words) are passed on as they are, until one
- * leaves (a quick match's two, leaving it without a rematch, kept apart a while too). The players try to reach each other directly (WebRTC) and use this only for what they
- * cannot; the servers they ask for that (STUN, TURN) are told them in the welcome.
+ * guest away, the room waiting on. Two players in a room are paired: text messages between them
+ * (`peer`) and binary ones (the pads' words) are passed on as they are, until one leaves (a quick
+ * match's two, leaving it without a rematch, kept apart a while too). The players try to reach
+ * each other directly (WebRTC) and use this only for what they cannot; the servers they ask for
+ * that (STUN, TURN) are told them in the welcome.
  *
  *   node server/relay.mjs [--config file.json] [--host 0.0.0.0] [--port 8790] [--path /] ...
  *
@@ -72,6 +75,27 @@ function addressOf(request) {
 /** Two players' pair, whichever way round. */
 const pairKey = (a, b) => (a.id < b.id ? `${a.id} ${b.id}` : `${b.id} ${a.id}`);
 
+/** The fighters whose data a player has, from the word their hello carries (a bit a roster id, in hex). */
+function rosterOf(word) {
+  try {
+    return typeof word === 'string' && /^[0-9a-f]{1,64}$/i.test(word) ? BigInt(`0x${word}`) : 0n;
+  } catch {
+    return 0n;
+  }
+}
+
+/** Whether a player has this fighter's data (any, for no fighter chosen). */
+const hasFighter = (client, fighter) => fighter < 0 || ((client.roster >> BigInt(fighter)) & 1n) === 1n;
+
+/**
+ * Whether two players can play each other: the same version of the game, and each one's chosen
+ * fighter one whose data the other has. Their rosters and their games' data may differ otherwise.
+ */
+const compatible = (a, b) => a.build === b.build && hasFighter(b, a.fighter) && hasFighter(a, b.fighter);
+
+/** A player as another is told of them on a refusal, to say why. */
+const sideOf = (client) => ({ version: client.build, roster: client.roster.toString(16), fighter: client.fighter });
+
 const flag = (name) => name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
 const envName = (name) => `T3_RELAY_${name.replace(/[A-Z]/g, (c) => `_${c}`).toUpperCase()}`;
 
@@ -128,6 +152,8 @@ function usage() {
 }
 
 /** A name as players are shown it: up to twelve letters, digits and spaces, upper case. */
+/** The fighter a command says its player chose (a roster id), or -1. */
+const fighterOf = (raw) => (Number.isInteger(raw) && 0 <= raw && raw < 64 ? raw : -1);
 const cleanName = (raw) => String(raw ?? '').toUpperCase().replace(/[^A-Z0-9 .\-]/g, '').trim().slice(0, 12) || 'PLAYER';
 const cleanTitle = (raw) => String(raw ?? '').toUpperCase().replace(/[^A-Z0-9 .\-!?']/g, '').trim().slice(0, 20);
 
@@ -214,7 +240,7 @@ export class Relay {
   }
 
   connected(socket, request) {
-    const client = { id: (this.ids += 1), address: addressOf(request), offer: null, socket, hello: false, name: 'PLAYER', build: '', room: null, seat: -1, queued: false, heard: this.now(), window: this.now(), count: 0, alive: true };
+    const client = { id: (this.ids += 1), address: addressOf(request), offer: null, socket, hello: false, name: 'PLAYER', build: '', roster: 0n, fighter: -1, room: null, seat: -1, queued: false, heard: this.now(), window: this.now(), count: 0, alive: true };
     this.clients.add(client);
     socket.on('pong', () => (client.alive = true));
     socket.on('message', (data, binary) => this.message(client, data, binary));
@@ -251,10 +277,13 @@ export class Relay {
       case 'hello':
         return this.hello(client, command);
       case 'host':
+        client.fighter = fighterOf(command.fighter);
         return this.host(client, command);
       case 'join':
+        client.fighter = fighterOf(command.fighter);
         return this.join(client, command);
       case 'queue':
+        client.fighter = fighterOf(command.fighter);
         return this.enqueue(client);
       case 'answer':
         return this.answer(client, command.yes === true);
@@ -275,7 +304,7 @@ export class Relay {
     }
   }
 
-  hello(client, { game, protocol, name, build }) {
+  hello(client, { game, protocol, name, build, roster }) {
     if (game !== GAME || protocol !== PROTOCOL) {
       this.tell(client, { ev: 'refused', why: protocol !== PROTOCOL ? 'protocol' : 'game' });
       client.socket.close(1008, 'refused');
@@ -284,6 +313,7 @@ export class Relay {
     client.hello = true;
     client.name = cleanName(name);
     client.build = String(build ?? '').slice(0, 64);
+    client.roster = rosterOf(roster);
     this.log(`[relay] ${who(client)} connected (${this.clients.size} on the server)`);
     this.tell(client, { ev: 'welcome', name: this.config.name, motd: this.config.motd, ice: this.config.ice, protocol: PROTOCOL, players: this.clients.size, rooms: this.rooms.size });
   }
@@ -295,7 +325,7 @@ export class Relay {
     let code;
     do code = Array.from({ length: CODE_LENGTH }, () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]).join('');
     while (this.rooms.has(code));
-    const room = { code, listed: listed === true, title: cleanTitle(title) || `${client.name}'S ROOM`, pass: typeof pass === 'string' ? pass.slice(0, 32) : '', build: client.build, seats: [client, null], quick: false, offering: null };
+    const room = { code, listed: listed === true, title: cleanTitle(title) || `${client.name}'S ROOM`, pass: typeof pass === 'string' ? pass.slice(0, 32) : '', seats: [client, null], quick: false, offering: null };
     this.rooms.set(code, room);
     client.room = room;
     client.seat = 0;
@@ -308,7 +338,7 @@ export class Relay {
     if (room.seats[0] === client) return this.tell(client, { ev: 'refused', why: 'own room' });
     if (room.seats[1] !== null || room.offering !== null) return this.tell(client, { ev: 'refused', why: 'full' });
     if (room.pass !== '' && room.pass !== pass) return this.tell(client, { ev: 'refused', why: 'password' });
-    if (room.build !== client.build) return this.tell(client, { ev: 'refused', why: 'different game', theirs: room.build });
+    if (!compatible(room.seats[0], client)) return this.tell(client, { ev: 'refused', why: 'different game', theirs: sideOf(room.seats[0]) });
     this.leave(client, 'left');
     this.offer(room.seats[0], client, room);
   }
@@ -316,7 +346,7 @@ export class Relay {
   enqueue(client) {
     this.leave(client, 'left');
     const now = this.now();
-    const other = this.queue.find((one) => one.build === client.build && !(now < (this.apart.get(pairKey(one, client)) ?? 0)));
+    const other = this.queue.find((one) => compatible(one, client) && !(now < (this.apart.get(pairKey(one, client)) ?? 0)));
     if (other === undefined) {
       this.queue.push(client);
       client.queued = true;
@@ -373,7 +403,7 @@ export class Relay {
       let code;
       do code = Array.from({ length: CODE_LENGTH }, () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]).join('');
       while (this.rooms.has(code));
-      const room = { code, listed: false, title: '', pass: '', build: first.build, seats: [first, null], quick: true, offering: null };
+      const room = { code, listed: false, title: '', pass: '', seats: [first, null], quick: true, offering: null };
       this.rooms.set(code, room);
       first.room = room;
       first.seat = 0;
@@ -406,7 +436,7 @@ export class Relay {
     const rooms = [...this.rooms.values()]
       .filter((room) => room.listed && room.seats[1] === null && room.offering === null)
       .slice(0, this.config.listed)
-      .map((room) => ({ code: room.code, title: room.title, host: room.seats[0].name, locked: room.pass !== '', same: room.build === client.build }));
+      .map((room) => ({ code: room.code, title: room.title, host: room.seats[0].name, locked: room.pass !== '', same: room.seats[0].build === client.build && hasFighter(client, room.seats[0].fighter) }));
     this.tell(client, { ev: 'rooms', rooms });
   }
 

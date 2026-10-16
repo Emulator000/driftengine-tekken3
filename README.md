@@ -195,8 +195,9 @@ match then starts at once on a stage drawn at random, three rounds to win, and o
 you both choose a rematch or the waiting room. Only the pads' presses and the match's setup
 go between the two games; each runs the whole match itself, at once from your own pad, the other's
 put right as it arrives (rollback), straight between the two machines where they can reach each
-other and through the server where not. Both of you need the same version and the same fighters'
-data (with Kazuya or without, or any fighter one of you lacks): players who differ are never paired.
+other and through the server where not. Both of you need the same version, and each the data of
+the fighter the other chose: a player with Kazuya is paired with one without him as long as
+neither of you plays him.
 
 `npm run dev` and `npm run dev:lan` run the server beside the page, so two players on your home
 network (`npm run dev:lan`) play with nothing else to run. Over the internet, one of you runs the

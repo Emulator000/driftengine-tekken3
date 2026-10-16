@@ -151,6 +151,34 @@ test('a tap made while a side waits for the other is played with the next field,
   assert.equal(b.session.desync, null);
 });
 
+test("a match's words reach only it: the last match's, sent again as it ended, are passed over by the next on the same link", () => {
+  const network = new LoopbackNetwork();
+  const transports = [0, 1].map((seat) => network.open({ self: seat, seed: 3 + seat }));
+  const sessions = (match) =>
+    [toyGame(), toyGame()].map((game, seat) => {
+      const fingerprints = new Map();
+      const snapshotter = new StateSnapshotter(game.state);
+      const session = new MatchSession({ step: (words, field) => (game.field(words), (field & 7) === 0 && fingerprints.set(field, snapshotter.digestNow())), snapshotter, transport: transports[seat], self: seat, inputDelay: [2, 2], match });
+      return { game, session, fingerprints };
+    });
+  const first = sessions(1);
+  for (let frame = 0; frame < 60; frame += 1) {
+    first.forEach((side, seat) => side.session.advance(script(seat, side.session.tick)));
+    network.advance(FIELD_MS);
+  }
+  const next = sessions(2);
+  for (let frame = 0; frame < 120; frame += 1) {
+    /* The first match's side keeps sending its last words again, as it does while the other may be behind. */
+    if (frame % 3 === 0) first[0].session.sendAgain();
+    next.forEach((side, seat) => side.session.advance(script(seat + 1, side.session.tick)));
+    network.advance(FIELD_MS);
+  }
+  assert.deepEqual(next.map((side) => side.session.state), ['running', 'running'], `no difference found (${next[0].session.reason || next[1].session.reason})`);
+  const { ticks, differ } = agreed(next, Math.min(...next.map((side) => side.session.tick)) - 2 * ROLLBACK_DEPTH);
+  assert.ok(ticks.length > 8);
+  assert.deepEqual(differ, [], 'the same game, field by field');
+});
+
 test('a side that hears nothing waits past the rollback window, and calls it a disconnection after five seconds', () => {
   const match = pair([toyGame(), toyGame()], { latencyMs: 20 });
   run(match, 120);

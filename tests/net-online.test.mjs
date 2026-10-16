@@ -2,7 +2,8 @@
  * Online play end to end on this machine: the server (`server/relay.mjs`) on a free port, and two
  * players' sides over real WebSockets, each playing a small made-up game: a quick match pairs them
  * and they play the same game; a room hosted is joined by its code, and listed in the room list
- * while it waits; a player with other game data is refused; a player leaving ends the other's
+ * while it waits; players are paired whatever fighters each has, unless one chose a fighter the
+ * other lacks, and another version is refused; a player leaving ends the other's
  * match; a match over asks both for a rematch; the server's settings come from a file, the environment and the command line in turn.
  */
 import assert from 'node:assert/strict';
@@ -25,16 +26,23 @@ async function server(settings = []) {
   return { relay, url: `ws://127.0.0.1:${port}/` };
 }
 
-/** A side: its made-up game, and what began and ended. */
-function side(url, { build = 'same', name = 'A', delay = 2, now } = {}) {
+/** Every roster id, Kazuya's (22) among them. */
+const EVERY = Array.from({ length: 23 }, (_, i) => i);
+
+/** A side: its made-up game (its version, the fighters whose data it has), the fighter it chose (`pick` changes it), and what began and ended. */
+function side(url, { version = '0.6.1', roster = EVERY, fighter = 0, name = 'A', delay = 2, now } = {}) {
+  const chosen = { fighter };
   const log = { began: null, ended: null, begun: 0, waited: 0 };
   const state = { at: [0, 0], mix: 1, fields: 0 };
   const game = {
-    build,
+    version,
+    roster,
     options: () => ({ rounds: 3 }),
     begin(start, seat) {
       log.began = { start, seat };
       log.begun += 1;
+      /* Every match from the same start, as the game's own begins from the state it powers on with. */
+      Object.assign(state, { at: [0, 0], mix: 1, fields: 0 });
       return {
         step: ([a, b]) => {
           state.at[0] += a & 1;
@@ -52,8 +60,8 @@ function side(url, { build = 'same', name = 'A', delay = 2, now } = {}) {
       log.waited += 1;
     },
   };
-  const online = new Online({ url: () => url, game, player: () => ({ name, delay, keys: [0, 1, 2, 3, 4, 5, 6, 7] }), open: (at) => new WebSocket(at), peerConnection: null, now });
-  return { online, state, log };
+  const online = new Online({ url: () => url, game, player: () => ({ name, delay, keys: [0, 1, 2, 3, 4, 5, 6, 7], fighter: { roster: chosen.fighter, costume: 0 } }), open: (at) => new WebSocket(at), peerConnection: null, now });
+  return { online, state, log, pick: (to) => (chosen.fighter = to) };
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -140,28 +148,43 @@ test('a room is joined by its code, listed while it waits if asked; a player lea
   }
 });
 
-test('a wrong code, and another game (here a roster without one fighter), are refused with a reason; the queue pairs only the same roster', async () => {
+test('players are paired whatever fighters each has, unless one chose a fighter the other lacks; a wrong code and another version are refused with a reason', async () => {
   const { relay, url } = await server();
-  const a = side(url, { build: '0.6.0 7fffff 0123abcd' });
-  const b = side(url, { build: '0.6.0 3fffff 0123abcd' });
+  const withoutKazuya = EVERY.filter((fighter) => fighter !== 22);
+  const a = side(url, { fighter: 22 });
+  const b = side(url, { roster: withoutKazuya, fighter: 3 });
+  const old = side(url, { version: '0.6.0' });
   try {
     b.online.join('ZZZZ');
-    await frames([a, b], () => b.online.ended !== '');
+    await frames([a, b, old], () => b.online.ended !== '');
     assert.equal(b.online.ended, 'NO ROOM WITH THAT CODE');
-    a.online.host(false);
-    await frames([a, b], () => a.online.code !== '');
+    a.online.host(true);
+    await frames([a, b, old], () => a.online.state === 'hosting' && a.online.code !== '');
+    b.online.listRooms(true);
+    await frames([a, b, old], () => b.online.rooms.length > 0);
+    assert.equal(b.online.rooms[0].same, false, "a room whose host plays a fighter this side lacks, greyed");
     b.online.join(a.online.code);
-    await frames([a, b], () => b.online.ended !== '' && b.online.ended !== 'NO ROOM WITH THAT CODE');
-    assert.equal(b.online.ended, 'YOU LACK FIGHTER 22');
+    await frames([a, b, old], () => b.online.ended !== '' && b.online.ended !== 'NO ROOM WITH THAT CODE');
+    assert.equal(b.online.ended, 'YOU LACK FIGHTER 22', "the host's Kazuya, whom this side lacks");
     a.online.cancel();
+    b.online.listRooms(false);
     a.online.quickMatch();
     b.online.quickMatch();
-    await frames([a, b], () => false, 40);
-    assert.equal(a.online.state, 'queued', 'the queue offers only the same game');
-    assert.equal(b.online.state, 'queued');
+    await frames([a, b, old], () => false, 40);
+    assert.deepEqual([a.online.state, b.online.state], ['queued', 'queued'], 'not paired while one plays a fighter the other lacks');
+    a.pick(5);
+    a.online.quickMatch();
+    await frames([a, b, old], () => a.online.state === 'offered' && b.online.state === 'offered');
+    assert.equal(a.online.state, 'offered', 'paired once both fighters are ones both have, their rosters differing still');
+    a.online.cancel();
+    b.online.cancel();
+    old.online.host(false);
+    await frames([a, b, old], () => old.online.state === 'hosting' && old.online.code !== '');
+    a.online.join(old.online.code);
+    await frames([a, b, old], () => a.online.ended !== '');
+    assert.equal(a.online.ended, 'THE OTHER PLAYER HAS VERSION 0.6.0');
   } finally {
-    a.online.disconnect();
-    b.online.disconnect();
+    for (const one of [a, b, old]) one.online.disconnect();
     await relay.close();
   }
 });
@@ -278,17 +301,19 @@ test("at a room the host is asked: a no sends the guest away with the reason, th
   }
 });
 
-test('why two builds cannot play each other: the version, the fighters one side lacks by name, the data', async () => {
-  const { buildDiffers, rosterWord } = await import('../src/net/online.ts');
+test('why two players cannot play each other: the version, or a chosen fighter the other lacks, by name; their rosters and data otherwise free to differ', async () => {
+  const { cannotPlay, rosterWord } = await import('../src/net/online.ts');
   const names = (fighter) => ['PAUL', 'LAW', 'LEI'][fighter] ?? (fighter === 22 ? 'KAZUYA' : `F${fighter}`);
-  const all = rosterWord(Array.from({ length: 23 }, (_, i) => i));
-  const noKazuya = rosterWord(Array.from({ length: 22 }, (_, i) => i));
+  const all = rosterWord(EVERY);
+  const noKazuya = rosterWord(EVERY.filter((fighter) => fighter !== 22));
   assert.equal(all, '7fffff');
-  assert.equal(buildDiffers(`0.6.0 ${all} aa`, `0.5.9 ${all} aa`, names), 'THE OTHER PLAYER HAS VERSION 0.5.9');
-  assert.equal(buildDiffers(`0.6.0 ${all} aa`, `0.6.0 ${noKazuya} aa`, names), 'THE OTHER PLAYER LACKS KAZUYA');
-  assert.equal(buildDiffers(`0.6.0 ${noKazuya} aa`, `0.6.0 ${all} aa`, names), 'YOU LACK KAZUYA');
-  assert.equal(buildDiffers(`0.6.0 ${all} aa`, `0.6.0 ${rosterWord([3, 4, 5, 6])} aa`, names), 'THE OTHER PLAYER LACKS PAUL AND LAW AND 17 MORE');
-  assert.equal(buildDiffers(`0.6.0 ${all} aa`, `0.6.0 ${all} bb`, names), 'THEIR GAME DATA DIFFERS');
+  const us = (fighter, roster = all, version = '0.6.1') => ({ version, roster, fighter });
+  assert.equal(cannotPlay(us(0), us(1, all, '0.6.0'), names), 'THE OTHER PLAYER HAS VERSION 0.6.0');
+  assert.equal(cannotPlay(us(22), us(0, noKazuya), names), 'THE OTHER PLAYER LACKS KAZUYA');
+  assert.equal(cannotPlay(us(0, noKazuya), us(22), names), 'YOU LACK KAZUYA');
+  assert.equal(cannotPlay(us(1, noKazuya), us(2), names), '', 'Kazuya on one side only, neither playing him');
+  assert.equal(cannotPlay(us(0, rosterWord([0, 1])), us(1, rosterWord([0, 1, 2]))), '', 'any two rosters holding both fighters');
+  assert.equal(cannotPlay(us(-1), us(22, noKazuya)), '', 'a fighter not chosen yet asks nothing');
 });
 
 test("the server's settings: a file, then the environment, then the command line", () => {

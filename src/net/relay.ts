@@ -27,7 +27,7 @@ export interface ListedRoom {
   readonly title: string;
   readonly host: string;
   readonly locked: boolean;
-  /** Whether its host plays the same game data as this one. */
+  /** Whether this player can join it: its host plays the same version, with a fighter whose data this one has. */
   readonly same: boolean;
 }
 
@@ -42,7 +42,7 @@ export type ServerEvent =
   | { readonly ev: 'rooms'; readonly rooms: readonly ListedRoom[] }
   | { readonly ev: 'peer'; readonly body: unknown }
   | { readonly ev: 'left'; readonly why: string }
-  | { readonly ev: 'refused'; readonly why: string; readonly theirs?: string }
+  | { readonly ev: 'refused'; readonly why: string; readonly theirs?: unknown }
   | { readonly ev: 'pong'; readonly t: number }
   | { readonly ev: 'error'; readonly why: string };
 

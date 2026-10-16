@@ -9,7 +9,7 @@
  * while a match is played, a line over the picture says how its connection goes.
  */
 import pkg from '../../package.json';
-import { Online, REMATCH_MS, rosterWord, type Start } from '../net/online.ts';
+import { Online, REMATCH_MS, type Start } from '../net/online.ts';
 import { StateSnapshotter } from '../net/snapshot.ts';
 import { ROLLBACK_DEPTH } from '../net/session.ts';
 import type { FightData } from '../sim/fight/state.ts';
@@ -107,7 +107,6 @@ export class OnlinePlay {
   private readonly game: Game;
   private readonly hooks: OnlineHooks;
   private readonly kept: Kept;
-  private buildValue = '';
   /** The local game's state while a match is played, its snapshotter, and the data its fight was loaded with. */
   private local: { readonly snapshotter: StateSnapshotter<GameState>; readonly slot: ReturnType<StateSnapshotter<GameState>['create']>; readonly match: FightData | null } | null = null;
   /** The match's snapshotter, told of each match's data as it is made. */
@@ -131,15 +130,13 @@ export class OnlinePlay {
     this.kept = readKept();
     const online = game.state.online;
     Object.assign(online, { delay: this.kept.delay, listed: this.kept.listed, side: this.kept.side, name: this.kept.name, server: params.get('server') ?? this.kept.server });
-    const self = this;
     this.online = new Online({
       url: () => serverUrl(this.game.state.online.server),
       player: () => ({ name: this.kept.name, delay: this.kept.delay, keys: this.localKeys(), fighter: this.localFighter() }),
       lagMs: Math.max(0, Number(params.get('netlag') ?? 0) || 0),
       game: {
-        get build() {
-          return self.build;
-        },
+        version: pkg.version,
+        roster: this.hooks.roster,
         fighterName: (fighter) => this.hooks.data.tables.roster.codes[fighter * 4]?.name ?? `FIGHTER ${fighter}`,
         options: () => this.decided(),
         begin: (start, seat) => this.begin(start, seat),
@@ -185,20 +182,6 @@ export class OnlinePlay {
   /** A match's data, made: its objects copied by reference in the match's saved states. */
   shared(data: FightData): void {
     this.match?.share(data);
-  }
-
-  /**
-   * The game both sides must share, as three words: the version, the roster (the fighters whose
-   * data this side has) and the fingerprint of the game's tables and scenes but its models (an
-   * arcade board's change them, as they change only the picture).
-   */
-  private get build(): string {
-    if (this.buildValue === '') {
-      const { tables, scenes } = this.hooks.data;
-      const digest = new StateSnapshotter({ tables: { ...tables, models: null }, scenes }).digestNow();
-      this.buildValue = `${pkg.version} ${rosterWord(this.hooks.roster)} ${digest}`;
-    }
-    return this.buildValue;
   }
 
   /** The fighter this player chose in the waiting room (its human's side). */

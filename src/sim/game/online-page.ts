@@ -392,7 +392,7 @@ function roomsFrame(game: GameState, data: Data): boolean {
     const colour = !open ? Colour.GREY : picked ? Colour.PICKED : Colour.ITEM;
     print(game, 0, colour, LIST.x, y, one.code);
     print(game, 0, colour, LIST.x + 6 * ADVANCE, y, fit(one.title, 19));
-    const side = !one.same ? 'OTHER DATA' : one.locked ? 'LOCKED' : one.host;
+    const side = !one.same ? 'CANNOT JOIN' : one.locked ? 'LOCKED' : one.host;
     print(game, 0, open ? Colour.VALUE : Colour.GREY, LIST.x + LIST.width - side.length * ADVANCE, y, side);
   });
   prompts(game, Colour.ITEM, CENTRE, 400, [['BUTTON', 'JOIN'], ['SELECT', 'BACK']]);
