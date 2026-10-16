@@ -60,6 +60,9 @@ export interface OnlineGame<S> {
   readonly roster: readonly number[];
   /** A fighter's name, for saying which one a side lacks. */
   readonly fighterName?: (fighter: number) => string;
+  /** A player's buttons as the game takes them: each of the pad's eight an entry of its table of `keyChoices`; its own setup as it powers on, for a player who sent none the game can take. */
+  readonly keyChoices: number;
+  readonly defaultKeys: readonly number[];
   /** The match's options, as the host decides them. */
   options(): Readonly<Record<string, unknown>>;
   /** The match begun from its start, this side in `seat`: the game reset to it, and how a field of it is stepped and saved. */
@@ -579,7 +582,9 @@ export class Online<S> {
     if (this.seat !== 0) return;
     const ours = this.options.player();
     const delay = Math.max(ours.delay, Number.isFinite(theirs.delay) ? theirs.delay : DEFAULT_INPUT_DELAY);
-    const keys = (k: readonly number[]): readonly number[] => (Array.isArray(k) && k.length === 8 && k.every((n) => Number.isInteger(n) && 0 <= n && n < 8) ? [...k] : [0, 1, 2, 3, 4, 5, 6, 7]);
+    /* Each player's own buttons, as the game takes them; the game's setup as it powers on for one it cannot. */
+    const { keyChoices, defaultKeys } = this.options.game;
+    const keys = (k: readonly number[]): readonly number[] => (Array.isArray(k) && k.length === 8 && k.every((n) => Number.isInteger(n) && 0 <= n && n < keyChoices) ? [...k] : [...defaultKeys]);
     const fighter = (f: Fighter | undefined): Fighter => ({ roster: Number.isInteger(f?.roster) ? f!.roster : 0, costume: Number.isInteger(f?.costume) ? f!.costume & 3 : 0 });
     const start: Start = { k: 'start', options: this.options.game.options(), delay, keys: [keys(ours.keys), keys(theirs.keys)], fighters: [fighter(ours.fighter), fighter(theirs.fighter)], match: 1 };
     this.starting = { start, at: this.now + GREETING_HOLD_MS };

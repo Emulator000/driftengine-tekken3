@@ -38,6 +38,8 @@ const RESET_TO = new Set<number>([Scene.BOOT, Scene.LOGO, Scene.TITLE, Scene.MEN
 const PAST_FIELDS = ROLLBACK_DEPTH + 4;
 /** The last roster id whose home stage an online match may be drawn on (Kazuya's, past it, has none of his own). */
 const LAST_STAGE_ROSTER = 0x15;
+/** The fields of a match's presses the page's probe keeps. */
+const PRESSES_KEPT = 600;
 /** The state's fields that are this machine's own, never the match's: left out of the fingerprint. */
 const OWN = ['remake', 'online'];
 
@@ -134,6 +136,8 @@ export class OnlinePlay {
       game: {
         version: pkg.version,
         roster: this.hooks.roster,
+        keyChoices: this.hooks.data.scenes.keyBits.length,
+        defaultKeys: this.hooks.data.scenes.powerOn.keys[0]!,
         fighterName: (fighter) => this.hooks.data.tables.roster.codes[fighter * 4]?.name ?? `FIGHTER ${fighter}`,
         options: () => this.decided(),
         begin: (start, seat) => this.begin(start, seat),
@@ -155,11 +159,22 @@ export class OnlinePlay {
     });
   }
 
+  /** The match's newest presses, for the page's probe: each field's pads' words and the game's buttons newly down for them, by field (a field played again in a rollback put right). */
+  private readonly presses = new Map<number, readonly [number, number, number, number]>();
+
+  private notePresses(field: number, words: readonly [number, number]): void {
+    const pressed = this.game.state.world.input.pads.pressed;
+    if (pressed[0] === 0 && pressed[1] === 0) this.presses.delete(field);
+    else this.presses.set(field, [words[0], pressed[0]!, words[1], pressed[1]!]);
+    for (const at of this.presses.keys()) if (at < field - PRESSES_KEPT) this.presses.delete(at);
+  }
+
   /** For the page's probe: where online play is, and the match's connection while one is played. */
   probe(): Record<string, unknown> {
     const session = this.online.session;
     const page = this.game.state.online;
-    return { state: this.online.state, page: { status: page.status, warming: page.warming, card: page.card, answer: page.answer, fresh: this.game.state.world.input.fresh[0] }, ...(session === null ? {} : { field: session.tick, session: session.state, ahead: session.ahead, ...session.quality, theyWait: this.online.theyWait, direct: this.online.direct }) };
+    const presses = [...this.presses.entries()].sort(([a], [b]) => a - b).map(([field, [raw0, game0, raw1, game1]]) => ({ field, pads: [raw0.toString(16), raw1.toString(16)], buttons: [game0.toString(16), game1.toString(16)] }));
+    return { state: this.online.state, page: { status: page.status, warming: page.warming, card: page.card, answer: page.answer, fresh: this.game.state.world.input.fresh[0] }, ...(session === null ? {} : { field: session.tick, session: session.state, ahead: session.ahead, ...session.quality, theyWait: this.online.theyWait, direct: this.online.direct, presses }) };
   }
 
   /** Whether a match is being played (the page steps it, not the local game). */
@@ -361,7 +376,7 @@ export class OnlinePlay {
     return [out[this.online.seat] ?? [0, 0], [0, 0]];
   }
 
-  private begin(start: Start, seat: 0 | 1): { step: (words: readonly [number, number]) => void; snapshotter: StateSnapshotter<GameState> } {
+  private begin(start: Start, seat: 0 | 1): { step: (words: readonly [number, number], field: number) => void; snapshotter: StateSnapshotter<GameState> } {
     const game = this.game;
     /* A rematch counts on; a new opponent from nothing. */
     if (this.online.state !== 'result') this.score.fill(0);
@@ -407,7 +422,14 @@ export class OnlinePlay {
     this.match = new StateSnapshotter(state, OWN);
     this.shareData(this.match);
     console.log(`[tekken3 online] a match with ${this.online.opponent}, this side the ${seat === 0 ? 'first' : 'second'} pad, input delay ${start.delay}`);
-    return { step: (words) => game.field(words), snapshotter: this.match };
+    this.presses.clear();
+    return {
+      step: (words, field) => {
+        game.field(words);
+        this.notePresses(field, words);
+      },
+      snapshotter: this.match,
+    };
   }
 
   private shareData(snapshotter: StateSnapshotter<GameState>): void {

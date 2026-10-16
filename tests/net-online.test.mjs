@@ -30,13 +30,19 @@ async function server(settings = []) {
 const EVERY = Array.from({ length: 23 }, (_, i) => i);
 
 /** A side: its made-up game (its version, the fighters whose data it has), the fighter it chose (`pick` changes it), and what began and ended. */
-function side(url, { version = '0.6.1', roster = EVERY, fighter = 0, name = 'A', delay = 2, now } = {}) {
+/** The game's own button setup as it powers on (each of the pad's eight buttons an entry of its table of thirteen; 12 none), and one of a player's own. */
+const DEFAULT_KEYS = [12, 12, 12, 12, 1, 3, 2, 0];
+const OWN_KEYS = [12, 12, 12, 12, 0, 1, 2, 3];
+
+function side(url, { version = '0.6.1', roster = EVERY, fighter = 0, name = 'A', delay = 2, now, keys = DEFAULT_KEYS } = {}) {
   const chosen = { fighter };
   const log = { began: null, ended: null, begun: 0, waited: 0 };
   const state = { at: [0, 0], mix: 1, fields: 0 };
   const game = {
     version,
     roster,
+    keyChoices: 13,
+    defaultKeys: DEFAULT_KEYS,
     options: () => ({ rounds: 3 }),
     begin(start, seat) {
       log.began = { start, seat };
@@ -60,7 +66,7 @@ function side(url, { version = '0.6.1', roster = EVERY, fighter = 0, name = 'A',
       log.waited += 1;
     },
   };
-  const online = new Online({ url: () => url, game, player: () => ({ name, delay, keys: [0, 1, 2, 3, 4, 5, 6, 7], fighter: { roster: chosen.fighter, costume: 0 } }), open: (at) => new WebSocket(at), peerConnection: null, now });
+  const online = new Online({ url: () => url, game, player: () => ({ name, delay, keys, fighter: { roster: chosen.fighter, costume: 0 } }), open: (at) => new WebSocket(at), peerConnection: null, now });
   return { online, state, log, pick: (to) => (chosen.fighter = to) };
 }
 
@@ -79,7 +85,7 @@ async function frames(sides, done, most = 600, word = (seat, frame) => (frame >>
 test('a quick match pairs two players, the host starts it and both play the same game', async () => {
   const { relay, url } = await server();
   const a = side(url, { name: 'Host', delay: 1 });
-  const b = side(url, { name: 'Guest', delay: 3 });
+  const b = side(url, { name: 'Guest', delay: 3, keys: OWN_KEYS });
   try {
     a.online.quickMatch();
     await frames([a, b], () => a.online.state === 'queued');
@@ -98,6 +104,7 @@ test('a quick match pairs two players, the host starts it and both play the same
     assert.equal(b.online.opponent, 'HOST');
     assert.deepEqual([a.log.began.seat, b.log.began.seat], [0, 1]);
     assert.equal(b.log.began.start.delay, 3, "the larger delay asked for");
+    assert.deepEqual(b.log.began.start.keys, [DEFAULT_KEYS, OWN_KEYS], "each player's own buttons, the game's setup as it powers on among them");
     assert.deepEqual(b.log.began.start.options, { rounds: 3 }, "the host's options");
     await frames([a, b], () => a.online.session === null || b.online.session === null || (a.online.session.tick > 300 && b.online.session.tick > 300), 2000);
     assert.ok(a.online.session !== null && b.online.session !== null, `the match went on (${a.log.ended} ${a.online.ended}, ${b.log.ended} ${b.online.ended})`);

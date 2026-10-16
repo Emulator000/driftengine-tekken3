@@ -175,6 +175,36 @@ test('two presses made one after the other while a side waits are played one aft
   }
 });
 
+test('a side that leaves fields out while its pad keeps changing plays each press a steady few fields after it is made, never later and later', () => {
+  /* The first pad's word of each field played on the first side, and the frame it was first played on. */
+  const firstAt = new Map();
+  let frame = 0;
+  const games = [0, 1].map((seat) => {
+    const state = { fields: 0 };
+    return { state, field: ([a]) => { if (seat === 0 && !firstAt.has(state.fields)) firstAt.set(state.fields, { frame, word: a }); state.fields += 1; } };
+  });
+  const match = pair(games, { latencyMs: 30, jitterMs: 10 });
+  const [a, b] = match.sides;
+  /* Buttons 1 to 4 tapped in turn, five frames down and four up, the stick moving under them. */
+  const BUTTONS = [0x80, 0x10, 0x40, 0x20];
+  const pad = (f) => (f % 9 < 5 ? BUTTONS[Math.floor(f / 9) % 4] : 0) | ((f >> 2) & 1 ? 0x2000 : 0);
+  const made = [];
+  for (; frame < 1800; frame += 1) {
+    const word = pad(frame);
+    if ((word & 0xf0) !== 0 && (pad(frame - 1) & 0xf0) !== (word & 0xf0)) made.push(frame);
+    a.session.advance(word);
+    /* The second side's page runs a little slow: this one, ahead, waits and leaves fields out. */
+    if (frame % 7 !== 0) b.session.advance(0);
+    match.network.advance(FIELD_MS);
+  }
+  assert.ok(a.session.quality.stalls + a.session.quality.skipped > 50, 'the first side waited and left fields out');
+  const fields = [...firstAt.entries()].sort(([x], [y]) => x - y).map(([, v]) => v);
+  const playedAt = fields.filter((v, i) => i > 0 && (v.word & 0xf0) !== 0 && (fields[i - 1].word & 0xf0) !== (v.word & 0xf0)).map((v) => v.frame);
+  const lags = playedAt.map((at, i) => at - made[i]);
+  assert.ok(lags.length > 150, `presses played: ${lags.length}`);
+  assert.ok(Math.max(...lags.slice(-40)) <= 12, `still played within a few fields at the end: ${lags.slice(-12).join(' ')}`);
+});
+
 test("a mirrored player's stick: its left and right swapped, its up and down and its buttons as they are", async () => {
   const { mirroredStick } = await import('../src/net/wire.ts');
   const [UP, RIGHT, DOWN, LEFT, SQUARE, TRIANGLE, CROSS, CIRCLE] = [0x1000, 0x2000, 0x4000, 0x8000, 0x80, 0x10, 0x40, 0x20];
