@@ -11,7 +11,7 @@
 | `npm run arcade -- "<folder>"` | Reads the dump of your own Tekken 3 arcade board (its chips' files, in one folder) for the arcade's stages, into `.cache/arcade/`; then run `npm run extract` again ([Tekken 3 Arcade assets](../README.md#tekken-3-arcade-assets-optional)) |
 | `npm run remaster` | On Linux, makes the remaster's assets on this machine, on its GPU where it has one (`-- --cpu`, `-- --rocm`, `-- --cuda` to choose), into `public/assets/remaster/`; then REMASTER in REMAKE OPTION draws with them ([The remaster](../README.md#the-remaster-optional)) |
 | `npm run dev` | Serves the game on `localhost:5190` (or the next free port), running `extract` and `import` first when their output is missing |
-| `npm run dev:lan` | Serves the game to your own devices on your home network, over HTTPS ([In a phone's browser](#in-a-phones-browser)) |
+| `npm run dev:lan` | Serves the game to your own devices on your home network, over HTTPS and over plain HTTP at the next port ([Over your home network](#over-your-home-network)) |
 | `npm run desktop` | Builds the game as an app for this computer (Windows, macOS or Linux), with your disc's data in it (and the remaster's assets, once `npm run remaster` has made them), into `out/<target>/`; `-- mac-arm64` or `-- mac-x64` builds a Mac's on Linux ([As an app](#as-an-app)) |
 | `npm run android` | Builds the game as an Android app for your own phone, with your disc's data in it, into `out/android/` ([As an app](#as-an-app)) |
 | `npm run ios` | On a Mac with Xcode, builds the game as an iPhone app, with your disc's data in it, into `out/ios/` ([As an app](#as-an-app)) |
@@ -33,6 +33,7 @@ which is the system's own.
 | `CSC_LINK`, `CSC_KEY_PASSWORD` (`WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD` on Windows) | A code-signing certificate of your own for the computer's app (electron-builder's names) |
 | `APPLE_TEAM_ID` | Your Apple developer team, signing the iPhone app as it is built (without it, Xcode signs it for your own iPhone) |
 | `T3_RELAY=0` | `npm run dev` and `npm run dev:lan` leave out the online server they run beside the page |
+| `T3_LAN_HTTP=0` | `npm run dev:lan` serves over HTTPS alone, without the plain HTTP beside it |
 | `T3_RELAY_*` | The online server's settings, wherever it runs ([server/README.md](../server/README.md)) |
 
 ## The page's options
@@ -347,6 +348,12 @@ into `.cache/lan/`, for the machine's addresses and names, and made again when t
 addresses change (the phone then asks to accept it once more). HTTPS is what gives the page WebGPU
 and full screen there: a page over plain HTTP from another address is refused both. A home router
 keeps the page inside the network unless a port is forwarded to it.
+
+It serves the same page over plain HTTP too, at the port after the HTTPS one (`http://<address>:5191`,
+printed with the others), for a device you would rather not ask to accept the certificate: there
+the page draws with WebGL2 rather than WebGPU, and has no full screen (nor, in some browsers, the
+gamepads), which a browser keeps for a secure page (on the machine itself, `http://localhost` is one). Its online
+server is the same as the HTTPS page's, so players on either meet. `T3_LAN_HTTP=0` leaves it out.
 
 A page opened from another device posts what it logs, its errors and, every two seconds, what its
 frames take (the fields and frames a second, the frames that ran two fields, the time between frames

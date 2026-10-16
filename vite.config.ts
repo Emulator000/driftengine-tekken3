@@ -1,5 +1,6 @@
 import { X509Certificate } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { hostname, networkInterfaces } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,10 +40,7 @@ function lanCertificate(): { key: Buffer; cert: Buffer } {
   const dir = path.join(here, '.cache/lan');
   const keyFile = path.join(dir, 'key.pem');
   const certFile = path.join(dir, 'cert.pem');
-  const addresses = Object.values(networkInterfaces())
-    .flat()
-    .filter((a) => a !== undefined && a.family === 'IPv4')
-    .map((a) => a!.address);
+  const addresses = lanAddresses();
   if (existsSync(keyFile) && existsSync(certFile)) {
     const cert = new X509Certificate(readFileSync(certFile));
     const ends = Date.parse(cert.validTo) - RENEW_DAYS * 24 * 3600 * 1000;
@@ -53,6 +51,46 @@ function lanCertificate(): { key: Buffer; cert: Buffer } {
   writeFileSync(keyFile, key);
   writeFileSync(certFile, cert);
   return { key: Buffer.from(key), cert: Buffer.from(cert) };
+}
+
+/** The machine's IPv4 addresses, on the home network and its own. */
+function lanAddresses(): string[] {
+  return Object.values(networkInterfaces())
+    .flat()
+    .filter((a) => a !== undefined && a.family === 'IPv4')
+    .map((a) => a!.address);
+}
+
+/**
+ * The same page over plain HTTP too, on the home network, at the port after the HTTPS one's (or the
+ * next free past it), for a device that is not to be asked for the certificate. Its WebSockets (the
+ * online server at `/relay`, the page's reloads) go where the HTTPS server's go, so its players meet
+ * those on HTTPS. A page over HTTP from another address is no secure page, which a browser keeps
+ * WebGPU and full screen for (and some the gamepads). `T3_LAN_HTTP=0` leaves it out.
+ */
+function plainHttp(): Plugin {
+  return {
+    name: 'tekken3-lan-http',
+    apply: 'serve',
+    configureServer(server) {
+      const secure = server.httpServer;
+      if (process.env.T3_LAN_HTTP === '0' || secure === null) return;
+      const plain = createServer(server.middlewares);
+      plain.on('upgrade', (request, socket, head) => secure.emit('upgrade', request, socket, head));
+      const listen = (port: number, tries: number): void => {
+        plain.once('error', (error: NodeJS.ErrnoException) => {
+          if (error.code === 'EADDRINUSE' && 0 < tries) listen(port + 1, tries - 1);
+          else server.config.logger.warn(`  HTTP: ${error.message}`);
+        });
+        plain.listen(port, () => server.config.logger.info(lanAddresses().map((address) => `  ➜  HTTP:    http://${address}:${port}/`).join('\n')));
+      };
+      secure.once('listening', () => {
+        const at = secure.address();
+        listen((typeof at === 'object' && at !== null ? at.port : 5190) + 1, 10);
+      });
+      secure.once('close', () => plain.close());
+    },
+  };
 }
 
 /**
@@ -114,8 +152,8 @@ function onlineServer(): Plugin {
 /**
  * `npm run dev:lan` (`vite --mode lan`): the page served to the user's own devices on their home
  * network, over HTTPS with the certificate above, so a phone or a tablet gets WebGPU and full
- * screen, which a page over plain HTTP from another address is refused. Pages there post their log
- * back (`clientLog`).
+ * screen, which a page over plain HTTP from another address is refused; and over plain HTTP too at
+ * the next port (`plainHttp`). Pages there post their log back (`clientLog`).
  */
 export default defineConfig(({ mode }) => ({
   resolve: {
@@ -132,7 +170,7 @@ export default defineConfig(({ mode }) => ({
         ]
       : [],
   },
-  plugins: mode === 'lan' ? [clientLog(), onlineServer()] : [onlineServer()],
+  plugins: mode === 'lan' ? [clientLog(), onlineServer(), plainHttp()] : [onlineServer()],
   /*
    * 5190 when it is free, otherwise the next port that is: Vite prints the one it took. Served to
    * this machine alone, the page loading the disc's data; `npm run dev:lan` alone serves the home

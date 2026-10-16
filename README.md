@@ -156,7 +156,9 @@ npm run dev:lan
 
 serves the game over HTTPS to your devices on your home network and prints the addresses to open
 (`https://<this machine's address>:5190`). The phone asks once to accept the certificate, made on
-your machine the first time; HTTPS is what gives the page WebGPU there.
+your machine the first time; HTTPS is what gives the page WebGPU there. The same page is served
+over plain HTTP at the next port too (`http://<this machine's address>:5191`), drawn with WebGL2
+there and without full screen (nor, in some browsers, the gamepads).
 
 On a touch screen the game shows a pad over the picture: a stick where your left thumb lands, the
 four buttons on the right in a diamond as on the pad (2 above, 1 and 4 either side, 3 below; a
