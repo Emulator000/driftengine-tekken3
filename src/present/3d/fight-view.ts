@@ -399,7 +399,7 @@ export class FightView {
     for (const cell of drawn.stage.cells) for (const piece of cell) this.renderer.prepareMesh(piece.mesh, piece.oneSided ? drawn.stage.oneSidedMaterial : drawn.stage.material, { translucent: true });
     for (const object of drawn.objects) for (const cell of object.stage.cells) for (const piece of cell) this.renderer.prepareMesh(piece.mesh, object.stage.material, { translucent: true });
     /* A sunk floor's grids made, and their pipelines compiled, before the fight shows. */
-    drawn.ground.prepare(state.mode === TEKKEN_FORCE ? undefined : GROUND_TILE);
+    drawn.ground.prepare(state.mode === TEKKEN_FORCE ? undefined : GROUND_TILE, drawn.stage.grid === ARCADE_GRID);
     if (drawn.puddles !== null) this.renderer.prepareMesh(drawn.puddles.mesh, drawn.puddles.material);
     void this.renderer.ready().then(() => {
       if (this.preparing === key) this.prepared = key;
@@ -685,8 +685,26 @@ export class FightView {
     /* Tekken Force's backdrop is the farthest thing drawn: everything after it lies over it. */
     if (drawn?.force != null && state.mode === TEKKEN_FORCE) drawn.force.draw(state, this.data, aspect);
     if (drawn !== null && layout != null) {
-      layGround(state, this.data, this.arena, layout, { widening }, this.ground, drawn.stage.grid === ARCADE_GRID);
+      const arcade = drawn.stage.grid === ARCADE_GRID;
+      layGround(state, this.data, this.arena, layout, { widening }, this.ground, arcade, arcade && scenery ? this.scenery : null);
       const fade = this.files.floorFade !== false;
+      const edge = arcade ? EDGED.get(state.stage) : undefined;
+      drawn.ground.update(this.ground, edge === undefined ? null : { x: this.scenery.x, z: this.scenery.z, yaw: this.scenery.yaw, half: edge * 8 }, fade);
+      const puddles = (): void => {
+        if (drawn.puddles === null) return;
+        renderer.setMaterial(drawn.puddles.material);
+        renderer.drawMesh(drawn.puddles.mesh, IDENTITY);
+        renderer.setMaterial(null);
+      };
+      /*
+       * An arcade stage's floor is drawn under its scenery, as the board draws its floor before its
+       * stage and paints the stage over it: its colours (its veil and puddles with them) writing no
+       * depth, so the stage's own floors and what lies below them show over it, then its depth alone.
+       */
+      if (arcade) {
+        drawn.ground.drawUnder();
+        puddles();
+      }
       if (scenery) {
         /* The stage's moving pieces: a model's parts each where the piece and the part stand this field. */
         for (const object of drawn.objects) placeParts(object.motion, state.frameCount, this.sceneryMatrix(), object.placed);
@@ -700,17 +718,14 @@ export class FightView {
        * sinks into it stays in sight as the game, drawing the floor first and everything over it,
        * keeps it. A sunk floor's veil over it, under its puddles.
        */
-      const edge = drawn.stage.grid === ARCADE_GRID ? EDGED.get(state.stage) : undefined;
-      drawn.ground.update(this.ground, edge === undefined ? null : { x: this.scenery.x, z: this.scenery.z, yaw: this.scenery.yaw, half: edge * 8 }, fade);
-      renderer.setMaterial(drawn.ground.material);
-      drawn.ground.drawRelief();
-      if (drawn.ground.mesh !== null) renderer.drawMesh(drawn.ground.mesh, IDENTITY);
-      renderer.setMaterial(null);
-      drawn.ground.drawVeil();
-      if (drawn.puddles !== null) {
-        renderer.setMaterial(drawn.puddles.material);
-        renderer.drawMesh(drawn.puddles.mesh, IDENTITY);
+      if (arcade) drawn.ground.drawDepth();
+      else {
+        renderer.setMaterial(drawn.ground.material);
+        drawn.ground.drawRelief();
+        if (drawn.ground.mesh !== null) renderer.drawMesh(drawn.ground.mesh, IDENTITY);
         renderer.setMaterial(null);
+        drawn.ground.drawVeil();
+        puddles();
       }
       if (drawn.grass !== null) {
         drawn.grass.plant(this.ground);

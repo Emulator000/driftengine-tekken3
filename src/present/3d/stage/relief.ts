@@ -7,7 +7,7 @@
  * the same heights: each kind's border at the coarsest level, averaged with the kind beside it as the
  * ground lays them, and every finer level's border drawn straight between those points.
  */
-import { createMeshInstances, type InstancedHandle, type MeshHandle, type MeshInstances, type RendererApi, type SurfaceMaterial, type SurfaceTextureHandle } from '@driftengine/core';
+import { createMeshInstances, type InstancedHandle, type MeshHandle, type MeshInstances, type RendererApi, type SurfaceMaterial, type SurfaceTextureHandle, type TranslucentMeshOptions } from '@driftengine/core';
 
 /** A floor's heights by its atlas's texels (0 the deepest joint, 1 a stone's top), and how far its joints sink (metres). */
 export interface FloorRelief {
@@ -155,9 +155,13 @@ export class ReliefTiles {
     for (const level of this.levels.values()) this.renderer.uploadInstanced(level.batch, level.instances);
   }
 
-  /** Draws the tiles laid, with the material set. */
-  draw(): void {
-    for (const level of this.levels.values()) if (level.instances.count > 0) this.renderer.drawInstanced(level.batch, level.instances);
+  /** Draws the tiles laid, with the material set; or blended at `opacity`, as `options` say (whether they write depth). */
+  draw(opacity?: number, options?: TranslucentMeshOptions): void {
+    for (const level of this.levels.values()) {
+      if (level.instances.count === 0) continue;
+      if (opacity === undefined) this.renderer.drawInstanced(level.batch, level.instances);
+      else this.renderer.drawTranslucentInstanced(level.batch, level.instances, opacity, options);
+    }
   }
 
   /** Whether any tile is laid. */
@@ -166,9 +170,9 @@ export class ReliefTiles {
     return false;
   }
 
-  /** Compiles the pipelines its batches are drawn with, `material` the ground's. */
-  prepare(material: SurfaceMaterial<SurfaceTextureHandle>): void {
-    for (const level of this.levels.values()) this.renderer.prepareInstanced(level.batch, material);
+  /** Compiles the pipelines its batches are drawn with, `material` the ground's, and the blended ones with `translucent`. */
+  prepare(material: SurfaceMaterial<SurfaceTextureHandle>, translucent = false): void {
+    for (const level of this.levels.values()) this.renderer.prepareInstanced(level.batch, material, { translucent });
   }
 
   /** A kind's texture coordinate at (s, t) across its tile, `o` 0 for u and 1 for v. */

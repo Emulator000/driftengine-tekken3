@@ -8,7 +8,7 @@
  * fades into the dark by depth, or away from the stage's lights, as the game's does; a sunk one,
  * whose tiles carry no colours of their own, under a black veil as dark as that shade at each corner.
  */
-import type { MeshHandle, RendererApi, SurfaceMaterial, SurfaceTextureHandle } from '@driftengine/core';
+import type { MeshHandle, RendererApi, SurfaceMaterial, SurfaceTextureHandle, TranslucentMeshOptions } from '@driftengine/core';
 import { ReliefTiles, type FloorRelief } from './relief.ts';
 
 /** The display's gamma, which the game's colour arithmetic works in. */
@@ -21,6 +21,8 @@ const CELLS = 100;
 /** How far over the floor its veil lies (metres): over its stones' tops, under anything standing on them. */
 const VEIL_LIFT = 0.004;
 const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+/** The least opacity a draw is made with: the floor's depth written, its colour all but none of it. */
+const DEPTH_ONLY = 1 / 1024;
 
 export interface GroundState {
   readonly drawn: boolean;
@@ -156,9 +158,10 @@ export class Ground {
 
   /**
    * Has the pipelines a patch is drawn with compiled before the fight shows: a tile made the two
-   * ways a patch is (its colours rewritten in place, and cut to a square), never drawn.
+   * ways a patch is (its colours rewritten in place, and cut to a square), never drawn; and the
+   * blended ones, with `under`, for a floor drawn under the scenery.
    */
-  prepare(side?: number): void {
+  prepare(side?: number, under = false): void {
     /* A sunk floor's grids, all made now, `side` mm to a tile, as many as a wide picture's patch has. */
     if (side !== undefined) this.reliefTiles?.ready(side, 10, 1024);
     const tile = (): Parameters<RendererApi['createMesh']>[0] => ({
@@ -170,8 +173,8 @@ export class Ground {
       indices: new Uint32Array([0, 1, 2, 1, 3, 2]),
     });
     this.warm ??= [this.renderer.createMesh(tile(), { dynamicColors: true }), this.renderer.createMesh(tile())];
-    for (const mesh of this.warm) this.renderer.prepareMesh(mesh, this.material);
-    this.reliefTiles?.prepare(this.material);
+    for (const mesh of this.warm) this.renderer.prepareMesh(mesh, this.material, { translucent: under });
+    this.reliefTiles?.prepare(this.material, under);
   }
 
   /**
@@ -244,6 +247,27 @@ export class Ground {
       }
     }
     this.veil = this.renderer.createMesh({ positions, normals, colors: new Float32Array(n * 12), emissive: new Float32Array(n * 4), uvs: new Float32Array(n * 8), indices, channel });
+  }
+
+  /**
+   * The floor under the scenery, as the board draws its floor before its stage: its colours writing
+   * no depth, its veil over them, so the scenery is drawn over it wherever both are.
+   */
+  drawUnder(): void {
+    this.renderer.setMaterial(this.material);
+    this.reliefTiles?.draw(1, { depthWrite: false });
+    if (this.mesh !== null) this.renderer.drawTranslucentMesh(this.mesh, IDENTITY, 1, { depthWrite: false });
+    this.renderer.setMaterial(null);
+    this.drawVeil();
+  }
+
+  /** The floor's depth alone, once the scenery is drawn over it: what is drawn after meets it, and the picture's passes see it. */
+  drawDepth(): void {
+    const options: TranslucentMeshOptions = { depthWrite: true, lit: false, fog: false, tint: [0, 0, 0] };
+    this.renderer.setMaterial(this.material);
+    this.reliefTiles?.draw(DEPTH_ONLY, options);
+    if (this.mesh !== null) this.renderer.drawTranslucentMesh(this.mesh, IDENTITY, DEPTH_ONLY, options);
+    this.renderer.setMaterial(null);
   }
 
   /** The veil over a sunk floor, over the floor and what lies on it, writing no depth. */

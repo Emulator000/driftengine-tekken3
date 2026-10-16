@@ -12,7 +12,9 @@
  * fading by the square of the distance, so the floor sinks into the dark beyond the patch, which
  * is then always laid round the fighters' midpoint; with True Ogre in the match a floor shaded by
  * depth takes the midpoint's light. A view wider than the game's 4:3 widens the culling and lays
- * extra rings of tiles, continuing the map as it repeats. Tekken Force lays a wider patch, 10 × 3
+ * extra rings of tiles, continuing the map as it repeats; an arcade stage's patch reaches as far as
+ * the board's floor, laid round where its scenery stands, and is drawn under the scenery, as the
+ * board paints its stage over its floor. Tekken Force lays a wider patch, 10 × 3
  * tiles of 2500 mm, from its own template and the first three rows of the map, always at the same
  * depth, its shade by depth measured from the camera's own distance, its dark stage lit at the
  * player's feet (the patch laid round them, none of it past the backdrop, which lies over it) and
@@ -36,7 +38,7 @@ export const GROUND_TILE = TILE;
  */
 const FORCE = { tile: 2500, rows: 3, z: 0x145, lightZ: -2000, backdrop: 2500 } as const;
 const TEKKEN_FORCE = 8;
-/** Rings of tiles past the patch: at most, on a wide picture and on an arcade stage, whose scenery stands much farther off than the disc's. */
+/** Rings of tiles past the patch, on a wide picture: at most. */
 const MAX_RINGS = 10;
 const MAX_QUADS = (MAP + 2 * MAX_RINGS) ** 2;
 /** The game's picture: half its width in pixels, the culling's view angle at it (4096ths), the attract intro's. */
@@ -89,8 +91,10 @@ export interface HeldScenery {
 
 export const newHeldScenery = (radius: number, slack: number): HeldScenery => ({ radius, slack, x: 0, z: 0, yaw: 0, last: null, flow: -1 });
 
-/** How far under the fight's floor an arcade stage's own floors lie (mm), so the fight's floor shows over them where both are. */
+/** How far under the fight's floor an arcade stage's own floors lie (mm), which are drawn over it as the board paints its stage over its floor. */
 const ARCADE_DEPTH = 20;
+/** Rings of tiles past an arcade stage's patch: as far as the board's floor reaches, ten of its 2.5 m tiles across. */
+const ARCADE_RINGS = 2;
 
 /** How far the game's place moves in a frame, or its turn, past which it has jumped rather than moved (mm, 4096ths). */
 const JUMP = 1500;
@@ -448,8 +452,12 @@ function lightsOf(state: FightState, kind: number): readonly [readonly number[],
   return [a.skeleton.base.translation, b.skeleton.base.translation];
 }
 
-/** The ground's patch this frame: each quad's map cell, its corners (mm) and their shades (128 unchanged); `arcade` for an arcade stage's floor. */
-export function layGround(state: FightState, data: FightData, arena: ArenaTables, stage: StageLayout, view: View, out: GroundLayout, arcade = false): void {
+/**
+ * The ground's patch this frame: each quad's map cell, its corners (mm) and their shades (128
+ * unchanged); `arcade` for an arcade stage's floor, laid round `around`, where its scenery stands,
+ * as the board's stands round the fighters with its scenery.
+ */
+export function layGround(state: FightState, data: FightData, arena: ArenaTables, stage: StageLayout, view: View, out: GroundLayout, arcade = false, around: { readonly x: number; readonly z: number } | null = null): void {
   const trig = new Trig(data.math.sine);
   const patch = patchOf(state, arena);
   const { tile, columns, rows, template } = patch;
@@ -457,7 +465,8 @@ export function layGround(state: FightState, data: FightData, arena: ArenaTables
   /* The attract intro lays its floor its own way, shaded by depth. */
   const lighting = state.attractIntro !== 0 ? { kind: GroundLight.DEPTH, brightest: 0 } : groundLighting(stage, state.stage, state.match.trueOgres, force && state.force.finalStage !== 0);
   const lit = lighting.kind !== GroundLight.DEPTH;
-  const centre = lit ? litCentre(trig, state, patch) : groundCentre(trig, state, data, patch);
+  const placed = lit ? litCentre(trig, state, patch) : groundCentre(trig, state, data, patch);
+  const centre = placed !== null && around !== null ? ([around.x, around.z] as [number, number]) : placed;
   out.drawn = centre !== null;
   out.shadeOf = null;
   if (centre === null) return;
@@ -526,8 +535,11 @@ export function layGround(state: FightState, data: FightData, arena: ArenaTables
     }
     out.count = kept;
   }
-  /* Tekken Force's patch already reaches past the widest view, at a fixed depth; an arcade stage's floor reaches out toward its walls. */
-  const rings = force ? 0 : arcade ? MAX_RINGS : view.widening <= 1 ? 0 : Math.min(MAX_RINGS, Math.ceil(5 * (view.widening - 1)) + 1);
+  /*
+   * Tekken Force's patch already reaches past the widest view, at a fixed depth. An arcade stage's
+   * reaches as far as the board's: past it lie the stage's own floors, and what lies below them.
+   */
+  const rings = force ? 0 : arcade ? ARCADE_RINGS : view.widening <= 1 ? 0 : Math.min(MAX_RINGS, Math.ceil(5 * (view.widening - 1)) + 1);
   const wrap = (v: number, n: number): number => ((v % n) + n) % n;
   let quad = out.count;
   for (let r = -rings; r < MAP + rings; r += 1) {

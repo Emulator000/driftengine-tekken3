@@ -8,8 +8,9 @@
  * the stage draws them. Stage 3 has a gradient in place of its tiles, and stage 6 its colour over
  * the whole picture. Remastered, its sky goes on up above it in its own colour (the mean of its top
  * texels, or the gradient's first), each column's top texels fading into it, in place of the colour
- * above. A cell that draws nothing, which the board's scenery always hides, shows that sky where
- * nothing stands behind the background.
+ * above. A cell that draws nothing, which the board's scenery always hides, shows the panorama's own
+ * tile there, so a view past the scenery that the board's camera never takes finds the picture going
+ * on rather than a gap; or, where a sky of its own stands behind the background, that sky.
  */
 import { srgbColor, type RendererApi } from '@driftengine/core';
 import { createSpritePass, drawSprite, type SpritePass } from '@driftengine/ui2d';
@@ -138,7 +139,7 @@ export class ArcadeBackground {
         const g = first + k;
         const x = (g * TILE - left) * PIXEL;
         const cell = cells[mod(g, layout.perTurn)];
-        if (cell === 'p') {
+        if (cell === 'p' || (cell !== 'b' && cell !== 't' && !skyBehind)) {
           const c = mod(g, layout.columns);
           const v0 = (r * TILE) / pictureHeight + dv / 2;
           const v1 = ((r + 1) * TILE) / pictureHeight - dv / 2;
@@ -153,7 +154,6 @@ export class ArcadeBackground {
           }
         } else if (cell === 'b') this.fill(x, skyOn && r === 0 ? 0 : y, TILE * PIXEL, skyOn && r === 0 ? y + TILE : TILE, this.colours.below);
         else if (cell === 't') this.fill(x, skyOn && r === 0 ? 0 : y, TILE * PIXEL, skyOn && r === 0 ? y + TILE : TILE, this.colours.cell);
-        else if (!skyBehind) this.fill(x, y, TILE * PIXEL, TILE, this.colours.sky);
       }
     }
     if (y < LINES && layout.drawn.below) {
