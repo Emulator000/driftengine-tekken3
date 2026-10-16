@@ -19,7 +19,9 @@ import { titleScene } from './title.ts';
 import { menuScene, modeScene } from './menu.ts';
 import { FightStep, fightScene, matchSetup } from './fight-scene.ts';
 import { OgreChangeShows } from './ogre-change.ts';
-import { goToScene, holdPicture, queueFile } from './logo.ts';
+import { goToLogo, goToScene, holdPicture, queueFile } from './logo.ts';
+import { warmUpFrame } from './online-page.ts';
+import { stopSounds } from '../fight/voices.ts';
 import { versusScene } from './versus.ts';
 import { selectScene } from './select.ts';
 import { vsSelectScene } from './vs-select.ts';
@@ -35,6 +37,10 @@ export interface GameData {
   fightData(setup: MatchSetup): FightData | null;
   introData(intro: number): FightData;
 }
+
+/** The screen's middle in its units: a scene's, and the fight's (wider). */
+const SCREEN_CENTRE = 0xb8;
+const FIGHT_CENTRE = 0xc0;
 
 /** The music set that is silent, and the scenes it is silent in (the matches', from the fight to the records). */
 const SILENT = 2;
@@ -169,6 +175,11 @@ export class Game {
     return this.match;
   }
 
+  /** The match's data put back with a state put back (the page's, after an online match): the data that state's fight was loaded with. */
+  set fightData(data: FightData | null) {
+    this.match = data;
+  }
+
   /**
    * One field: a frame, or a field the last frame's waits still spend (only the sound's tick then),
    * or one an ending's movie goes on through within its frame, its waits reading the pads.
@@ -238,6 +249,17 @@ export class Game {
   private scene(): void {
     const game = this.state;
     this.musicOptions();
+    /* The waiting room's practice: back to ONLINE MODE's page once nothing is waited for, held under an opponent found. */
+    if (game.online.warming !== 0) {
+      const fight = game.scene === Scene.FIGHT;
+      const asked = warmUpFrame(game, this.data.tables, fight ? FIGHT_CENTRE : SCREEN_CENTRE, fight ? 'fight' : game.scene === Scene.SELECT ? 'select' : 'other');
+      if (asked === 'leave') {
+        stopSounds(game.world, false);
+        goToLogo(game, Scene.OPTIONS);
+        return;
+      }
+      if (asked === 'hold') return;
+    }
     switch (game.scene) {
       case Scene.BOOT:
         return bootScene(game);

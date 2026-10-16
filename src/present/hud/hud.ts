@@ -10,6 +10,7 @@
  */
 import type { RendererApi } from '@driftengine/core';
 import { createSpritePass, drawSprite, type SpritePass } from '@driftengine/ui2d';
+import { mirror, upright, uprightUv } from '../2d/mirror.ts';
 import type { FightData, FightState } from '../../sim/fight/state.ts';
 import { stageCodes } from '../../sim/fight/force-stage.ts';
 import { LARGEST, PaintAtlas, TILES, type AtlasPicture } from '../2d/atlas.ts';
@@ -436,7 +437,7 @@ export class Hud {
   private put(pass: SpritePass, picture: AtlasPicture, x: number, y: number, uv = picture.uv, tint: readonly number[] | null = null): void {
     const px = Math.round(this.width / 2 + (x - MIDDLE) * this.kx);
     const py = Math.round(y * this.ky);
-    drawSprite(pass.batch, picture.slot, { x: MIDDLE + (px - this.width / 2) / this.kx, y: py / this.ky, w: picture.width / this.kx, h: picture.height / this.ky }, uv, tint);
+    drawSprite(pass.batch, picture.slot, { x: MIDDLE + (px - this.width / 2) / this.kx, y: py / this.ky, w: picture.width / this.kx, h: picture.height / this.ky }, uprightUv(uv), tint);
   }
 
   private drawPiece(pass: SpritePass, placed: PlacedPiece): void {
@@ -446,7 +447,7 @@ export class Hud {
         const column = this.barColumn(piece.part);
         if (!column) return;
         const u = (column.uv.u0 + column.uv.u1) / 2;
-        drawSprite(pass.batch, column.slot, { x: placed.x, y: placed.y, w: placed.w, h: placed.h }, { u0: u, v0: column.uv.v0, u1: u, v1: column.uv.v1 }, glowTint(piece.glow));
+        drawSprite(pass.batch, column.slot, { x: placed.x, y: placed.y, w: placed.w, h: placed.h }, uprightUv({ u0: u, v0: column.uv.v0, u1: u, v1: column.uv.v1 }), glowTint(piece.glow));
         return;
       }
       case 'cap': {
@@ -508,8 +509,10 @@ export class Hud {
       this.paintAhead();
     }
     const half = (ACROSS / 2) * (width / height);
+    /* A fight drawn mirrored has the HUD drawn upright over it, each plate showing the fighter now on its side (`mirror.ts`). */
     this.transform.set([1 / half, 0, 0, -2 / LINES, -MIDDLE / half, 1]);
-    const { back, front } = layOutHud(state, this.names, this.data);
+    upright(this.transform);
+    const { back, front } = layOutHud(state, this.names, this.data, mirror.on);
     for (const [pass, pieces] of [
       [this.back, back],
       [this.front, front],

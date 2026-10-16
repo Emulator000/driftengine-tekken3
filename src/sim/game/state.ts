@@ -9,6 +9,7 @@ import { blankFightState } from '../fight/blank.ts';
 import type { FightState } from '../fight/state.ts';
 import type { Progress } from './save.ts';
 import { REMAKE_DEFAULTS } from './remake-options.ts';
+import { blankOnline, type OnlineState } from './online-page.ts';
 
 /** The game's scenes, as it numbers them. */
 export const Scene = {
@@ -573,6 +574,8 @@ export interface GameState {
   readonly earned: { ball: number; theater: number };
   /** The remake's own settings (its page in the Options), as set and as the page started with them; and whether the remaster's assets were made on this machine. */
   readonly remake: { readonly settings: RemakeSettings; readonly started: RemakeSettings; remasterMade: boolean };
+  /** ONLINE MODE's page: its screens and settings, what it asks of the page and what the page tells it of the connection. */
+  readonly online: OnlineState;
   /** The progress as last saved, which a load brings back (null: none saved), as the memory card holds it. */
   kept: Progress | null;
   practice: PracticeState;
@@ -788,6 +791,9 @@ export interface GameState {
   /** Set on a field the game saves its progress (`save.ts`), where the console writes its memory card. */
   saving: number;
   readonly run: {
+    /** Whether this Versus is an online match (both sides set it alike): its handicaps fixed, its stage the code the host drew (`onlineStage`, -1 none). */
+    online: number;
+    onlineStage: number;
     challengers: number;
     challengerChooses: number;
     skipsSelect: number;
@@ -918,6 +924,7 @@ export function blankGameState(): GameState {
     },
     earned: { ball: 0, theater: 0 },
     remake: { settings: { ...REMAKE_DEFAULTS }, started: { ...REMAKE_DEFAULTS }, remasterMade: false },
+    online: blankOnline(),
     kept: null,
     practice: blankPractice(),
     optionsScreen: {
@@ -1065,6 +1072,8 @@ export function blankGameState(): GameState {
     codeRan: 0,
     saving: 0,
     run: {
+      online: 0,
+      onlineStage: -1,
       challengers: 0,
       challengerChooses: 0,
       skipsSelect: 0,

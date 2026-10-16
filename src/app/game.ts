@@ -37,6 +37,8 @@ import { frameRateShown, showFrameRate } from './fps-meter.ts';
 import { startSound } from './sound.ts';
 import { Rumble } from './rumble.ts';
 import { MoviePicture } from '../present/scenes/movie.ts';
+import { OnlinePlay } from './online.ts';
+import { mirror } from '../present/2d/mirror.ts';
 
 /** The frames each of the ten stages takes in the time record `?record=time` sets. */
 const RECORD_STAGE_FRAMES = 30 * 60;
@@ -51,6 +53,10 @@ const ARCADE_STAGES = 10;
 /** Tekken Force's stages, the final one the fifth. */
 const FORCE_STAGES = 5;
 const KAZUYA = 22;
+/** The attract intro's warming: frames in a row this quick end it, or this long whatever they take. */
+const WARM_FAST = 4;
+const WARM_FRAME_MS = 24;
+const WARM_MOST_MS = 15000;
 
 export async function playGame(): Promise<void> {
   const { renderer, backend } = await pageRenderer();
@@ -90,6 +96,7 @@ export async function playGame(): Promise<void> {
     if (needed.some((set) => set === null)) return null;
     const data = fightDataFor(tables, setup, (id) => movesets.get(id)!, common);
     matches.set(key, data);
+    online?.shared(data);
     return data;
   };
 
@@ -106,6 +113,12 @@ export async function playGame(): Promise<void> {
   };
 
   const game = new Game({ tables, scenes, fightData, introData });
+  /* ONLINE MODE: its page's asks, and a match played in place of the local game. */
+  const manifest = (await json('manifest.json')) as { movesets?: number[]; kazuya?: boolean };
+  /* The fighters whose data is in: their moveset imported, Kazuya with his files. */
+  const roster = Array.from({ length: KAZUYA + 1 }, (_, fighter) => fighter).filter((fighter) => (fighter === KAZUYA ? manifest.kazuya === true : (manifest.movesets ?? []).includes(tables.roster.codes[fighter * 4]?.moveset ?? -1)));
+  let online: OnlinePlay | null = null;
+  online = new OnlinePlay(game, { data: game.data, matches: () => matches.values(), roster });
   /* The pads' vibration, felt on the gamepads. */
   const rumble = new Rumble(window);
   /*
@@ -313,6 +326,22 @@ export async function playGame(): Promise<void> {
   };
   /** Whether the attract intro is set up (its world holds the intro's fighters and stage). */
   const introSetUp = (state: typeof game.state): boolean => state.scene === Scene.ATTRACT && state.step === 2 && state.attractScreen.step !== 0;
+  /*
+   * The attract intro warmed before it plays: once prepared, its first view is drawn unseen (black
+   * drawn over it in the same frame) while the game and its song wait, until its frames come at
+   * full speed, so what its pictures make on first use (the skinning, the shadows, the scenery's
+   * solid cells, the remaster's sky and passes) is made then rather than over its first seconds,
+   * which played it slower than its song.
+   */
+  const introWarm = { intro: -1, frames: 0, fast: 0, since: 0, last: 0 };
+  const introWarmed = (intro: number): boolean => introWarm.intro === intro && (WARM_FAST <= introWarm.fast || WARM_MOST_MS <= introWarm.last - introWarm.since);
+  const warmIntro = (intro: number, now: number): void => {
+    if (introWarm.intro !== intro) Object.assign(introWarm, { intro, frames: 0, fast: 0, since: now, last: now });
+    const took = now - introWarm.last;
+    introWarm.frames += 1;
+    introWarm.fast = 2 < introWarm.frames && took < WARM_FRAME_MS ? introWarm.fast + 1 : 0;
+    introWarm.last = now;
+  };
   /**
    * Whether the game may step on to show its 3D, whose drawing is asked for while it is not ready
    * (its models loaded, its pipelines compiled): the fight's over the versus screen's wait, the
@@ -330,7 +359,7 @@ export async function playGame(): Promise<void> {
       const ready = view.prepare(state.world);
       return state.step === FightStep.WAIT || ready;
     }
-    if (introSetUp(state)) return introView(state.attract.intro).prepare(state.world);
+    if (introSetUp(state)) return introView(state.attract.intro).prepare(state.world) && introWarmed(state.attract.intro);
     if (state.scene === Scene.RECORDS && data !== null) return fightFor(data).view.prepare(state.world, true);
     return true;
   };
@@ -340,13 +369,19 @@ export async function playGame(): Promise<void> {
   /*
    * The stage's song waits for the fight to show: a fight's first round starts it while the
    * versus screen it loaded under still shows, or dissolves into the fight's first frame, and it
-   * plays once that is over, as the original starts it with the fight on screen.
+   * plays once that is over, as the original starts it with the fight on screen. The attract
+   * intro's waits likewise for its first frame, which its models and pipelines, made as it is set
+   * up, keep black a while.
    */
   const heldSongs: (typeof game.state.world.sound.commands)[number][] = [];
-  const holdSong = (): void => {
+  const holdSong = (): (typeof game.state.world.sound.commands)[number][] => {
     const state = game.state;
     const fight = state.scene === Scene.FIGHT;
-    holdSongs(state.world.sound.commands, heldSongs, { waiting: fight && (shown === null || shown.startsWith('scene') || (shown === 'fight' && presenter.moving)), fight });
+    const intro = state.scene === Scene.ATTRACT;
+    const commands = [...state.world.sound.commands];
+    const waiting = (fight && (shown === null || shown.startsWith('scene') || (shown === 'fight' && presenter.moving))) || (intro && shown !== 'intro');
+    holdSongs(commands, heldSongs, { waiting, still: fight || intro });
+    return commands;
   };
   /*
    * The display's place (DISPLAY ADJUST): the whole picture moved as the console moves its
@@ -357,17 +392,34 @@ export async function playGame(): Promise<void> {
   const placeDisplay = (): void => {
     const { x, y } = game.state.options.display;
     const home = scenes.powerOn.options.display;
-    const key = `${x} ${y} ${canvas.clientHeight}`;
+    const flipped = mirror.on;
+    const key = `${x} ${y} ${canvas.clientHeight} ${flipped}`;
     if (key === placed) return;
     placed = key;
     const across = ((displayShift(x) - displayShift(home.x)) * canvas.clientHeight * 4) / 3 / SCREEN.width;
     const down = ((y - home.y) * 2 * canvas.clientHeight) / SCREEN.lines;
-    canvas.style.transform = across === 0 && down === 0 ? '' : `translate(${across}px, ${down}px)`;
+    const moved = across === 0 && down === 0 ? '' : `translate(${across}px, ${down}px)`;
+    canvas.style.transform = flipped ? `${moved} scaleX(-1)`.trim() : moved;
+  };
+
+  /** A field of an online match: stepped through its session once this side's fight is ready, its sound and this side's motors after. */
+  const onlineField = (play: OnlinePlay, pads: readonly [number, number]): boolean => {
+    const next = game.upcoming();
+    if (next !== null) fightData(next);
+    const ready = !game.blocked() && drawingReady();
+    const played = play.matchField(pads[0] | pads[1], ready);
+    if (!play.playing || !played) return played;
+    rumble.field(play.ownRumble(game.state.rumble.out), performance.now());
+    sound?.field(game.state.world, game.state.vblanks, play.ending ? [] : holdSong());
+    movie.audible = sound?.running ?? false;
+    movie.field(game.state);
+    return true;
   };
 
   play(
     {
       field(pads) {
+        if (online?.playing === true) return onlineField(online, pads);
         const next = game.upcoming();
         if (next !== null) fightData(next);
         if (game.blocked() || !drawingReady()) return false;
@@ -375,14 +427,14 @@ export async function playGame(): Promise<void> {
         if (saves && game.state.saving !== 0 && game.state.kept !== null) writeProgress(game.state.kept);
         settle();
         rumble.field(game.state.rumble.out, performance.now());
-        holdSong();
-        sound?.field(game.state.world, game.state.vblanks);
+        const played = holdSong();
+        sound?.field(game.state.world, game.state.vblanks, played);
         movie.audible = sound?.running ?? false;
         movie.field(game.state);
+        online?.afterField();
         return true;
       },
       render(width, height) {
-        placeDisplay();
         presenter.controllers = controllers();
         const state = game.state;
         const now = performance.now() / 1000;
@@ -391,9 +443,23 @@ export async function playGame(): Promise<void> {
         const data = game.fightData ?? (state.scene === Scene.RECORDS ? fightData(matchSetup(state)) : null);
         /* What this frame shows: the fight, the records over their stage, the attract intro, a scene's 2D; or nothing new (the picture held, drawn again only while a dissolve over it runs). */
         const records = state.scene === Scene.RECORDS && state.recordsScreen.draws !== 0 && data !== null && state.held === 0 && fightFor(data).view.prepare(state.world, true);
-        const intro = introSetUp(state) && state.held === 0 && introView(state.attract.intro).prepare(state.world);
+        const prepared = introSetUp(state) && state.held === 0 && introView(state.attract.intro).prepare(state.world);
+        if (prepared && !introWarmed(state.attract.intro)) {
+          introView(state.attract.intro).render(state.world, aspect, undefined, () => presenter.render(state, width, height, true, now));
+          renderer.beginFrame([0, 0, 0]);
+          renderer.endFrame();
+          warmIntro(state.attract.intro, performance.now());
+          return;
+        }
+        const intro = prepared;
         const change = state.scene === Scene.FIGHT && state.ogreChange.shows !== OgreChangeShows.NONE && data !== null;
-        const shows = change ? 'change' : state.scene === Scene.FIGHT ? (state.drewFight !== 0 && data !== null ? 'fight' : null) : records ? 'records' : intro ? 'intro' : state.held === 0 ? `scene ${state.scene}` : null;
+        const shows = online?.ending === true ? null : change ? 'change' : state.scene === Scene.FIGHT ? (state.drewFight !== 0 && data !== null ? 'fight' : null) : records ? 'records' : intro ? 'intro' : state.held === 0 ? `scene ${state.scene}` : null;
+        /*
+         * An online match's fight seen from this player's side: the picture turned over (`mirror.ts`),
+         * a frame that draws the fight alone; a picture held stays as it was drawn.
+         */
+        if (shows !== null) mirror.on = online?.mirroredSide === true && shows === 'fight';
+        placeDisplay();
         if (shows === null) {
           presenter.hold(width, height, now);
           return;
@@ -440,9 +506,9 @@ export async function playGame(): Promise<void> {
           },
         );
       },
-      moving: () => presenter.moving,
+      moving: () => presenter.moving || (introSetUp(game.state) && !introWarmed(game.state.attract.intro)),
       fighting: () => shown === 'fight',
-      probe: () => ({ scene: game.state.scene, sceneState: game.state.step, sound: sound?.probe() ?? null, movie: movie.probe() }),
+      probe: () => ({ scene: game.state.scene, sceneState: game.state.step, sound: sound?.probe() ?? null, movie: movie.probe(), online: online?.probe() ?? null }),
       about: () => {
         const state = game.state;
         const world = state.world;

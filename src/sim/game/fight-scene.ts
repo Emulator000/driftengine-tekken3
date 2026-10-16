@@ -138,6 +138,12 @@ export function softReset(game: GameState, data: Pick<FightData, 'sound'>): bool
   stopSounds(world, true);
   stopMotors(game);
   voiceLine(world, data, 0, START_SOUND, 0);
+  /* The waiting room left: no more waiting, back to ONLINE MODE's page. */
+  if (game.online.warming !== 0) {
+    Object.assign(game.online, { warming: 0, opens: 1, ask: 'cancel' });
+    goToLogo(game, Scene.OPTIONS);
+    return true;
+  }
   goToLogo(game, Scene.MENU);
   return true;
 }

@@ -79,7 +79,8 @@ function layOut(game: GameState, tables: FightTables, scenes: SceneTables): Vers
     band = SURVIVAL_BAND;
   } else if (world.mode === MenuMode.ARCADE || world.mode === MenuMode.TIME_ATTACK) stageLine = scenes.versus.stage.replace('%d', String(world.match.stage + 1));
   else if (world.mode === MenuMode.PRACTICE) {
-    stageLine = scenes.practice.lines.title;
+    /* ONLINE MODE's waiting room is Practice, by its own name. */
+    stageLine = game.online.warming !== 0 ? 'ONLINE MODE' : scenes.practice.lines.title;
     picture = 0;
     band = PRACTICE_BAND;
   } else if (world.mode === MenuMode.TEKKEN_BALL) {

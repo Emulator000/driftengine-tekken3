@@ -7,6 +7,7 @@
  */
 import type { RendererApi } from '@driftengine/core';
 import { createSpritePass, drawSprite, type SpritePass, type UvRect } from '@driftengine/ui2d';
+import { upright, uprightUv } from '../2d/mirror.ts';
 import type { PrintRun } from '../../sim/game/state.ts';
 import { FONTS } from '../../sim/game/printer.ts';
 import { PICTURE_SCALE } from '../../assets/manifest.ts';
@@ -128,7 +129,7 @@ export class ScreenLayer {
     }
     const half = (this.units.across / 2) * (width / height);
     this.transform.set([1 / half, 0, 0, -2 / this.units.lines, -this.middle / half, 1]);
-    this.pass.setTransform(this.transform);
+    this.pass.setTransform(upright(this.transform));
     this.pass.reset();
     this.shade = 1;
     this.alpha = 1;
@@ -149,7 +150,7 @@ export class ScreenLayer {
     for (const s of sprites) {
       const [r, g, b, a] = s.tint ?? [1, 1, 1, 1];
       tint.set([r, g, b, a * alpha]);
-      drawSprite(this.pass.batch, s.texture, { x: s.x, y: s.y, w: s.w, h: s.h }, s.uv, tint);
+      drawSprite(this.pass.batch, s.texture, { x: s.x, y: s.y, w: s.w, h: s.h }, uprightUv(s.uv), tint);
     }
   }
 
@@ -167,7 +168,7 @@ export class ScreenLayer {
       }
       [x, w] = [start, end - start];
     }
-    drawSprite(this.pass.batch, texture, { x, y, w, h }, uv, tint);
+    drawSprite(this.pass.batch, texture, { x, y, w, h }, uprightUv(uv), tint);
     this.sprites.push({ texture, x, y, w, h, uv, tint: tint === null ? null : [tint[0]!, tint[1]!, tint[2]!, tint[3]!] });
   }
 

@@ -143,6 +143,19 @@ export function practiceRoundStart(game: GameState, data: FightData): void {
   resetInputs(world, InputSource.NONE);
   world.practice.counters.fill(0);
   for (const r of p.records) for (const key of Object.keys(r) as (keyof typeof r)[]) r[key] = 0;
+  /* The waiting room's fight starting: the quick match or the room asked for now, its character chosen. */
+  const online = game.online;
+  if (online.warming === 1) Object.assign(online, { ask: online.pending, pending: '', warming: 2 });
+  world.practice.waitingRoom = online.warming !== 0 ? 1 : 0;
+  /*
+   * ONLINE MODE's waiting room: a fight at once, as the menu's closing leaves it (the pads the
+   * players', the dummy standing, the attack data shown); start opens the menu as ever.
+   */
+  if (game.online.warming !== 0) {
+    world.practice.starting = 0;
+    resetInputs(world, InputSource.PAD);
+    partnerControl(game, data, human(game), partner(game));
+  }
 }
 
 /** What a pause's start and practice's round start clear: the colours, the markers, the input display. */

@@ -184,6 +184,26 @@ the first. Alt+Enter takes the game to full screen and back; `F` shows and hides
 once; [docs/USAGE.md](docs/USAGE.md) lists every option (fighters, stage, the computer's sides,
 the endings, the original textures, the viewer) and every command.
 
+### Online
+
+ONLINE MODE, in the mode menu after VS MODE, plays a Versus fight against someone on another
+machine, each of you from your own disc: a quick match with the next player waiting, a room you
+create (its code to give the other player, or listed in the server's room list), or a room joined
+by its code or from the list. You choose your fighter and your side once, then wait in a fight of
+your own against a training dummy until an opponent is found, whom you accept or turn down; the
+match then starts at once on a stage drawn at random, three rounds to win, and once it is over
+you both choose a rematch or the waiting room. Only the pads' presses and the match's setup
+go between the two games; each runs the whole match itself, at once from your own pad, the other's
+put right as it arrives (rollback), straight between the two machines where they can reach each
+other and through the server where not. Both of you need the same version and the same fighters'
+data (with Kazuya or without, or any fighter one of you lacks): players who differ are never paired.
+
+`npm run dev` and `npm run dev:lan` run the server beside the page, so two players on your home
+network (`npm run dev:lan`) play with nothing else to run. Over the internet, one of you runs the
+server where the other can reach it (`npm run relay`, or the `server/` folder on a machine of its
+own, [server/README.md](server/README.md)) and both set its address as SERVER on ONLINE MODE's page.
+[docs/USAGE.md](docs/USAGE.md#online) says more.
+
 ### Kazuya (optional)
 
 Kazuya joins the roster from Tekken 4 when you have that disc too (PlayStation 2, USA,
@@ -295,6 +315,7 @@ field. What is done and what is not yet:
 | A quick match without the menus (`?quick`) | Done | |
 | **The modes** | | |
 | Versus (two players) | Done | |
+| Versus online | Done | ONLINE MODE: a quick match, rooms by code or from the list; a waiting room to practise in, the opponent found accepted or turned down, the match on a stage drawn at random, three rounds to win, a rematch asked for, each player's side kept (the fight drawn mirrored); rollback, the input delay asked for, the connection shown over the picture, the two games' states compared as they play; straight between the machines (WebRTC) or through the server (`npm run relay`, configurable) |
 | Team Battle | Done | Its results too |
 | Time Attack | Done | Its results too |
 | Survival | Done | Its results too |
@@ -344,6 +365,8 @@ field. What is done and what is not yet:
 | `src/assets/` | The imported assets' types and validating loaders |
 | `src/present/` | The presentation on DriftEngine: the 3D, the 2D, the effects, the sound |
 | `src/app/` | The page, the input and the 60 Hz loop |
+| `src/net/` | Online play: the rollback session, the state saved and restored whole, the server's and the other player's messages, the direct connection |
+| `server/` | The online server (`npm run relay`), which pairs players and passes their messages; it runs on its own ([server/README.md](server/README.md)) |
 | `src/mod/kazuya/` | Kazuya, added through the game's extension points |
 | `drift.package.json` | The apps, as DriftEngine's packager builds them (`npm run desktop`, `npm run android`, `npm run ios`) |
 | `tests/` | The tests (`npm test`); those that need the disc's data skip without it |

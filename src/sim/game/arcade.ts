@@ -80,6 +80,8 @@ export function chooseStage(game: GameState, tables: FightTables): void {
       code = [first, second][run.newcomer]!;
       const kept = run.versusStage;
       if (kept.code !== -1 && first !== kept.first && second !== kept.second) code = kept.code;
+      /* Online, the stage the host drew. */
+      if (run.online !== 0 && 0 <= run.onlineStage) code = run.onlineStage;
       Object.assign(kept, { code, first, second });
       break;
     }

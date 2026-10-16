@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { type Plugin, defineConfig } from 'vite';
 
 import { makeCertificate } from './scripts/lib/certificate.mjs';
+import { Relay, readConfig } from './server/relay.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -21,8 +22,8 @@ const ENGINE_SRC = path.join(here, '../drftrun/driftengine/packages');
 const LOCAL_ENGINE =
   process.env.DRIFT_ENGINE_LOCAL !== '0' && existsSync(path.join(ENGINE_SRC, 'core/src/index.ts'));
 
-/** What this player imports, and what core's own barrel imports: `physics` and `drft`. */
-const ENGINE_PACKAGES = ['core', 'physics', 'drft', 'audio', 'ui2d'].join('|');
+/** What this player imports (`network` for its online matches), and what core's own barrel imports: `physics` and `drft`. */
+const ENGINE_PACKAGES = ['core', 'physics', 'drft', 'audio', 'ui2d', 'network'].join('|');
 
 /** The days before a certificate ends that a new one is made. */
 const RENEW_DAYS = 30;
@@ -91,6 +92,26 @@ function clientLog(): Plugin {
 }
 
 /**
+ * ONLINE MODE's server (`server/relay.mjs`) beside the page, at `/relay` on the dev server's own
+ * address (over HTTPS on the home network, as the page is), which the page connects to when no
+ * other is set: two players on the same network, or on one machine, play with nothing else run.
+ * Its settings are the environment's (`T3_RELAY_*`); `T3_RELAY=0` leaves it out.
+ */
+function onlineServer(): Plugin {
+  return {
+    name: 'tekken3-online-server',
+    apply: 'serve',
+    configureServer(server) {
+      const http = server.httpServer;
+      if (process.env.T3_RELAY === '0' || http === null) return;
+      const relay = new Relay(readConfig([], process.env), { log: (line) => server.config.logger.info(line) });
+      relay.attach(http as Parameters<Relay['attach']>[0], '/relay');
+      http.once('close', () => void relay.close());
+    },
+  };
+}
+
+/**
  * `npm run dev:lan` (`vite --mode lan`): the page served to the user's own devices on their home
  * network, over HTTPS with the certificate above, so a phone or a tablet gets WebGPU and full
  * screen, which a page over plain HTTP from another address is refused. Pages there post their log
@@ -111,7 +132,7 @@ export default defineConfig(({ mode }) => ({
         ]
       : [],
   },
-  plugins: mode === 'lan' ? [clientLog()] : [],
+  plugins: mode === 'lan' ? [clientLog(), onlineServer()] : [onlineServer()],
   /*
    * 5190 when it is free, otherwise the next port that is: Vite prints the one it took. Served to
    * this machine alone, the page loading the disc's data; `npm run dev:lan` alone serves the home

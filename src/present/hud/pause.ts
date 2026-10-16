@@ -9,6 +9,7 @@
  */
 import type { RendererApi } from '@driftengine/core';
 import { createSpritePass, drawSprite, type SpritePass } from '@driftengine/ui2d';
+import { upright, uprightUv } from '../2d/mirror.ts';
 import type { CommandMove, CommandTables, CommandToken } from '../../assets/commands.ts';
 import type { FightData, FightState } from '../../sim/fight/state.ts';
 import { PaintAtlas, TILES, type AtlasPicture } from '../2d/atlas.ts';
@@ -279,7 +280,7 @@ export class PauseScreen {
       cut = { u0: uv.u0, v0: v(start), u1: uv.u1, v1: v(end) };
       [top, height] = [start, end - start];
     }
-    drawSprite(this.pass.batch, picture.slot, { x: MIDDLE + (px - this.width / 2) / this.kx, y: top, w, h: height }, cut, null);
+    drawSprite(this.pass.batch, picture.slot, { x: MIDDLE + (px - this.width / 2) / this.kx, y: top, w, h: height }, uprightUv(cut), null);
   }
 
   private fill(x: number, y: number, w: number, h: number, colour: readonly [number, number, number, number]): void {
@@ -290,7 +291,7 @@ export class PauseScreen {
       [y, h] = [start, end - start];
     }
     screenTint(this.tint, colour);
-    drawSprite(this.pass.batch, this.pass.white, { x, y, w, h }, null, this.tint);
+    drawSprite(this.pass.batch, this.pass.white, { x, y, w, h }, uprightUv(null), this.tint);
   }
 
   /** Text with its baseline at `y`, from `x`; returns where it ends. */
@@ -400,7 +401,7 @@ export class PauseScreen {
     }
     const half = (ACROSS / 2) * (width / height);
     this.transform.set([1 / half, 0, 0, -2 / LINES, -MIDDLE / half, 1]);
-    this.pass.setTransform(this.transform);
+    this.pass.setTransform(upright(this.transform));
     this.pass.reset();
     const view = pauseView(state, this.data);
     this.shown = view.menu !== null || view.lists.length > 0 || view.rules !== null;

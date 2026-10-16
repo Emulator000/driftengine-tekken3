@@ -1077,7 +1077,8 @@ export interface FightState {
    * (on, red, green, blue) in place of its light, and each moveset slot's held pad as its input
    * read it this frame.
    */
-  readonly practice: { starting: number; readonly counters: number[]; readonly colours: number[][]; readonly heldPad: number[] };
+  /** Practice's: its start, its counters and colours, the held pad; and whether it is ONLINE MODE's waiting room (its calls ONLINE MODE). */
+  readonly practice: { starting: number; readonly counters: number[]; readonly colours: number[][]; readonly heldPad: number[]; waitingRoom: number };
   stage: number;
   /** The camera's view, and the skeletons' (the view, or levelled and lifted looking straight down). */
   readonly view: Matrix;
@@ -1201,6 +1202,9 @@ export interface FightState {
    * the rounds a win takes.
    */
   readonly match: {
+    /** An online match: a scene cut short only once both players ask (`skipAsks`, a bit a side, kept till both have). */
+    online: number;
+    skipAsks: number;
     winner: number;
     challenger: number;
     goesOn: number;

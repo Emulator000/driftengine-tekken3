@@ -197,6 +197,7 @@ export function startRoundOfMatch(state: FightState, data: FightData): void {
   replay.soundShift = 0;
   replay.index = 0;
   replay.skip = 0;
+  state.match.skipAsks = 0;
   replay.recorded = 0;
   if (state.attractIntro !== 0) replay.state = 0;
   a.blend.kind = 0;

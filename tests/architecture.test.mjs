@@ -17,6 +17,6 @@ test('the scanner finds each kind of violation on its line', () => {
 });
 
 test('the game source keeps the rules', () => {
-  const scanned = [...scanTree('src/sim', [...REMAKE_RULES, ...SIM_RULES]), ...['src/assets', 'src/present', 'src/app'].flatMap((root) => scanTree(root, REMAKE_RULES))];
+  const scanned = [...scanTree('src/sim', [...REMAKE_RULES, ...SIM_RULES]), ...['src/assets', 'src/present', 'src/app', 'src/net'].flatMap((root) => scanTree(root, REMAKE_RULES))];
   assert.deepEqual(scanned.filter((f) => f.findings.length > 0), []);
 });

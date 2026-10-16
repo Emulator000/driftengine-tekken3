@@ -80,9 +80,9 @@ export class SoundPlayer {
     this.context.createMediaElementSource(video).connect(this.node);
   }
 
-  /** A field's sound (vertical blank `vblank`): its commands (only the music's before the audio runs) and the banks in its slots. */
-  field(state: FightState, vblank: number): void {
-    const commands = this.running ? [...state.sound.commands] : state.sound.commands.filter((c) => !VOICE_KEYS.has(c.key));
+  /** A field's sound (vertical blank `vblank`): its commands (the field's, or `played` as the page passes them on; only the music's before the audio runs) and the banks in its slots. */
+  field(state: FightState, vblank: number, played: readonly FightState['sound']['commands'][number][] = state.sound.commands): void {
+    const commands = this.running ? [...played] : played.filter((c) => !VOICE_KEYS.has(c.key));
     for (const c of commands) {
       if (c.key === 'music options') this.set = c.set;
       else if (c.key === 'song') this.fetch(c.song, this.set);

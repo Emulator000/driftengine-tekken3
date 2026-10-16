@@ -18,15 +18,41 @@ const PICTURE_LAYER = 3;
 const MARK = { x: 0x97, y: 0x184, w: 0x48, h: 0x10 } as const;
 const ENGINE_LINE = { centre: 0xb8, top: 0x1c8 } as const;
 
-/** The title's picture (or another of the screen's size, by its name) over the whole screen, at most the atlas's size (stretched back when it was painted smaller). */
+/** The title's picture (or another of the screen's size, by its name) over the whole screen, at most the atlas's size (stretched back when it was painted smaller), its edges going on to the window's sides. */
 export function drawTitlePicture(art: ScreenLayer, picture: ImageBitmap, shade = 1, name = 'title'): void {
   const fit = Math.min(1, MOST / (SCREEN.width * art.kx), MOST / (SCREEN.lines * art.ky));
   const [w, h] = [SCREEN.width * art.kx * fit, SCREEN.lines * art.ky * fit];
   const painted = art.atlas.picture(`${name} picture ${w} ${h}`, w, h, (g, left, top) => paintOriginal(g, picture, 0, 0, SCREEN.width, SCREEN.lines, left, top, w, h));
   if (painted === null) return;
   art.setShade(shade);
+  drawEdges(art, picture, name, h);
   art.put(painted, 0, 0, SCREEN.width, SCREEN.lines);
   art.setShade(1);
+}
+
+/** Device pixels across a picture's edge strip. */
+const EDGE_PX = 4;
+
+/**
+ * A screen's picture going on past its sides where the window is wider than it: each side the
+ * picture's last column there, stretched across, so its own colour (and its fall down the side)
+ * meets the window's edge rather than black.
+ */
+function drawEdges(art: ScreenLayer, picture: ImageBitmap, name: string, h: number): void {
+  const { left, right } = art.edges;
+  for (const side of ['left', 'right'] as const) {
+    const [from, to] = side === 'left' ? [left, 0] : [SCREEN.width, right];
+    if (to <= from) continue;
+    const strip = art.atlas.picture(`${name} ${side} edge ${h}`, EDGE_PX, h, (g, x, y) => {
+      g.imageSmoothingEnabled = true;
+      g.imageSmoothingQuality = 'high';
+      g.drawImage(picture, side === 'left' ? 0 : picture.width - 1, 0, 1, picture.height, x, y, EDGE_PX, h);
+    });
+    if (strip === null) continue;
+    /* The strip's middle alone, so nothing beside it in the atlas blends in at its ends. */
+    const middle = (strip.uv.u0 + strip.uv.u1) / 2;
+    art.put(strip, from, 0, to - from, SCREEN.lines, { ...strip.uv, u0: middle, u1: middle });
+  }
 }
 
 /** The namco mark under the start line, the original's picture enlarged smoothly. */

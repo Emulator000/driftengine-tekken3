@@ -8,7 +8,7 @@
  */
 import type { FightData } from '../fight/state.ts';
 import { voiceLine } from '../fight/voices.ts';
-import type { SceneTables } from '../data/scenes.ts';
+import type { MenuEntry, SceneTables } from '../data/scenes.ts';
 import { goToLogo, goToScene, holdPicture, queueFile } from './logo.ts';
 import { print } from './printer.ts';
 import { blankPractice, Scene, type GameState } from './state.ts';
@@ -30,9 +30,13 @@ const NEW_COLOUR = 0xe;
 const BAR_STEP = 0x18;
 const FULL = 0x100;
 /** The modes the menu treats apart. */
-export const MenuMode = { ARCADE: 0, VERSUS: 1, TEAM_BATTLE: 2, TIME_ATTACK: 3, SURVIVAL: 4, PRACTICE: 5, DEMO: 6, TEKKEN_BALL: 7, TEKKEN_FORCE: 8, OPTIONS: 9, THEATER: 10 } as const;
+export const MenuMode = { ARCADE: 0, VERSUS: 1, TEAM_BATTLE: 2, TIME_ATTACK: 3, SURVIVAL: 4, PRACTICE: 5, DEMO: 6, TEKKEN_BALL: 7, TEKKEN_FORCE: 8, OPTIONS: 9, THEATER: 10, ONLINE: 11 } as const;
+/** The remake's own entry, listed after VS MODE: ONLINE MODE's page. */
+const ONLINE_ENTRY: MenuEntry = { name: 'ONLINE MODE', mode: MenuMode.ONLINE, twoPads: false, colour: 3 };
 /** Earned and no longer new. */
 const SHOWN = 3;
+/** `toOptions` coming back from ONLINE MODE's page rather than the Options. */
+export const BACK_FROM_ONLINE = 2;
 /** No character chosen yet: the roster id the select reads as none; and a last choice naming no one (the game's own 0x58 is the first added character's code). */
 const NO_ONE = 0x16;
 /** A team's size as Team Battle starts. */
@@ -92,12 +96,14 @@ export function menuScene(game: GameState, data: Pick<FightData, 'sound'>, scene
       for (const entry of scenes.menu) {
         const earned = entry.mode === MenuMode.TEKKEN_BALL ? game.earned.ball : entry.mode === MenuMode.THEATER ? game.earned.theater : SHOWN;
         if (earned !== 0) menu.items.push({ ...entry, fresh: earned < SHOWN });
+        if (entry.mode === MenuMode.VERSUS) menu.items.push({ ...ONLINE_ENTRY, fresh: false });
       }
       menu.count = menu.items.length;
       menu.chosen = 0;
       if (menu.toOptions !== 0) {
+        const back = menu.toOptions === BACK_FROM_ONLINE ? MenuMode.ONLINE : MenuMode.OPTIONS;
         menu.toOptions = 0;
-        const at = menu.items.findIndex((item) => item.mode === MenuMode.OPTIONS);
+        const at = menu.items.findIndex((item) => item.mode === back);
         menu.picked = at < 0 ? menu.count : at;
         if (10 < menu.picked) menu.picked = 0;
       }
@@ -140,6 +146,10 @@ export function menuScene(game: GameState, data: Pick<FightData, 'sound'>, scene
     case 2: {
       const mode = menu.items[menu.picked]!.mode;
       if (mode === MenuMode.OPTIONS) goToLogo(game, Scene.OPTIONS);
+      else if (mode === MenuMode.ONLINE) {
+        game.online.opens = 1;
+        goToLogo(game, Scene.OPTIONS);
+      }
       else if (mode === MenuMode.THEATER) {
         if (game.earned.theater < SHOWN) game.earned.theater += 1;
         world.humans = 0;

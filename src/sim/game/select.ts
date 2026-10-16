@@ -42,6 +42,7 @@ const KICKS = 0x60;
 const THIRD = 0x810;
 const BUTTONS = 0xf0;
 const CANCEL = 0x100;
+const PUNCH = 0x80;
 const START = 0x800;
 /** The sounds: a cursor's move, a choice, a challenger. */
 const MOVE_SOUND = 0x55f5;
@@ -385,6 +386,17 @@ function stepSide(game: GameState, data: Pick<FightData, 'sound'>, scenes: Scene
       }
       break;
     case SideState.PARTNER:
+      /* The waiting room's partner: any character on the select, at random. */
+      if (game.online.warming !== 0) {
+        const cells = select.cells.slice(0, select.count).flatMap((cell, at) => (isCharacter(scenes, cell.roster) ? [at] : []));
+        if (cells.length > 0) side.cell = cells[(game.world.noise >>> 16) % cells.length]!;
+        side.roster = select.cells[side.cell]!.roster;
+        choose(game, data, scenes, n, PUNCH);
+        side.wait = CHOSEN_WAIT;
+        side.fade = FADE_IN;
+        side.state = SideState.PARTNER_CHOSEN;
+        break;
+      }
       steer(game, data, side, other);
       if ((pressed(other) & CANCEL) === 0) {
         if (!choose(game, data, scenes, n, pressed(other))) {
@@ -507,7 +519,8 @@ function printNames(game: GameState, scenes: SceneTables): void {
   select.sides.forEach((side, n) => {
     const centre = scenes.select.sides[n]!.nameCentre;
     if (side.nameKind === 3) {
-      const title = MODE_TITLES[select.mode] ?? '';
+      /* ONLINE MODE's waiting room is Practice, by its own name. */
+      const title = select.mode === MenuMode.PRACTICE && game.online.warming !== 0 ? 'ONLINE!' : (MODE_TITLES[select.mode] ?? '');
       const width = title.length * TITLE.advance;
       let x = centre - (width >> 1);
       let end = x + width;

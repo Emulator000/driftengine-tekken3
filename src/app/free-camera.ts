@@ -21,6 +21,9 @@ const MOST_PITCH = 1.55;
 
 const FLY = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ShiftLeft', 'ShiftRight', 'AltLeft', 'AltRight']);
 
+/** Whether the free camera may not be taken now (online play, which no side may hold, or a text being typed): told by what knows. */
+export const freeCameraBarred = { now: (): boolean => false };
+
 export class FreeCamera {
   private readonly position: [number, number, number] = [0, 0, 0];
   private yaw = 0;
@@ -39,6 +42,7 @@ export class FreeCamera {
       'keydown',
       (e) => {
         if (e.code === 'KeyP' && !e.repeat) {
+          if (freeCameraBarred.now() && !freeView.active) return;
           e.preventDefault();
           e.stopImmediatePropagation();
           this.toggle();

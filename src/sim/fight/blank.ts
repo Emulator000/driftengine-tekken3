@@ -623,7 +623,7 @@ export function blankFightState(): FightState {
         forceWait: new Array<number>(2).fill(0),
         forceHold: new Array<number>(2).fill(0),
       },
-      practice: { starting: 0, counters: [0, 0, 0], colours: [[0, 0, 0, 0], [0, 0, 0, 0]], heldPad: [0, 0] },
+      practice: { starting: 0, counters: [0, 0, 0], colours: [[0, 0, 0, 0], [0, 0, 0, 0]], heldPad: [0, 0], waitingRoom: 0 },
       ball: blankBall(),
       force: blankForce(),
       camera: {
@@ -902,6 +902,8 @@ export function blankFightState(): FightState {
         posesDone: new Array<number>(2).fill(0),
       },
       match: {
+        online: 0,
+        skipAsks: 0,
         canPause: 0,
         drawRule: 0,
         healthBackForPoses: 0,

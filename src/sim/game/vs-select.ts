@@ -459,6 +459,11 @@ function stepSide(game: GameState, tables: FightTables, scenes: SceneTables, n: 
       break;
     }
     case VsSideState.HANDICAP: {
+      /* Online, no handicap: both at the game's own. */
+      if (game.run.online !== 0) {
+        side.state = VsSideState.SETTLED;
+        break;
+      }
       side.gaugeTarget = layout.gauge.raised;
       let handicap = side.handicap;
       let dx = across(game.pads.repeats[n]!);

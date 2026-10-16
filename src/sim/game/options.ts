@@ -17,7 +17,8 @@ import { voiceLine } from '../fight/voices.ts';
 import type { OptionsItem, OptionsPage, OptionsTables, OptionValue, SceneTables } from '../data/scenes.ts';
 import { softReset } from './fight-scene.ts';
 import { goToLogo } from './logo.ts';
-import { mapPads } from './menu.ts';
+import { BACK_FROM_ONLINE, mapPads, MenuMode, startMode } from './menu.ts';
+import { ONLINE_PAGE, onlineFrame } from './online-page.ts';
 import { print } from './printer.ts';
 import { playCount, sortPairs } from './records.ts';
 import { share } from './records-screen.ts';
@@ -701,6 +702,13 @@ function recordsFrame(game: GameState, data: OptionsData, tables: OptionsTables)
 function pageFrame(game: GameState, data: OptionsData, scenes: SceneTables): void {
   const tables = scenes.options;
   const screen = game.optionsScreen;
+  if (screen.page === ONLINE_PAGE) {
+    /* A quick match or a room waited for in Practice, the waiting room's. */
+    const asked = onlineFrame(game, data);
+    if (asked === 'leave') game.step = 2;
+    else if (asked === 'warm') startMode(game, MenuMode.PRACTICE, 1);
+    return;
+  }
   if (screen.page === REMAKE_PAGE) {
     /* The list as the remaster leaves it, the cursor kept on it where a line has gone. */
     const remake = remakeOptions(game);
@@ -766,11 +774,12 @@ export function optionsScene(game: GameState, data: OptionsData, scenes: SceneTa
   }
   switch (game.step) {
     case 0:
-      game.menu.toOptions = 1;
+      game.menu.toOptions = game.online.opens !== 0 ? BACK_FROM_ONLINE : 1;
       listLabels(game, scenes.options);
       keyConfigReset(game, scenes);
       for (const page of [...screen.pages, screen.remake]) Object.assign(page, { cursor: 0, sub: 0 });
-      screen.page = Page.MAIN;
+      screen.page = game.online.opens !== 0 ? ONLINE_PAGE : Page.MAIN;
+      game.online.opens = 0;
       game.step = 1;
       pageFrame(game, data, scenes);
       break;

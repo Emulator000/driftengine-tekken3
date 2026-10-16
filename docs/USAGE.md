@@ -15,6 +15,7 @@
 | `npm run desktop` | Builds the game as an app for this computer (Windows, macOS or Linux), with your disc's data in it (and the remaster's assets, once `npm run remaster` has made them), into `out/<target>/`; `-- mac-arm64` or `-- mac-x64` builds a Mac's on Linux ([As an app](#as-an-app)) |
 | `npm run android` | Builds the game as an Android app for your own phone, with your disc's data in it, into `out/android/` ([As an app](#as-an-app)) |
 | `npm run ios` | On a Mac with Xcode, builds the game as an iPhone app, with your disc's data in it, into `out/ios/` ([As an app](#as-an-app)) |
+| `npm run relay` | Runs the online server on its own, on port 8790 (`-- --help` lists its settings; [Online](#online)) |
 | `npm run build` | Runs the tests, then builds the page into `dist/`. The build copies the disc's data from `public/` into `dist/`: it is for your own machine, never to host or share |
 | `npm test` | The tests (those that need the disc's data skip without it), then the typecheck |
 
@@ -31,6 +32,8 @@ which is the system's own.
 | `DRIFT_ANDROID_KEYSTORE`, `DRIFT_ANDROID_KEYSTORE_PASSWORD`, `DRIFT_ANDROID_KEY_ALIAS` | A signing key of your own for the Android app, in place of the one made for you |
 | `CSC_LINK`, `CSC_KEY_PASSWORD` (`WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD` on Windows) | A code-signing certificate of your own for the computer's app (electron-builder's names) |
 | `APPLE_TEAM_ID` | Your Apple developer team, signing the iPhone app as it is built (without it, Xcode signs it for your own iPhone) |
+| `T3_RELAY=0` | `npm run dev` and `npm run dev:lan` leave out the online server they run beside the page |
+| `T3_RELAY_*` | The online server's settings, wherever it runs ([server/README.md](../server/README.md)) |
 
 ## The page's options
 
@@ -68,6 +71,8 @@ address's.
 | `look=light`, `look=normal`, `look=strong` | The remaster's look (as LOOK in REMAKE OPTION) |
 | `brightness=low`, `brightness=normal`, `brightness=high` | The remaster's brightness (as BRIGHTNESS in REMAKE OPTION) |
 | `floorfade=on`, `floorfade=off` | Whether the remaster's floors fade into the dark (as FLOOR FADE in REMAKE OPTION) |
+| `netlag=MS` | Online, each of the other side's presses held that many milliseconds more ([Online](#online)) |
+| `server=ADDRESS` | The online server ONLINE MODE connects to (`host:port`, `ws://…`, `wss://…`), over SERVER on its page; by default the one beside the page (`/relay`) |
 | `stop=N` | Holds the game after `N` fields (sixtieths of a second), for comparing pictures |
 | `viewer` | Opens the viewer for every fighter and move instead of the game (`fighter`, `move` and `paused=1` set where it starts) |
 
@@ -154,6 +159,75 @@ or the app) for every start after.
 The frame rate shows or hides at once. The others change what the game loads: while one differs
 from the start's, the page says LEAVING RESTARTS THE GAME, and leaving it starts the game again
 (with auto save on, the progress is saved first).
+
+## Online
+
+ONLINE MODE, after VS MODE in the mode menu, lists:
+
+| Line | What it does |
+| --- | --- |
+| QUICK MATCH | Waits for the next player of the same game, who is offered to you |
+| CREATE ROOM | Opens a room and shows its code, to give the other player; with ROOM set to LISTED it shows in the server's room list too |
+| JOIN ROOM | The room with the code you enter |
+| ROOM LIST | The rooms the server lists; those of another game are greyed |
+| INPUT DELAY | The fields your presses wait before they count, 0 to 6 (2 by default): the larger of both players' is the match's |
+| ROOM | PRIVATE (by its code alone) or LISTED |
+| SIDE | The side your fighter is seen on in the match, LEFT (the default) or RIGHT, whichever the server seats you on |
+| NAME | Your name, as the other player sees it |
+| SERVER | The server's address; empty, the one beside the page |
+
+Select goes back. The code, the name and the address are entered with the pad (up and down
+through the letters, left and right along them) or with a keyboard and a mouse as a text box is:
+typed, the arrows, Home and End (with Shift, selecting), Backspace and Delete, Ctrl+A, Ctrl+C,
+Ctrl+X and Ctrl+V, the mouse placing the caret, dragging a selection and selecting all with a
+double click.
+
+**The waiting room.** A quick match, a room created or a room joined starts with Practice's select:
+you choose your fighter (L1 and R1 choose your side, as SIDE does); your partner is drawn at
+random. Then you fight it, as Practice's 1P FREESTYLE with its training dummy standing and the attack
+data shown, while what is waited for shows in the corner (a room's code with it); start opens
+Practice's menus as ever, and RESET (in them, or Select with Start held) leaves the waiting room for
+ONLINE MODE's page. The free camera is off in online play.
+
+**An opponent found.** Every pairing asks both of you: the quick match's, and a room's host with
+the player joining it. The fight holds under a card with their name and a bar running down the
+seconds the server gives (10 by default): start says yes, select no, the two buttons the waiting
+fight does not fight with (a press counts once the card has settled, half a second, as the two
+answers show). Both yes, a card names the other player a moment and the match starts. In the
+quick match a no puts both of you back in the queue, kept apart from each other a while, and a card
+not answered in time puts both back to look again; at a room, the guest is sent away (saying why)
+and the room waits on.
+
+**The match.** Versus, your fighters as chosen, on a stage drawn at random, no handicap, three
+rounds to win, from the state the game powers on with: the host's options and earned characters,
+each player's own buttons. Your progress and records are left as they were. Where the server seats
+you on the other side than SIDE asks, the fight is drawn mirrored: your fighter and its plate on
+your side, the stick's left and right with the picture. A round's end (its replay, the win poses)
+is cut short only once both of you have pressed to skip it; until then it plays on, for both.
+
+**After the match.** The fight's last picture holds until the match is over, then the waiting room
+comes back under a card with its result: who won, whether you did, and the score since you were
+paired. Start asks for a rematch, select goes back to the waiting room, within 30 seconds. Both of
+you asking, the same two fighters fight again on a stage drawn anew; a no from either, or no answer
+in time, puts both back in the waiting room, waiting again (a quick match's two kept apart from
+each other a while; a room joined goes back to ONLINE MODE's page). A reset by either player ends
+the match too, the one who reset going back to the page.
+
+Each side plays its own pad at once and the other's as it arrives, guessing it held until then; a
+press that comes late rolls the game back to its field and plays on again within the frame (eight
+fields at most: one later waits for it, and five seconds of waiting with nothing heard ends the
+match). A press made while a side waits is played with its next field. Both sides compare a
+fingerprint of the game's state every eight fields; a difference ends the match and the console
+names the field. The line over the picture shows the opponent, the round trip, the input delay,
+the rollbacks and whether the presses go straight between the two machines (DIRECT) or through the
+server; and says so while the other side loads or is waited for. Should the direct connection
+close, or a wait over it last half a second, the presses go through the server as well for the rest
+of the match. `?netlag=MS` holds each of the
+other side's presses that many milliseconds more, to try a match over a slower link.
+
+Players whose games differ (the version, the fighters whose data is in, or the game's data) are
+never paired, and a room of another game is not joined; ONLINE MODE says which differs (the
+fighters one of you lacks by name).
 
 ## When the game stops
 

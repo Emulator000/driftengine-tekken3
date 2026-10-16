@@ -91,6 +91,24 @@ export function humanButtons(state: FightState): number {
   }
 }
 
+/**
+ * Whether the humans ask to cut the scene short: either's start, or in an online match both
+ * players', a side's press kept till the other's comes; spent as it is answered (`skipped`).
+ */
+export function skipAsked(state: FightState): boolean {
+  const match = state.match;
+  if (match.online === 0) return (humanButtons(state) & START) !== 0;
+  const fresh = state.input.fresh;
+  if ((fresh[0]! & START) !== 0) match.skipAsks |= 1;
+  if ((fresh[1]! & START) !== 0) match.skipAsks |= 2;
+  return match.skipAsks === 3;
+}
+
+/** The ask to cut a scene short answered: the next takes both again. */
+function skipped(state: FightState): void {
+  state.match.skipAsks = 0;
+}
+
 /* ---- The pause. ---- */
 
 /**
@@ -618,7 +636,7 @@ function afterReplay(state: FightState, data: FightData): boolean {
   clearDust(state, data);
   endSoundScript(a);
   endSoundScript(b);
-  if (state.match.winner !== 0 || ((humanButtons(state) & START) === 0 && state.replaySkipped === 0)) {
+  if (state.match.winner !== 0 || (!skipAsked(state) && state.replaySkipped === 0)) {
     winnerPoses(state, data);
     if ((state.round.result & Result.TIME_UP) === 0) {
       poseFighter(state, data, a, (s) => startReplayCamera(s, data));
@@ -654,8 +672,12 @@ function closing(state: FightState, data: FightData): void {
   }
   round.left -= 1;
   if (round.left < 0) round.left = 0;
-  if ((humanButtons(state) & START) !== 0) keyOffVoices(state, false);
-  if (round.done !== 0 || round.left < 1 || (state.match.winner === 0 && state.replaySkipped !== 0 && 1 < round.flowFrames) || (humanButtons(state) & START) !== 0) endRound(state);
+  const skip = skipAsked(state);
+  if (skip) keyOffVoices(state, false);
+  if (round.done !== 0 || round.left < 1 || (state.match.winner === 0 && state.replaySkipped !== 0 && 1 < round.flowFrames) || skip) {
+    if (skip) skipped(state);
+    endRound(state);
+  }
 }
 
 /**
@@ -805,8 +827,9 @@ export function stepRound(state: FightState, data: FightData): void {
 
 /** A human's start button cuts the replay short (not in practice). */
 export function skipReplayIfAsked(state: FightState): void {
-  if (state.mode !== Mode.PRACTICE && (humanButtons(state) & START) !== 0) {
+  if (state.mode !== Mode.PRACTICE && skipAsked(state)) {
     state.replay.skip = 1;
     state.replaySkipped = 1;
+    skipped(state);
   }
 }

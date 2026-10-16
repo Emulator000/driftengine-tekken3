@@ -246,6 +246,9 @@ export class FightView {
   /** The fighters' packs and stage `prepare` found ready, and those it waits on the compiles of. */
   private prepared = '';
   private preparing = '';
+  /** The stage whose every scenery draw was made once (`warmScenery`), and the matrix that draws a piece to a point. */
+  private warmedStage: StageDrawing | null = null;
+  private readonly toPoint = new Float32Array(16);
 
   constructor(renderer: RendererApi, data: FightData, arena: ArenaTables, files: DrawingFiles) {
     this.renderer = renderer;
@@ -432,6 +435,39 @@ export class FightView {
       joints[j] = { r: Float64Array.from(world.rotation, (v) => v / 4096), t: Float64Array.from(world.translation) };
     });
     return joints;
+  }
+
+  /**
+   * Every scenery piece drawn once in each way it is ever drawn (whole and fading, at its depth
+   * layer), through a matrix that collapses it to a point before the camera: nothing shows, but the
+   * pipeline each needs is built now, where `prepare` builds only the whole draw's at the first
+   * layer and the first fade, cut or cell of another layer built the rest as it came, a frame or
+   * more each (the attract intro played slower than its song over its first seconds).
+   */
+  private warmScenery(drawn: StageDrawing): void {
+    if (this.warmedStage === drawn) return;
+    this.warmedStage = drawn;
+    const renderer = this.renderer;
+    const point = this.toPoint;
+    point.fill(0);
+    const ahead = 2;
+    for (let i = 0; i < 3; i += 1) point[12 + i] = this.camera.position[i]! - this.view[i * 4 + 2]! * ahead;
+    point[15] = 1;
+    for (const oneSided of [false, true]) {
+      renderer.setMaterial(oneSided ? drawn.stage.oneSidedMaterial : drawn.stage.material);
+      for (const cell of drawn.stage.cells) {
+        for (const piece of cell) {
+          if (piece.oneSided !== oneSided) continue;
+          const lit = drawn.stage.lit && piece.far !== true;
+          for (const depthWrite of [true, false]) for (const opacity of [1, 0.5]) renderer.drawTranslucentMesh(piece.mesh, point, opacity, { lit, fog: false, depthLayer: piece.layer, depthWrite });
+        }
+      }
+    }
+    for (const object of drawn.objects) {
+      renderer.setMaterial(object.stage.material);
+      for (const cell of object.stage.cells) for (const piece of cell) renderer.drawTranslucentMesh(piece.mesh, point, 1, { lit: false, fog: false, depthLayer: piece.layer });
+    }
+    renderer.setMaterial(null);
   }
 
   /**
@@ -700,8 +736,11 @@ export class FightView {
        * An arcade stage's floor is drawn under its scenery, as the board draws its floor before its
        * stage and paints the stage over it: its colours (its veil and puddles with them) writing no
        * depth, so the stage's own floors and what lies below them show over it, then its depth alone.
+       * In the attract intro, whose camera goes down to the floor, it is solid as a floor is, so
+       * what lies below it (stage 4's lower terrace) stays under it rather than hang over it.
        */
-      if (arcade) {
+      const under = arcade && state.attractIntro === 0;
+      if (under) {
         drawn.ground.drawUnder();
         puddles();
       }
@@ -710,6 +749,7 @@ export class FightView {
         for (const object of drawn.objects) placeParts(object.motion, state.frameCount, this.sceneryMatrix(), object.placed);
         /* Remastered, an arcade stage's own floors fade as the fight's does. */
         drawn.stage.darkenFloors(this.sceneryMatrix(), fade ? this.ground.shadeOf : null);
+        this.warmScenery(drawn);
         this.drawScenery(state, drawn, false, this.sceneryFade.shown);
       }
       /*
@@ -718,7 +758,7 @@ export class FightView {
        * sinks into it stays in sight as the game, drawing the floor first and everything over it,
        * keeps it. A sunk floor's veil over it, under its puddles.
        */
-      if (arcade) drawn.ground.drawDepth();
+      if (under) drawn.ground.drawDepth();
       else {
         renderer.setMaterial(drawn.ground.material);
         drawn.ground.drawRelief();

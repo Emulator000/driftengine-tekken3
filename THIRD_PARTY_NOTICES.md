@@ -10,7 +10,8 @@ Fetched by npm at install time; no dependency source is vendored into this repos
 
 | Package | License |
 | --- | --- |
-| `@driftengine/core`, `@driftengine/audio`, `@driftengine/ui2d` (and `@driftengine/physics`, `@driftengine/drft`, which core uses) | Apache-2.0 (see below) |
+| `@driftengine/core`, `@driftengine/audio`, `@driftengine/ui2d`, `@driftengine/network` (and `@driftengine/physics`, `@driftengine/drft`, which core uses) | Apache-2.0 (see below) |
+| `ws` (the online server's WebSocket) | MIT |
 | `@fontsource/russo-one` (Russo One) | SIL Open Font License 1.1 |
 | `@fontsource/saira-extra-condensed` (Saira Extra Condensed) | SIL Open Font License 1.1 |
 | `gl-matrix` | MIT |
@@ -139,3 +140,7 @@ its contributors), checked against the data.
   (`scripts/remaster/sky.mjs`).
 - **mulberry32** (Tommy Ettinger), public domain: the seeded random numbers the versus screen's art,
   the remaster's grass, wet floors and sky are laid out by.
+- **FNV-1a** (Fowler, Noll and Vo), public domain: the low half of the fingerprint two online games
+  compare of their state (`src/net/snapshot.ts`).
+- **WebRTC** and **WebSocket** (W3C, IETF RFC 6455): the online matches' direct connection and
+  their connection to the server.

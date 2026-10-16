@@ -123,16 +123,18 @@ export interface BarLight {
   readonly alpha: number;
   readonly triangle: boolean;
 }
+/** The HUD screen's middle, in its units (384 across). */
+const HUD_MIDDLE = 192;
 /** The infinity sign the timer shows when it is stopped. */
 export const INFINITY = '∞';
 
-/** The calls, each in its printer block, the last printed first; with `cells`, a run of digits a glyph a cell. */
-function calls(state: FightState, cells = false): PlacedPiece[] {
+/** The calls, each in its printer block, the last printed first; with `cells`, a run of digits a glyph a cell; `swapped`, each block at its mirrored place (`HUD_MIDDLE` its middle). */
+function calls(state: FightState, cells = false, swapped = false): PlacedPiece[] {
   return state.hud.prints
     .filter((print) => FONTS[print.font] !== undefined && print.text.length > 0)
     .flatMap((print): PlacedPiece[] => {
       const font = FONTS[print.font]!;
-      const piece = (text: string, x: number, w: number): PlacedPiece => ({ x, y: print.y, w, h: font.height, piece: { kind: 'call', font: print.font, colour: print.colour, text } });
+      const piece = (text: string, x: number, w: number): PlacedPiece => ({ x: swapped ? HUD_MIDDLE * 2 - x - w : x, y: print.y, w, h: font.height, piece: { kind: 'call', font: print.font, colour: print.colour, text } });
       if (!cells || !DIGITS.test(print.text)) return [piece(print.text, print.x, (print.text.length - 1) * font.advance + font.width)];
       return [...print.text].flatMap((glyph, i) => (glyph === ' ' ? [] : [piece(glyph, print.x + i * font.advance, font.width)])).reverse();
     })
@@ -214,19 +216,20 @@ function gauges(state: FightState): PlacedPiece[] {
   return added;
 }
 
-/** The back's pieces, in the order they are added (drawn last to first). */
-function back(state: FightState, names: readonly string[]): PlacedPiece[] {
+/** The back's pieces, in the order they are added (drawn last to first); `swapped`, each side's place showing the other side's. */
+function back(state: FightState, names: readonly string[], swapped = false): PlacedPiece[] {
   const hud = state.hud;
   const added: PlacedPiece[] = [];
+  const of = (side: number): number => (swapped ? 1 - side : side);
   for (const side of [0, 1] as const) {
-    added.push({ x: NAMES.x[side]!, y: NAMES.y, w: 0, h: NAMES.height, piece: { kind: 'name', side, text: names[side] ?? '', costume: state.fighters[side]!.rosterCode & 3 } });
+    added.push({ x: NAMES.x[side]!, y: NAMES.y, w: 0, h: NAMES.height, piece: { kind: 'name', side, text: names[of(side)] ?? '', costume: state.fighters[of(side)]!.rosterCode & 3 } });
   }
-  hud.teamMarks.forEach((marks, side) => {
+  [0, 1].map((side) => hud.teamMarks[of(side)] ?? []).forEach((marks, side) => {
     marks.forEach((mark, i) => {
       added.push({ x: TEAM_MARKS.x[side]! + i * TEAM_MARKS.step[side]!, y: TEAM_MARKS.y, w: TEAM_MARKS.width, h: TEAM_MARKS.height, piece: { kind: 'team', crossed: (mark & TeamMark.CROSSED) !== 0, beaten: (mark & TeamMark.BEATEN) !== 0 } });
     });
   });
-  hud.marksLit.forEach((marks, side) => {
+  [0, 1].map((side) => hud.marksLit[of(side)] ?? []).forEach((marks, side) => {
     marks.forEach((lit, i) => {
       added.push({ x: MARKS.x[side]! + i * MARKS.step[side]!, y: MARKS.y, w: MARKS.width, h: MARKS.height, piece: { kind: 'mark', lit: lit !== 0 } });
     });
@@ -234,7 +237,7 @@ function back(state: FightState, names: readonly string[]): PlacedPiece[] {
   added.push(timer(state));
   for (let side = 0; side < 2; side += 1) {
     const { x, y, fromRight } = BARS[side]!;
-    const bar = hud.bars[side]!;
+    const bar = hud.bars[of(side)]!;
     added.push({ x, y, w: BAR.capWidth, h: BAR.height, piece: { kind: 'cap', end: 0 } });
     added.push({ x: x + BAR.rightCap, y, w: BAR.capWidth, h: BAR.height, piece: { kind: 'cap', end: 1 } });
     const lengths = [bar.shown, bar.damage - bar.shown, BAR.length - bar.damage];
@@ -250,10 +253,15 @@ function back(state: FightState, names: readonly string[]): PlacedPiece[] {
   return added.reverse();
 }
 
-/** The HUD's pieces this field, given each side's name (and in Tekken Force the match's tables): the back's, then the front's, each in drawing order. */
-export function layOutHud(state: FightState, names: readonly string[], data?: Pick<FightData, 'roster' | 'force'>): { back: PlacedPiece[]; front: PlacedPiece[] } {
+/**
+ * The HUD's pieces this field, given each side's name (and in Tekken Force the match's tables): the
+ * back's, then the front's, each in drawing order. `swapped` (a fight drawn mirrored), each side's
+ * plate showing the other side's fighter, so the fighter on the left has the left plate, and each
+ * call at its mirrored place.
+ */
+export function layOutHud(state: FightState, names: readonly string[], data?: Pick<FightData, 'roster' | 'force'>, swapped = false): { back: PlacedPiece[]; front: PlacedPiece[] } {
   if (state.mode === TEKKEN_FORCE && data !== undefined) return { back: state.hud.back === 0 ? [] : forceBack(state, data), front: [...keys(state), ...calls(state, true)] };
-  return { back: state.hud.back === 0 ? [] : back(state, names), front: [...gauges(state), ...calls(state)] };
+  return { back: state.hud.back === 0 ? [] : back(state, names, swapped), front: [...gauges(state), ...calls(state, false, swapped)] };
 }
 
 /** Tekken Force's progress bar this field, in drawing order (its marker, the final box, the segments from the last, the lines, the cursor). */

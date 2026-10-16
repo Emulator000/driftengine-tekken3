@@ -153,7 +153,8 @@ function callRound(state: FightState): void {
       print(state, Font.BIG, 8, 0x13, 0x70, 'SURVIVAL BATTLE');
       break;
     case Mode.PRACTICE:
-      print(state, Font.BIG, 8, 0x29, 0x70, 'PRACTICE MODE');
+      if (state.practice.waitingRoom !== 0) print(state, Font.BIG, 8, 0x3f, 0x70, 'ONLINE MODE');
+      else print(state, Font.BIG, 8, 0x29, 0x70, 'PRACTICE MODE');
       break;
     case Mode.TEKKEN_FORCE:
       if (state.match.stage < FORCE_FINAL_STAGE) print(state, Font.BIG, 8, 0x6b, 0x70, `STAGE ${state.match.stage + 1}`);
