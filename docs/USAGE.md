@@ -64,7 +64,7 @@ address's.
 | `models=psx`, `models=rounded` | Draws the fighters with the console's meshes, or the rounded ones (by default the rounded ones, but at `quality=verylow`) |
 | `quality=high` | The whole picture: ambient occlusion and bloom over the multisampled HDR scene; the default but on a phone |
 | `quality=low` | Leaves out the ambient occlusion and the bloom; a phone's default |
-| `quality=verylow` | The picture for an entry-level phone: the scene drawn straight to the screen with no pass after it, one pixel to the CSS pixel and no more pixels than a 640 by 480 picture, thirty pictures a second (the game still runs sixty fields), and the fighters with the console's meshes. It is the default on a phone whose GPU the browser names as an entry-level part (a Mali-G31, G51, G52 or G57, an Adreno 5xx or 600s to 610s, or a PowerVR), and on any device whose fight ran too slow even at its least density on a start before ([A slow device](#a-slow-device)) |
+| `quality=verylow` | The picture for an entry-level phone: the scene drawn straight to the screen with no pass after it, one pixel to the CSS pixel and no more pixels than a 640 by 480 picture, thirty pictures a second (the game still runs sixty fields), and the fighters with the console's meshes. It is the default on a phone whose GPU the browser names as an entry-level part (a Mali-G31, G51, G52 or G57, an Adreno 5xx or 600s to 610s, or a PowerVR) |
 | `budget=N` | The frame time, in milliseconds, the picture's density is held to (20 by default): while most of a fight's frames take longer, the picture steps down toward half its pixels each way, and back up as the frames allow; `0` holds it still |
 | `touch=1`, `touch=0` | The touch pad over the picture anywhere, or nowhere (by default on a touch screen or a phone) |
 | `remaster=on`, `remaster=off` | The fight remastered or not (as REMASTER in REMAKE OPTION), once `npm run remaster` has made its assets |
@@ -368,8 +368,9 @@ density is held to its frames (`budget`).
 ### A slow device
 
 The picture's density steps down while a fight's frames run slow (`budget`), to half its pixels
-each way. Where most of a fight's frames still run over budget at that density (300 frames
-judged together), the browser keeps it, and every start after draws `quality=verylow`; the page
-logs it (`.cache/client.log` for a phone on `npm run dev:lan`). It is kept until the site's data
-is cleared in the browser, or the app's storage in an Android app's settings; `?quality=` in the
-address decides for that start whatever was kept.
+each way, and back up as they allow. A frame after the game waited (an online match waiting for
+the other side, a fight loading) or the page was hidden does not count: its time is the wait's.
+Nothing is kept between starts: each starts at its full density and picks its picture afresh (the
+address's, REMAKE OPTION's, or the device's own as above), so `quality=verylow` is drawn only where
+it is chosen, or on an entry-level phone. A setting an earlier version kept, after a fight it found
+too slow, is cleared at the first start.

@@ -162,9 +162,10 @@ On a touch screen the game shows a pad over the picture: a stick where your left
 four buttons on the right in a diamond as on the pad (2 above, 1 and 4 either side, 3 below; a
 thumb between two holds both), Select and Start between the thumbs. A phone draws the
 picture without the ambient occlusion and the bloom, at fewer pixels while its frames run slow; an
-entry-level phone (its GPU a small Mali, an older Adreno or a PowerVR), or one found too slow
-before, draws the very low picture: fewer pixels, thirty pictures a second while the game runs at
-sixty, and the console's meshes for the fighters.
+entry-level phone (its GPU a small Mali, an older Adreno or a PowerVR) draws the very low
+picture: fewer pixels, thirty pictures a second while the game runs at sixty, and the console's
+meshes for the fighters. Each start picks its picture afresh: nothing measured on a start before
+keeps a device on a lower one.
 
 Every app carries your disc's converted data, and the home network's page serves it: all of them
 are for your own devices. Never share or upload an app built from your disc.

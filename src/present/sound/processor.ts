@@ -15,6 +15,12 @@ export type SoundMessage =
   | { readonly kind: 'song'; readonly xa: number; readonly bytes: Uint8Array }
   | { readonly kind: 'track'; readonly track: number; readonly samples: Int16Array };
 
+/** What the worklet tells the page: the song it plays (its XA song, the start it was made for) and the samples of it put out so far, or null. */
+export type SoundReport = { readonly xa: number; readonly starts: number; readonly samples: number } | null;
+
+/** Render quanta (128 samples each) between the worklet's reports. */
+const REPORT_EVERY = 8;
+
 /* The worklet's scope, which the DOM's types leave out. */
 declare class AudioWorkletProcessor {
   readonly port: MessagePort;
@@ -23,6 +29,7 @@ declare function registerProcessor(name: string, processor: new () => AudioWorkl
 
 class GameSound extends AudioWorkletProcessor {
   private mixer: Mixer | null = null;
+  private quanta = 0;
 
   constructor() {
     super();
@@ -48,6 +55,8 @@ class GameSound extends AudioWorkletProcessor {
     const input = inputs[0];
     const cd = input !== undefined && 0 < input.length ? ([input[0]!, input[1] ?? input[0]!] as const) : undefined;
     this.mixer.render(left, right, cd);
+    this.quanta += 1;
+    if (this.quanta % REPORT_EVERY === 0) this.port.postMessage(this.mixer.songPlayed satisfies SoundReport);
     return true;
   }
 }

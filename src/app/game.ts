@@ -11,6 +11,7 @@ import { bindMoveIds, bossMoveset, drawnMovesets, fightDataFor, matchMovesets, t
 import type { FightData, LoadedMoveset } from '../sim/fight/state.ts';
 import { Game } from '../sim/game/game.ts';
 import { Scene } from '../sim/game/state.ts';
+import { MusicMode } from '../sim/sound/music.ts';
 import { FightStep, matchSetup } from '../sim/game/fight-scene.ts';
 import { MenuMode, startMode } from '../sim/game/menu.ts';
 import { OgreChangeShows } from '../sim/game/ogre-change.ts';
@@ -57,6 +58,8 @@ const KAZUYA = 22;
 const WARM_FAST = 4;
 const WARM_FRAME_MS = 24;
 const WARM_MOST_MS = 15000;
+/** The most fields the attract intro runs in one tick to catch up with its song. */
+const MOST_CATCH_UP = 8;
 
 export async function playGame(): Promise<void> {
   const { renderer, backend } = await pageRenderer();
@@ -416,6 +419,45 @@ export async function playGame(): Promise<void> {
     return true;
   };
 
+  /**
+   * The fields the attract intro runs this tick while its song plays, to keep with the song as it is
+   * heard: one as a rule, none while ahead of it, more while behind (a slow frame's time, which the
+   * page's loop does not run again, or a display a hair slower than the fields). The intro is cut to
+   * its song as the console plays it, so its picture follows the song rather than the clock; anywhere
+   * else, or with no song heard (the audio not running), one a tick.
+   */
+  const introFields = (): number => {
+    const state = game.state;
+    const music = state.world.sound.music;
+    if (sound === null || !introSetUp(state) || music.mode !== MusicMode.PLAYING || music.xa < 0) return 1;
+    const heard = sound.songFields(music.xa, music.starts);
+    if (heard === null) return 1;
+    const behind = heard - music.played;
+    if (behind < -1) return 0;
+    return behind > 1 ? Math.min(MOST_CATCH_UP, 1 + Math.floor(behind)) : 1;
+  };
+
+  /** For the page's probe: the song playing, the fields of it the game has played and those heard (null not heard). */
+  const songProbe = (): { xa: number; played: number; heard: number | null } | null => {
+    const music = game.state.world.sound.music;
+    if (music.mode !== MusicMode.PLAYING || music.xa < 0) return null;
+    const heard = sound?.songFields(music.xa, music.starts) ?? null;
+    return { xa: music.xa, played: music.played, heard: heard === null ? null : Math.round(heard * 10) / 10 };
+  };
+
+  /** A field of the local game, its saving, sound, motors and movie, and ONLINE MODE's page after it. */
+  const localField = (pads: readonly [number, number]): void => {
+    game.field(pads);
+    if (saves && game.state.saving !== 0 && game.state.kept !== null) writeProgress(game.state.kept);
+    settle();
+    rumble.field(game.state.rumble.out, performance.now());
+    const played = holdSong();
+    sound?.field(game.state.world, game.state.vblanks, played);
+    movie.audible = sound?.running ?? false;
+    movie.field(game.state);
+    online?.afterField();
+  };
+
   play(
     {
       field(pads) {
@@ -423,16 +465,13 @@ export async function playGame(): Promise<void> {
         const next = game.upcoming();
         if (next !== null) fightData(next);
         if (game.blocked() || !drawingReady()) return false;
-        game.field(pads);
-        if (saves && game.state.saving !== 0 && game.state.kept !== null) writeProgress(game.state.kept);
-        settle();
-        rumble.field(game.state.rumble.out, performance.now());
-        const played = holdSong();
-        sound?.field(game.state.world, game.state.vblanks, played);
-        movie.audible = sound?.running ?? false;
-        movie.field(game.state);
-        online?.afterField();
-        return true;
+        const count = introFields();
+        for (let n = 0; n < count; n += 1) {
+          /* A field more only while the intro plays on, its drawing ready. */
+          if (n > 0 && (game.blocked() || !drawingReady() || !introSetUp(game.state))) break;
+          localField(pads);
+        }
+        return count > 0;
       },
       render(width, height) {
         presenter.controllers = controllers();
@@ -508,7 +547,7 @@ export async function playGame(): Promise<void> {
       },
       moving: () => presenter.moving || (introSetUp(game.state) && !introWarmed(game.state.attract.intro)),
       fighting: () => shown === 'fight',
-      probe: () => ({ scene: game.state.scene, sceneState: game.state.step, sound: sound?.probe() ?? null, movie: movie.probe(), online: online?.probe() ?? null }),
+      probe: () => ({ scene: game.state.scene, sceneState: game.state.step, sound: sound?.probe() ?? null, song: songProbe(), movie: movie.probe(), online: online?.probe() ?? null }),
       about: () => {
         const state = game.state;
         const world = state.world;

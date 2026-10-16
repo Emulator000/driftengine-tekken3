@@ -63,8 +63,8 @@ function moveOf(c: Camera, f: Fighter) {
   return moveAt(c.data, f.move);
 }
 
-/** A move's camera byte: which shots it calls for. */
-const cameraByte = (c: Camera, f: Fighter): number => moveOf(c, f).hitFlags & 0xff;
+/** A move's camera byte: which shots it calls for; none from a fighter on no move (an intro's sides as it sets up, still on an id their moveset lacks). */
+const cameraByte = (c: Camera, f: Fighter): number => (f.move === null ? 0 : moveOf(c, f).hitFlags & 0xff);
 
 function readSlot(c: Camera, i: number): Place {
   const slot = c.state.camera.slots[i]!;

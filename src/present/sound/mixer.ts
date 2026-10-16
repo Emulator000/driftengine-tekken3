@@ -138,6 +138,8 @@ export class Mixer {
   private readonly wet: [number, number] = [0, 0];
   private player: SongPlayer | null = null;
   private playing = { xa: -1, start: -1 };
+  /** The samples of the song playing put out since its player started. */
+  private songSamples = 0;
   /** The music's gains as heard, eased toward the driver's each sample so a field's step does not click. */
   private same = 0;
   private across = 0;
@@ -145,6 +147,11 @@ export class Mixer {
   constructor(banks: PlayableBanks, music: MusicTables) {
     this.banks = banks;
     this.music = new MusicDriver(music);
+  }
+
+  /** The song being played (its XA song and the start it was made for) and the samples of it put out so far, or null. */
+  get songPlayed(): { readonly xa: number; readonly starts: number; readonly samples: number } | null {
+    return this.player === null ? null : { xa: this.playing.xa, starts: this.playing.start, samples: this.songSamples };
   }
 
   /** An XA song's bytes, to play when its driver asks for it. */
@@ -216,6 +223,7 @@ export class Mixer {
         const music = this.player.next();
         if (music === null) this.player = null;
         else {
+          this.songSamples += 1;
           l += music[0] * this.same + music[1] * this.across;
           r += music[1] * this.same + music[0] * this.across;
         }
@@ -250,5 +258,6 @@ export class Mixer {
     if (bytes === undefined) return;
     this.player = new SongPlayer(bytes);
     this.playing = { xa, start: starts };
+    this.songSamples = 0;
   }
 }

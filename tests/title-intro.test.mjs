@@ -1,11 +1,16 @@
-/** The remake's way to the attract intros for showing them, on the imported data: select during the title's movie. */
+/**
+ * The remake's way to the attract intros for showing them, on the imported data: select during the
+ * title's movie; and an intro set up whatever camera the attract demo before it left.
+ */
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { loadFightTables } from '../src/assets/load.ts';
+import { loadFightTables, loadIntroModels, loadMoveset } from '../src/assets/load.ts';
+import { bindMoveIds } from '../src/sim/fight/match.ts';
+import { Mode } from '../src/sim/fight/state.ts';
 import { Game } from '../src/sim/game/game.ts';
 import { Scene } from '../src/sim/game/state.ts';
 import { TitleShows } from '../src/sim/game/title.ts';
@@ -30,4 +35,26 @@ test("select during the title's movie goes straight to the attract overlay's int
   assert.equal(state.scene, Scene.LOGO);
   assert.equal(state.next, Scene.ATTRACT, 'on to the intro');
   assert.equal(state.attract.step, 1, 'the attract cycle on the step that shows it');
+});
+
+test('an intro sets up whatever camera the attract demo before it left: its sides, on no move yet, call for no shot', { skip }, async () => {
+  const { tables, scenes } = await loadFightTables(json);
+  const [common, introSet, introModels] = await Promise.all([loadMoveset(json, 'common'), loadMoveset(json, 'intro'), loadIntroModels(json)]);
+  const sets = [introSet, introSet, common];
+  const introData = (intro) => ({ ...tables, models: introModels[intro], sets, moveIds: bindMoveIds(sets) });
+  const game = new Game({ tables, scenes, fightData: () => null, introData });
+  const state = game.state;
+  Object.assign(state, { scene: Scene.TITLE, step: 0 });
+  state.attract.step = 0;
+  for (const pads of [[0, 0], [0, 0], [SELECT, 0], [SELECT, 0]]) game.field(pads);
+  for (let field = 0; field < 2000 && !(state.scene === Scene.ATTRACT && state.step === 2); field += 1) game.field([0, 0]);
+  assert.equal(state.attractScreen.step, 0, 'the intro about to set up');
+  /* The demo's last camera: the demo's own, started, on its follow shot (the attract camera's step 11), swinging, the fighters apart. */
+  state.world.mode = Mode.DEMO;
+  state.world.camera.attractStarted = 1;
+  state.world.camera.attract.step = 11;
+  state.world.camera.follow[0].swinging = 1;
+  state.world.distance = 1000;
+  game.field([0, 0]);
+  assert.equal(state.attractScreen.step, 1, 'set up, waiting for its song');
 });

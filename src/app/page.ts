@@ -57,7 +57,7 @@ export const image = async (path: string): Promise<ImageBitmap> =>
   createImageBitmap(new Blob([await fetchBytes(DATA, path)], { type: 'image/png' }), { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
 export const two = (n: number): string => String(n).padStart(2, '0');
 
-/** Where the browser keeps that this device's fights were too slow even at their least density. */
+/** Where an earlier version kept that this device's fights ran too slow: no longer read, and cleared, as each start picks its picture afresh. */
 const SLOW = 'tekken3.slow';
 /** The page's quality, as `pageRenderer` picked it. */
 let quality: Quality = 'high';
@@ -66,26 +66,23 @@ let quality: Quality = 'high';
 export const pageQuality = (): Quality => quality;
 
 /**
- * The picture's quality: the address's (`?quality=high`, `low` or `verylow`), or REMAKE OPTION's; else `verylow` where a
- * start before found a fight's frames too slow even at their least density, or on a phone whose GPU
- * the browser names as an entry-level part; else `low` on a phone and `high` elsewhere.
+ * The picture's quality, picked afresh at each start: the address's (`?quality=high`, `low` or
+ * `verylow`), or REMAKE OPTION's; else `verylow` on a phone whose GPU the browser names as an
+ * entry-level part; else `low` on a phone and `high` elsewhere. Nothing a start before measured
+ * decides it: while a fight's frames run slow, its density steps down for that start alone.
  */
 async function pickQuality(): Promise<{ quality: Quality; why: string }> {
   const chosen = asked(params, 'quality', settings.picture, [null, 'high', 'low', 'verylow']);
   if (isQuality(chosen)) return { quality: chosen, why: params.has('quality') ? 'asked' : 'set in REMAKE OPTION' };
-  if (stored(SLOW)) return { quality: 'verylow', why: 'a fight before ran too slow at its least density' };
+  try {
+    localStorage.removeItem(SLOW);
+  } catch {
+    /* Nothing kept where the page may not store. */
+  }
   if (!onPhone()) return { quality: 'high', why: 'not a phone' };
   const { rendererName } = await describeGpu();
   if (entryLevelGpu(rendererName)) return { quality: 'verylow', why: `a phone with an entry-level GPU, ${rendererName}` };
   return { quality: 'low', why: `a phone, ${rendererName || 'its GPU unnamed'}` };
-}
-
-function stored(key: string): boolean {
-  try {
-    return localStorage.getItem(key) === '1';
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -186,9 +183,6 @@ const BUDGET_MS = 20;
 const LEAST_SCALE = 0.5;
 /** The fewest milliseconds between pictures on a very low page: thirty a second, the game still running sixty fields. */
 const VERY_LOW_FRAME_MS = 1000 / 30 - 4;
-/** Fight frames at the least density judged together, and the share of them that, over budget, makes this device a slow one. */
-const SLOW_FRAMES = 300;
-const SLOW_SHARE = 0.5;
 
 /**
  * The game played at 60 fields a second from the pads, drawn each frame, until `stop` fields (the
@@ -198,8 +192,9 @@ const SLOW_SHARE = 0.5;
  * fight's frames come longer than `BUDGET_MS` after the one before (`?budget` sets it, `0` holds
  * the density still) it steps down toward half its pixels each way, and back up as the frames
  * allow. Only frames drawn count: on a display faster than 60 Hz the frames between fields draw
- * nothing and take no time of their own. Where most of a fight's frames still run over budget at the
- * least density, the browser keeps it, and the next start draws the very low picture.
+ * nothing and take no time of their own; nor does a frame after the game waited (a field due that ran
+ * none) or the page was hidden, whose time is the wait's. The density is the start's own: the next
+ * starts at its full density again.
  *
  * A very low page draws thirty pictures a second at most (`VERY_LOW_FRAME_MS`), its budget doubled;
  * the fields still run sixty a second.
@@ -234,29 +229,12 @@ export function play(player: Player, renderer: RendererApi, backend: string): vo
   const veryLow = quality === 'verylow';
   const budget = Number(params.get('budget') ?? (veryLow ? 2 * BUDGET_MS : BUDGET_MS));
   const governor = budget > 0 ? new ResolutionGovernor(1, { budgetMs: budget, minScale: LEAST_SCALE }) : null;
-  /** Fight frames drawn at the least density, and those of them over budget, toward judging this device slow. */
-  const slow = { frames: 0, long: 0, kept: veryLow };
   const stats = new FrameStats(() => `${backend}, ${canvas.width}x${canvas.height} at ${(governor?.scale ?? 1).toFixed(3)}`);
   tellWith(() => stats.line());
-  /** When the last frame was drawn. */
+  /** When the last frame was drawn, and whether the game waited since (a field due ran none: a match waiting for the other side or leaving a field out, a fight loading) or the page was hidden: that frame's time is not the drawing's, and does not count toward the density. */
   let lastDrawn = 0;
-  /** One fight frame at the least density; after `SLOW_FRAMES`, this device kept as a slow one where most ran over budget. */
-  const judgeSlow = (long: boolean): void => {
-    slow.frames += 1;
-    if (long) slow.long += 1;
-    if (slow.frames < SLOW_FRAMES) return;
-    if (slow.long / slow.frames >= SLOW_SHARE) {
-      slow.kept = true;
-      try {
-        localStorage.setItem(SLOW, '1');
-      } catch {
-        /* Not kept where the page may not store: the next start judges again. */
-      }
-      console.log(`[tekken3 remake] ${slow.long} of ${slow.frames} fight frames over ${budget} ms at the least density: the next start draws the very low picture`);
-    }
-    slow.frames = 0;
-    slow.long = 0;
-  };
+  let waited = false;
+  document.addEventListener('visibilitychange', () => (waited = true));
   const stopAt = Number(params.get('stop') ?? Infinity);
   /* `P` flies a free camera through the held fight; `F` shows the frame rate. */
   new FreeCamera(canvas);
@@ -280,7 +258,7 @@ export function play(player: Player, renderer: RendererApi, backend: string): vo
           if (player.field([input.word(0) | touched, input.word(1)]) !== false) {
             fields += 1;
             stats.field(start);
-          }
+          } else waited = true;
         } catch (e) {
           failure = e as Error;
           showCrash(e, 'stepping the game');
@@ -297,12 +275,12 @@ export function play(player: Player, renderer: RendererApi, backend: string): vo
           return;
         }
         if (lastDrawn > 0) {
-          const counted = document.visibilityState === 'visible' && player.fighting();
+          const counted = !waited && document.visibilityState === 'visible' && player.fighting();
           const scale = governor?.sample(now - lastDrawn, counted) ?? null;
           if (scale !== null) renderer.applyResolutionScale(scale);
-          if (counted && !slow.kept && governor !== null && governor.scale <= LEAST_SCALE) judgeSlow(now - lastDrawn > budget);
         }
         lastDrawn = now;
+        waited = false;
         drawnAt = { fields, width, height };
         frames.drawn += 1;
         stats.drawing();

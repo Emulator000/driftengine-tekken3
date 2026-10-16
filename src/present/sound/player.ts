@@ -9,12 +9,16 @@ import { audioContextConstructor, claimPlaybackSession } from '@driftengine/audi
 import type { FightState } from '../../sim/fight/state.ts';
 import type { PlayableBanks } from './banks.ts';
 import type { MusicTables } from './music.ts';
-import type { SoundMessage } from './processor.ts';
+import type { SoundMessage, SoundReport } from './processor.ts';
 import processorUrl from './processor.ts?worker&url';
 import { CHIP_RATE } from './voices.ts';
 import { THEATER_SLOT } from './mixer.ts';
 
 const VOICE_KEYS = new Set(['on', 'off']);
+/** A field's length, seconds. */
+const FIELD_SECONDS = 1 / 60;
+/** How long past the worklet's last report the song's place is reckoned on (it reports every few milliseconds while it runs). */
+const REPORT_HELD_MS = 100;
 
 export class SoundPlayer {
   private readonly context: AudioContext;
@@ -27,6 +31,9 @@ export class SoundPlayer {
   private readonly asked = new Set<number>();
   /** The set songs pick from (-1 none), as the game's music options last said. */
   private set: number;
+  /** The worklet's last report of the song it plays, and when it came (`performance.now()`). */
+  private report: SoundReport = null;
+  private reportAt = 0;
 
   private readonly fetchTrack: (track: number) => Promise<ArrayBuffer>;
 
@@ -40,6 +47,10 @@ export class SoundPlayer {
     this.set = music.set === 1 ? 1 : 0;
     this.fetchSong = fetchSong;
     this.fetchTrack = fetchTrack;
+    node.port.onmessage = (event: MessageEvent<SoundReport>) => {
+      this.report = event.data;
+      this.reportAt = performance.now();
+    };
   }
 
   /** The player, or null where the browser has no Web Audio or no worklets. `fetchSong` fetches an XA song's file by its number, `fetchTrack` an audio track's samples. */
@@ -73,6 +84,20 @@ export class SoundPlayer {
     let sum = 0;
     for (const v of this.samples) sum += v * v;
     return { running: this.running, level: Math.round(Math.sqrt(sum / this.samples.length) * 1e4) / 1e4 };
+  }
+
+  /**
+   * The fields of a song heard so far: the XA song `xa` from its start `starts`, as the worklet last
+   * reported it, reckoned on to now and back by the output's latency (what is put out now is heard
+   * that much later). Null while the audio does not run or plays another song (or none).
+   */
+  songFields(xa: number, starts: number): number | null {
+    const report = this.report;
+    if (!this.running || report === null || report.xa !== xa || report.starts !== starts) return null;
+    const since = Math.min(performance.now() - this.reportAt, REPORT_HELD_MS) / 1000;
+    const latency = this.context.baseLatency + (this.context.outputLatency || 0);
+    const seconds = report.samples / this.context.sampleRate + since - latency;
+    return Math.max(0, seconds) / FIELD_SECONDS;
   }
 
   /** A movie's video, its sound into the CD input (once for each element: the browser routes it here alone after). */
