@@ -151,6 +151,40 @@ test('a tap made while a side waits for the other is played with the next field,
   assert.equal(b.session.desync, null);
 });
 
+test('two presses made one after the other while a side waits are played one after the other, never together', () => {
+  /* A game that keeps the first pad's word of each field it plays (put right where a rollback plays it again). */
+  const played = [new Map(), new Map()];
+  const games = played.map((words) => {
+    const state = { fields: 0 };
+    return { state, field: ([a]) => (words.set(state.fields, a), (state.fields += 1)) };
+  });
+  const match = pair(games, { latencyMs: 20 });
+  run(match, 60, () => 0);
+  const [a] = match.sides;
+  for (let frame = 0; frame < 40; frame += 1) {
+    /* The other side gone a while: this one waits, its pad pressing 1, letting go, then pressing 2. */
+    a.session.advance(18 <= frame && frame < 22 ? 1 : 25 <= frame && frame < 28 ? 2 : 0);
+    match.network.advance(FIELD_MS);
+  }
+  assert.equal(a.session.state, 'stalled');
+  run(match, 120, () => 0);
+  for (const [side, words] of played.entries()) {
+    const seen = [...words.entries()].sort(([x], [y]) => x - y).map(([, word]) => word).filter((word) => word !== 0);
+    assert.ok(!seen.includes(3), `side ${side}: never both at once (${seen.join(' ')})`);
+    assert.deepEqual([...new Set(seen)], [1, 2], `side ${side}: 1, then 2`);
+  }
+});
+
+test("a mirrored player's stick: its left and right swapped, its up and down and its buttons as they are", async () => {
+  const { mirroredStick } = await import('../src/net/wire.ts');
+  const [UP, RIGHT, DOWN, LEFT, SQUARE, TRIANGLE, CROSS, CIRCLE] = [0x1000, 0x2000, 0x4000, 0x8000, 0x80, 0x10, 0x40, 0x20];
+  assert.equal(mirroredStick(DOWN | RIGHT | TRIANGLE), DOWN | LEFT | TRIANGLE, "down and forward on the screen with a button: down and the game's left, the same button");
+  assert.equal(mirroredStick(LEFT), RIGHT);
+  assert.equal(mirroredStick(UP | LEFT | RIGHT), UP | LEFT | RIGHT, 'both held: both');
+  assert.equal(mirroredStick(SQUARE | TRIANGLE | CROSS | CIRCLE), SQUARE | TRIANGLE | CROSS | CIRCLE, 'the buttons never swapped: a move is its button');
+  assert.equal(mirroredStick(mirroredStick(DOWN | LEFT | CROSS)), DOWN | LEFT | CROSS);
+});
+
 test("a match's words reach only it: the last match's, sent again as it ended, are passed over by the next on the same link", () => {
   const network = new LoopbackNetwork();
   const transports = [0, 1].map((seat) => network.open({ self: seat, seed: 3 + seat }));

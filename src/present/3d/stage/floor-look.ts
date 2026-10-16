@@ -7,7 +7,7 @@
 import type { RendererApi, SurfaceTextureHandle } from '@driftengine/core';
 import type { FloorLayout, FloorLook } from './ground.ts';
 import { gratingMaps, heightsOf, macroRelief, originalFloor, pixelsOf, reliefMaps, wetMaps, type StageLook } from './looks.ts';
-import { FINE_CUTS } from './relief.ts';
+import { LOW_RELIEF_CUTS, RELIEF_CUTS } from './relief.ts';
 
 /** A floor redrawn by the importer: its atlas, its maps, and where the ground's regions went. */
 export interface RedrawnFloor {
@@ -25,7 +25,7 @@ const SEE_THROUGH = 0.02;
  * The floor's look: `texture` the stage's own atlas (`atlas` its size as the ground's cells count
  * it), `floor` the redrawn one where the importer made it, `look` the stage's.
  */
-export function floorLookOf(renderer: RendererApi, texture: ImageBitmap, atlas: { readonly width: number }, floor: RedrawnFloor | undefined, look: StageLook): FloorLook {
+export function floorLookOf(renderer: RendererApi, texture: ImageBitmap, atlas: { readonly width: number }, floor: RedrawnFloor | undefined, look: StageLook, fine = true): FloorLook {
   const own = look.floor;
   const wet = own.reflectivity === 0 ? null : { reflectivity: own.reflectivity, roughnessScale: 1, specular: own.metal === undefined ? 0.5 : 0.04, grain: own.grain ?? 1 };
   const textures = (maps: { normal: ImageData; orm: ImageData }): { normal: SurfaceTextureHandle; orm: SurfaceTextureHandle } => ({
@@ -54,7 +54,9 @@ export function floorLookOf(renderer: RendererApi, texture: ImageBitmap, atlas: 
     const grating = gratingMaps(original, Math.max(2, Math.round(cell / 256)), own.metal ?? 0.6, own.roughness);
     return { texture: renderer.createSurfaceTexture(grating.albedo, COLOUR), ...textures(grating), ...base, relief: null };
   }
-  const relief = floor.maps?.height == null || own.depth === 0 ? null : { ...heightsOf(floor.maps.height, cell, Math.max(1, Math.round(cell / FINE_CUTS / 4)), Math.round(cell / 18)), depth: own.depth };
+  /* Every tile cut alike, finely for the picture at its best; its heights read four to a cut. */
+  const cuts = fine ? RELIEF_CUTS : LOW_RELIEF_CUTS;
+  const relief = floor.maps?.height == null || own.depth === 0 ? null : { ...heightsOf(floor.maps.height, cell, Math.max(1, Math.round(cell / cuts / 4)), Math.round(cell / 18)), depth: own.depth, cuts };
   const picture = renderer.createSurfaceTexture(floor.texture, COLOUR);
   const maps = floor.maps;
   if (maps?.normal == null || maps.orm == null) {

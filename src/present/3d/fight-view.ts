@@ -57,6 +57,8 @@ export interface DrawingFiles {
   readonly remaster?: boolean;
   /** Remastered, whether the floors fade into the dark as the game's do (the default), or are lit evenly. */
   readonly floorFade?: boolean;
+  /** Remastered, whether a sunk floor's tiles are cut finely, for the picture at its best (the default), or coarsely. */
+  readonly fineRelief?: boolean;
 }
 
 /** An atlas's normal and ORM maps, and its heights, made on this machine for the remaster. */
@@ -343,7 +345,7 @@ export class FightView {
         const heights = remaster && stageLook.relief > 0 && sceneryMaps?.height != null ? pixelsOf(sceneryMaps.height) : null;
         const look = remaster ? { light: { dir: stageLook.sun, sun: stageLook.sunColour, sky: stageLook.ambient, ground: stageLook.ambientGround, shade: SHADE, sunlit: SUNLIT }, ...this.mapTextures(sceneryMaps), height: heights, relief: stageLook.relief, ragged: stageLook.ragged === true } : null;
         const stage = arcade === undefined ? createStage(this.renderer, mesh, handle, look) : createStage(this.renderer, arcade.mesh, this.renderer.createSurfaceTexture(arcade.texture, this.textureOptions(true, remaster && arcade.maps != null)), look, remaster);
-        const floorLook = remaster ? floorLookOf(this.renderer, texture, atlas, floor, stageLook) : null;
+        const floorLook = remaster ? floorLookOf(this.renderer, texture, atlas, floor, stageLook, this.files.fineRelief !== false) : null;
         const tint = remaster ? floorTint(stageLook) : this.groundTint;
         const laid = new Ground(this.renderer, ground, atlas.width, atlas.height, handle, tint, floorLook);
         let grass: Grass | null = null;

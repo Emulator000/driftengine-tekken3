@@ -12,8 +12,10 @@
  *   (a stall) until it arrives, rather than leaving a field played on a guess it can no longer put
  *   right; five seconds of it with nothing heard from the other side ends the match as a
  *   disconnection (a side loading its fight says so, `heard`).
- * - A field's word is taken as the field is played, with whatever the pad pressed while this side
- *   waited (a tap then is not lost), and sent once: while this side waits (or leaves a field out)
+ * - A field's word is taken as the field is played, and sent once. The pad's changes while this
+ *   side waits are kept in order and played one a field after it, so a tap then is not lost and two
+ *   presses are never played as one (two buttons together make another move, a throw of two
+ *   strikes). While this side waits (or leaves a field out)
  *   it sends its last packet again as it was, the words before it with it, so the other side gets
  *   any it lacks, and never a second word for a field it may have played already.
  * - Each side tells the other how far ahead of it it reckons itself (with the round trip's
@@ -45,6 +47,8 @@ const FINGERPRINT_EVERY = 8;
 /** How much further ahead than the other side this one must reckon itself to leave a field out, and how often at most. */
 const LEAD = 2;
 const SKIP_EVERY = 6;
+/** The most changes of the pad kept while no field is played; past them the newest takes the last one's place. */
+const MOST_WAITING = 8;
 
 export type SessionState = 'running' | 'stalled' | 'desynced' | 'disconnected' | 'halted';
 
@@ -91,8 +95,9 @@ export class MatchSession<S> {
   private readonly inputs: InputLog;
   private readonly session: LockstepSession<S>;
   private readonly transport: KeepingTransport;
-  /** What the pad pressed since the last field played. */
-  private pressed = 0;
+  /** The pad's words while no field was played (each one a change from the word before it), played one a field in turn; and the last word played. */
+  private readonly waiting: number[] = [];
+  private lastWord = 0;
   /** How far ahead the other side last reckoned itself, or null before it said. */
   private theirs: number | null = null;
   private readonly payload = new Uint8Array(INPUT_BYTES);
@@ -214,7 +219,12 @@ export class MatchSession<S> {
    */
   advance(word: number): boolean {
     if (this.stateNow === 'desynced' || this.stateNow === 'disconnected' || this.stateNow === 'halted') return false;
-    this.pressed |= word;
+    /* A change of the pad's kept: played in its turn, never merged with another (two presses would make a third move). */
+    const newest = this.waiting.length > 0 ? this.waiting[this.waiting.length - 1]! : this.lastWord;
+    if (word !== newest) {
+      if (this.waiting.length < MOST_WAITING) this.waiting.push(word);
+      else this.waiting[MOST_WAITING - 1] = word;
+    }
     this.session.poll();
     if (this.session.status === 'halted') {
       this.stateNow = this.session.desync === null ? 'halted' : 'desynced';
@@ -239,8 +249,9 @@ export class MatchSession<S> {
       this.transport.sendAgain();
       return false;
     }
-    writeWord(this.payload, this.pressed | word);
-    this.pressed = 0;
+    const played = this.waiting.shift() ?? word;
+    this.lastWord = played;
+    writeWord(this.payload, played);
     this.session.submit(this.field, this.payload);
     this.stateNow = 'running';
     const before = this.loop.stats.replayedTicks;

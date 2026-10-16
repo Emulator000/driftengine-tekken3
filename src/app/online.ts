@@ -12,6 +12,7 @@ import pkg from '../../package.json';
 import { Online, REMATCH_MS, type Start } from '../net/online.ts';
 import { StateSnapshotter } from '../net/snapshot.ts';
 import { ROLLBACK_DEPTH } from '../net/session.ts';
+import { mirroredStick } from '../net/wire.ts';
 import type { FightData } from '../sim/fight/state.ts';
 import { stopMusic } from '../sim/fight/voices.ts';
 import { Game } from '../sim/game/game.ts';
@@ -24,10 +25,6 @@ import { SCREEN } from '../present/scenes/screen.ts';
 import { canvas, params } from './page.ts';
 import { freeCameraBarred } from './free-camera.ts';
 import { addressBounds, ClipboardBridge, codeBounds, copied, edit, insert, nameBounds, placeCaret, type Bounds, type Field } from './text-field.ts';
-
-/** A pad's left and right. */
-const LEFT = 0x8000;
-const RIGHT = 0x2000;
 
 /** Where the page's settings are kept on this device. */
 const KEPT = 'tekken3-online';
@@ -312,7 +309,7 @@ export class OnlinePlay {
   matchField(word: number, ready: boolean): boolean {
     this.endedNow = false;
     /* The stick goes by the screen: on a mirrored fight, its left is the game's right. */
-    const pressed = this.mirrored ? (word & ~(LEFT | RIGHT)) | ((word & LEFT) !== 0 ? RIGHT : 0) | ((word & RIGHT) !== 0 ? LEFT : 0) : word;
+    const pressed = this.mirrored ? mirroredStick(word) : word;
     const played = this.online.frame(pressed, ready);
     /* Over once past Versus for longer than a rollback reaches: every press behind it in, on both sides alike. */
     if (played) this.pastFields = PAST_VERSUS.has(this.game.state.scene) ? this.pastFields + 1 : 0;

@@ -151,6 +151,9 @@ export const drawingFiles: DrawingFiles = {
   get floorFade() {
     return floorFade.on;
   },
+  get fineRelief() {
+    return pageQuality() === 'high';
+  },
 };
 
 /** An attract intro's drawing data: for each pack, the model its archive holds in the pair its table names; the stages as the fight's. */
@@ -168,6 +171,9 @@ export const introFiles = (intro: number, pairs: readonly number[]): DrawingFile
   },
   get floorFade() {
     return floorFade.on;
+  },
+  get fineRelief() {
+    return pageQuality() === 'high';
   },
 });
 

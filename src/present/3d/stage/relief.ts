@@ -1,30 +1,31 @@
 /**
  * A floor's tiles sunk where their joints lie, in 3D. A tile's relief is its kind's (the
- * region of the floor's atlas its cell shows, and which way round) at a level of detail, so each
- * kind is made once at each level, a grid sunk under the stones' tops by the floor's heights, and
- * every tile is drawn as an instance of its kind's grid, placed where the tile lies: nothing is made
- * again as the fight moves, and the floor is a draw a kind and level. Where two tiles meet, both take
- * the same heights: each kind's border at the coarsest level, averaged with the kind beside it as the
- * ground lays them, and every finer level's border drawn straight between those points.
+ * region of the floor's atlas its cell shows, and which way round), made once a kind, a grid sunk
+ * under the stones' tops by the floor's heights, and every tile is drawn as an instance of its
+ * kind's grid, placed where the tile lies: nothing is made again as the fight moves, and the floor
+ * is a draw a kind. Every tile is cut alike (`FloorRelief.cuts`): a tile cut finer shows its joints
+ * sunk deeper, so its stones darker, and tiles cut finer round the fight than past it showed a square
+ * of darker floor. Where two tiles meet, both take the same heights: each kind's border at the
+ * coarsest cut, averaged with the kind beside it as the ground lays them, and a finer cut's border
+ * drawn straight between those points.
  */
 import { createMeshInstances, type InstancedHandle, type MeshHandle, type MeshInstances, type RendererApi, type SurfaceMaterial, type SurfaceTextureHandle, type TranslucentMeshOptions } from '@driftengine/core';
 
-/** A floor's heights by its atlas's texels (0 the deepest joint, 1 a stone's top), and how far its joints sink (metres). */
+/** A floor's heights by its atlas's texels (0 the deepest joint, 1 a stone's top), how far its joints sink (metres), and how many times each tile is cut each way. */
 export interface FloorRelief {
   readonly heights: Float32Array;
   readonly width: number;
   readonly height: number;
   readonly depth: number;
+  readonly cuts: number;
 }
 
-/** How many times a tile is cut each way: under the fighters, round them, and farther; how far those under and round them lie (tiles). */
-export const FINE_CUTS = 192;
-const CUTS = 48;
-const FAR_CUTS = 16;
-const FINE_REACH = 1;
+/** How many times every tile is cut each way: for the picture at its best, and otherwise (the coarsest cut, which the tiles' borders are laid at). */
+export const RELIEF_CUTS = 48;
+export const LOW_RELIEF_CUTS = 16;
+const FAR_CUTS = LOW_RELIEF_CUTS;
 /** A ground map's cells to a row. */
 const MAP_COLUMNS = 10;
-const REACH = 3;
 
 /** The patch a frame, as the ground lays it: its near tiles' corners (mm), cells, and how many. */
 export interface ReliefPatch {
@@ -81,12 +82,10 @@ interface Level {
 export class ReliefTiles {
   /** Each cell's corners' texture coordinates (the near corner 2, then 3 along x, 0 along z, 1 across). */
   private readonly corners: Float32Array;
-  /** Each kind's border at the coarsest level, `FAR_CUTS + 1` points a side, joined with its neighbours' once they are known; and the tile's side (mm). */
+  /** Each kind's border at the coarsest cut, `FAR_CUTS + 1` points a side, joined with its neighbours' once they are known; and the tile's side (mm). */
   private borders: Float32Array[] | null = null;
   private side = 0;
   private readonly levels = new Map<string, Level>();
-  /** How finely each place's tile was last cut, which it keeps until the fight is well past it. */
-  private cutsAt = new Map<string, number>();
   private lastKey = '';
 
   /** Each map cell's kind, and a cell of each (`kindsOf`). */
@@ -105,7 +104,7 @@ export class ReliefTiles {
     ({ kindOf: this.kindOf, sample: this.sample } = kindsOf(uvs));
   }
 
-  /** Lays the patch's tiles: each an instance of its kind's grid at the detail its distance from the fight asks. */
+  /** Lays the patch's tiles: each an instance of its kind's grid. */
   lay(patch: ReliefPatch): void {
     const { x, z, cell, count } = patch;
     if (count === 0) {
@@ -118,27 +117,9 @@ export class ReliefTiles {
     const key = `${count}:${x[2]},${z[2]}:${x[count * 4 - 2]},${z[count * 4 - 2]}`;
     if (key === this.lastKey) return;
     this.lastKey = key;
-    let cx = 0;
-    let cz = 0;
-    for (let v = 0; v < count * 4; v += 1) {
-      cx += x[v]!;
-      cz += z[v]!;
-    }
-    cx /= count * 4;
-    cz /= count * 4;
     for (const level of this.levels.values()) level.instances.count = 0;
-    const cutsAt = new Map<string, number>();
     for (let q = 0; q < count; q += 1) {
-      const lowX = Math.min(x[q * 4]!, x[q * 4 + 1]!, x[q * 4 + 2]!, x[q * 4 + 3]!);
-      const lowZ = Math.min(z[q * 4]!, z[q * 4 + 1]!, z[q * 4 + 2]!, z[q * 4 + 3]!);
-      const off = Math.max(Math.abs(lowX + side / 2 - cx), Math.abs(lowZ + side / 2 - cz));
-      let cuts = off <= FINE_REACH * side ? FINE_CUTS : off <= REACH * side ? CUTS : FAR_CUTS;
-      /* Finer as the fight comes near, coarser only once it is a tile farther than that. */
-      const place = `${lowX},${lowZ},${cell[q]}`;
-      const before = this.cutsAt.get(place);
-      if (before !== undefined && before > cuts && off <= ((before === FINE_CUTS ? FINE_REACH : REACH) + 1) * side) cuts = before;
-      cutsAt.set(place, cuts);
-      const level = this.levelOf(this.kindOf[cell[q]!]!, cuts, count);
+      const level = this.levelOf(this.kindOf[cell[q]!]!, this.relief.cuts, count);
       const m = level.instances.models;
       const at = level.instances.count * 16;
       m.fill(0, at, at + 16);
@@ -151,7 +132,6 @@ export class ReliefTiles {
       level.instances.tints.fill(1, level.instances.count * 3, level.instances.count * 3 + 3);
       level.instances.count += 1;
     }
-    this.cutsAt = cutsAt;
     for (const level of this.levels.values()) this.renderer.uploadInstanced(level.batch, level.instances);
   }
 
@@ -245,7 +225,7 @@ export class ReliefTiles {
       this.renderer.disposeMesh(level.mesh);
     }
     this.levels.clear();
-    for (let kind = 0; kind < this.sample.length; kind += 1) for (const cuts of [FINE_CUTS, CUTS, FAR_CUTS]) this.levelOf(kind, cuts, capacity);
+    for (let kind = 0; kind < this.sample.length; kind += 1) this.levelOf(kind, this.relief.cuts, capacity);
   }
 
   /** A kind's grid at `cuts` and its batch, made the first time a tile asks for it. */
