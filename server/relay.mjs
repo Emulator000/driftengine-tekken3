@@ -24,12 +24,16 @@
  * then the command line (`--<name>`), each over the one before; `--help` lists them.
  */
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
 import { createServer as createHttp } from 'node:http';
 import { createServer as createHttps } from 'node:https';
 import { randomInt } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
 import { WebSocketServer } from 'ws';
+
+import { panelPage } from './panel.mjs';
 
 /** The protocol's version: a client speaking another is refused at its hello. */
 export const PROTOCOL = 1;
@@ -73,6 +77,32 @@ function addressOf(request) {
 }
 
 /** Two players' pair, whichever way round. */
+/** The server's own version (its package's, kept with the game's), and the oldest game version that speaks its protocol. */
+const SERVER_VERSION = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version ?? '?';
+const OLDEST_GAME = '0.6.0';
+
+/** The game's two faces its page is set in, each by the file its package keeps it in (read once, none where the package is not installed). */
+const FONTS = {
+  'russo-one.woff2': ['@fontsource/russo-one', 'russo-one-latin-400-normal.woff2'],
+  'saira-500.woff2': ['@fontsource/saira-extra-condensed', 'saira-extra-condensed-latin-500-normal.woff2'],
+  'saira-900.woff2': ['@fontsource/saira-extra-condensed', 'saira-extra-condensed-latin-900-normal.woff2'],
+};
+const fonts = new Map();
+const require = createRequire(import.meta.url);
+function fontFile(name) {
+  if (!fonts.has(name)) {
+    const [pkg, file] = FONTS[name] ?? [];
+    let bytes = null;
+    try {
+      if (pkg !== undefined) bytes = readFileSync(path.join(path.dirname(require.resolve(`${pkg}/LICENSE`)), 'files', file));
+    } catch {
+      bytes = null;
+    }
+    fonts.set(name, bytes);
+  }
+  return fonts.get(name);
+}
+
 const pairKey = (a, b) => (a.id < b.id ? `${a.id} ${b.id}` : `${b.id} ${a.id}`);
 
 /** The fighters whose data a player has, from the word their hello carries (a bit a roster id, in hex). */
@@ -163,6 +193,8 @@ const cleanTitle = (raw) => String(raw ?? '').toUpperCase().replace(/[^A-Z0-9 .\
  */
 export class Relay {
   constructor(config, { now = () => Date.now(), log = (line) => console.log(line) } = {}) {
+    /** When it started, for its page's time up. */
+    this.started = now();
     this.config = config;
     this.now = now;
     this.log = log;
@@ -199,6 +231,8 @@ export class Relay {
   /** On another HTTP server's upgrades to `path` (the dev server's `/relay`), leaving the rest to it. */
   attach(server, path) {
     const { config } = this;
+    /** The path its players' WebSockets come to, which its page tells them. */
+    this.path = path;
     this.sockets = new WebSocketServer({ noServer: true, maxPayload: config.maxMessage });
     this.sockets.on('connection', (socket, request) => this.connected(socket, request));
     this.sweeper = setInterval(() => this.sweep(), 5000);
@@ -227,16 +261,63 @@ export class Relay {
     return closed;
   }
 
-  /** `GET /health`: whether it is up, and how busy. */
+  /**
+   * Its HTTP answers: `GET /health`, whether it is up and how busy; `GET /status.json`, the numbers
+   * its page shows (`status`); its page itself on its own path (`panel.mjs`). Behind another server
+   * (the dev server's `/relay`), the path the request came on (`originalUrl`) is the page's own.
+   */
   http(request, response) {
     const url = new URL(request.url ?? '/', 'http://relay');
+    const own = new URL(request.originalUrl ?? request.url ?? '/', 'http://relay').pathname;
     if (url.pathname === '/health') {
       response.writeHead(200, { 'content-type': 'text/plain', 'access-control-allow-origin': '*' });
       response.end(`ok clients=${this.clients.size} rooms=${this.rooms.size} queued=${this.queue.length}\n`);
       return;
     }
-    response.writeHead(426, { 'content-type': 'text/plain' });
-    response.end(`${this.config.name}: a server for Tekken 3's online matches; connect with the game.\n`);
+    const font = /\/fonts\/([a-z0-9-]+\.woff2)$/.exec(url.pathname);
+    if (font !== null) {
+      const bytes = fontFile(font[1]);
+      response.writeHead(bytes === null ? 404 : 200, bytes === null ? { 'content-type': 'text/plain' } : { 'content-type': 'font/woff2', 'cache-control': 'public, max-age=86400' });
+      response.end(bytes ?? 'no such font\n');
+      return;
+    }
+    if (url.pathname.endsWith('/status.json')) {
+      response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store', 'access-control-allow-origin': '*' });
+      response.end(JSON.stringify(this.status()));
+      return;
+    }
+    if (url.pathname === '/' || url.pathname === '/index.html' || url.pathname === this.path) {
+      const base = own.endsWith('/') ? own : own.endsWith('/index.html') ? own.slice(0, -'index.html'.length) : `${own}/`;
+      const secure = request.socket.encrypted === true || String(request.headers['x-forwarded-proto'] ?? '').split(',')[0]?.trim() === 'https';
+      const wsPath = this.path === undefined || this.path === '/' ? '' : this.path;
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      response.end(panelPage({ root: base, address: `${secure ? 'wss' : 'ws'}://${request.headers.host ?? `localhost:${this.port ?? this.config.port}`}${wsPath}` }));
+      return;
+    }
+    response.writeHead(404, { 'content-type': 'text/plain' });
+    response.end(`${this.config.name}: a server for Tekken 3's online matches; its page is at /.\n`);
+  }
+
+  /**
+   * What its page shows, no player's address among it: its name and line, its own version and the
+   * oldest game version it serves, the players on it, the fights on now, the quick match's queue,
+   * the rooms waiting (and those listed, by title, host and version), the versions being played,
+   * and the seconds it has been up.
+   */
+  status() {
+    let fights = 0;
+    let waiting = 0;
+    const listed = [];
+    for (const room of this.rooms.values()) {
+      if (room.seats[1] !== null) fights += 1;
+      else if (!room.quick) {
+        waiting += 1;
+        if (room.listed && room.offering === null) listed.push({ title: room.title, host: room.seats[0].name, version: room.seats[0].build });
+      }
+    }
+    const versions = {};
+    for (const client of this.clients) if (client.hello) versions[client.build] = (versions[client.build] ?? 0) + 1;
+    return { name: this.config.name, motd: this.config.motd, version: SERVER_VERSION, oldest: OLDEST_GAME, protocol: PROTOCOL, ...this.counts(), fights, rooms: waiting, listed: listed.slice(0, this.config.listed), versions, up: Math.floor((this.now() - this.started) / 1000) };
   }
 
   connected(socket, request) {
@@ -298,7 +379,7 @@ export class Relay {
         return;
       }
       case 'ping':
-        return this.tell(client, { ev: 'pong', t: command.t ?? 0 });
+        return this.tell(client, { ev: 'pong', t: command.t ?? 0, ...this.counts() });
       default:
         return this.tell(client, { ev: 'error', why: `no command ${command.do}` });
     }
@@ -315,7 +396,14 @@ export class Relay {
     client.build = String(build ?? '').slice(0, 64);
     client.roster = rosterOf(roster);
     this.log(`[relay] ${who(client)} connected (${this.clients.size} on the server)`);
-    this.tell(client, { ev: 'welcome', name: this.config.name, motd: this.config.motd, ice: this.config.ice, protocol: PROTOCOL, players: this.clients.size, rooms: this.rooms.size });
+    this.tell(client, { ev: 'welcome', name: this.config.name, motd: this.config.motd, ice: this.config.ice, protocol: PROTOCOL, rooms: this.rooms.size, ...this.counts() });
+  }
+
+  /** The players on the server (those who said hello) and those waiting in its quick match, told with each pong so a page can say how many are about. */
+  counts() {
+    let players = 0;
+    for (const client of this.clients) if (client.hello) players += 1;
+    return { players, queued: this.queue.length };
   }
 
   /** A room of this player's own, waiting for another: listed or not, with a password or not. */

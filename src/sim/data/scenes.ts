@@ -446,7 +446,8 @@ export type OptionValue =
   | 'remaster'
   | 'look'
   | 'brightness'
-  | 'floorFade';
+  | 'floorFade'
+  | 'crt';
 
 /**
  * An item of an Options list: what it changes, its label and its values' names, how left and

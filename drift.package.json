@@ -6,5 +6,5 @@
   "window": { "width": 1280, "height": 720, "mode": "windowed", "resizable": true },
   "backend": { "webgpu": "prefer", "allowSoftwareRenderer": false },
   "features": { "clipExport": false, "gamepad": true },
-  "android": { "permissions": [], "cleartextTraffic": false, "orientation": "sensorLandscape" }
+  "android": { "permissions": ["INTERNET"], "cleartextTraffic": true, "orientation": "sensorLandscape" }
 }

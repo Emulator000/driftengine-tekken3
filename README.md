@@ -207,8 +207,9 @@ network (`npm run dev:lan`) play with nothing else to run. Over the internet, on
 server where the other can reach it (`npm run relay`, or the `server/` folder on a machine of its
 own, [server/README.md](server/README.md)), opening its one TCP port (8790 by default) on the
 router and the firewall, and both set its address as SERVER on ONLINE MODE's page; nobody else
-opens anything ([how to host it](server/README.md#opening-it-to-the-internet)).
-[docs/USAGE.md](docs/USAGE.md#online) says more.
+opens anything ([how to host it](server/README.md#opening-it-to-the-internet)). A browser opened
+on the server's address shows [its page](server/README.md#its-page): whether it is up, how many
+play on it, and how to join them. [docs/USAGE.md](docs/USAGE.md#online) says more.
 
 ### Kazuya (optional)
 
@@ -357,7 +358,7 @@ field. What is done and what is not yet:
 | Kazuya from Tekken 4 | Done | Optional, from your own Tekken 4 disc |
 | The arcade release's stages | Done | Optional, from a dump of your own arcade board: the 14 stages it has, their backgrounds as the board lays them, their floors as far as the board's and drawn under the stage as it draws them, darkening toward their edges as the disc's do, the carousel, the helicopter and the torches; `?stages=psx` draws the disc's |
 | The arcade release's fighters | Done | Optional, from the same dump: the 31 models it has (where it has a stand-in, Julia's second costume, the disc's is drawn), their seams' own weights, their accessories each on its own joint and swung on the board's own springs; `?fighters=psx` draws the disc's. Their coats' panels and the tails they hang from the hips are kept clear of the legs (`?cloth=original` draws them as the board does). They do not close their eyes, as the board has no closed eyes to draw |
-| The remake's settings in the game | Done | REMAKE OPTION in the Options: the textures, the models, the arcade's stages and fighters, the cloth, the picture, the frame rate and the touch pad, kept on the device |
+| The remake's settings in the game | Done | REMAKE OPTION in the Options: the textures, the models, the arcade's stages and fighters, the cloth, the picture, the frame rate, the touch pad and a CRT filter (off unless chosen), kept on the device |
 | A stop shown as the game's own | Done | A window with what went wrong and what was playing, its details to copy into an issue |
 | A free camera and a frame-rate meter | Done | `P` holds a fight and flies a camera through it; `F` shows the frame rate |
 | Discs of other regions (PAL, Japanese) | Not yet | The USA disc (SLUS-00402) alone is read |

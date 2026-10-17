@@ -33,7 +33,7 @@ export interface ListedRoom {
 
 /** What the server says. */
 export type ServerEvent =
-  | { readonly ev: 'welcome'; readonly name: string; readonly motd: string; readonly ice: readonly unknown[]; readonly players: number; readonly rooms: number }
+  | { readonly ev: 'welcome'; readonly name: string; readonly motd: string; readonly ice: readonly unknown[]; readonly players: number; readonly queued?: number; readonly rooms: number }
   | { readonly ev: 'hosting'; readonly code: string; readonly listed: boolean }
   | { readonly ev: 'queued'; readonly waiting: number }
   | { readonly ev: 'offer'; readonly peer: { readonly name: string }; readonly seconds: number }
@@ -43,7 +43,7 @@ export type ServerEvent =
   | { readonly ev: 'peer'; readonly body: unknown }
   | { readonly ev: 'left'; readonly why: string }
   | { readonly ev: 'refused'; readonly why: string; readonly theirs?: unknown }
-  | { readonly ev: 'pong'; readonly t: number }
+  | { readonly ev: 'pong'; readonly t: number; readonly players?: number; readonly queued?: number }
   | { readonly ev: 'error'; readonly why: string };
 
 const OPEN = 1;
@@ -63,8 +63,10 @@ export class RelayClient {
   private readonly held: string[] = [];
   private shut = false;
 
-  constructor(url: string, open: (url: string) => SocketLike = (at) => new WebSocket(at) as unknown as SocketLike) {
+  /** `carried`, commands another connection held unsent (a way to the server that failed), sent once this one opens. */
+  constructor(url: string, open: (url: string) => SocketLike = (at) => new WebSocket(at) as unknown as SocketLike, carried: readonly string[] = []) {
     this.socket = open(url);
+    this.held.push(...carried);
     this.socket.binaryType = 'arraybuffer';
     this.socket.addEventListener('message', (event) => this.arrived((event as { data?: unknown }).data));
     this.socket.addEventListener('open', () => {
@@ -107,6 +109,11 @@ export class RelayClient {
   /** A message for the other player, passed on by the server unread. */
   toPeer(body: unknown): void {
     this.say({ do: 'peer', body });
+  }
+
+  /** The commands held for a socket that never opened, given up for another connection to send. */
+  unsent(): string[] {
+    return this.held.splice(0);
   }
 
   close(): void {

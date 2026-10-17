@@ -28,7 +28,8 @@ import { PauseScreen } from '../present/hud/pause.ts';
 import { loadTypefaces } from '../present/2d/typefaces.ts';
 import { ScenePresenter } from '../present/scenes/scenes.ts';
 import { SCREEN } from '../present/scenes/screen.ts';
-import { applyBrightness, applyLook, assetImage, floorFade, canvas, controllers, dataUrl, json, pageRenderer, params, play, remasterMadeHere, remastered, status, two } from './page.ts';
+import { applyBrightness, applyLook, assetImage, crtAsked, floorFade, canvas, controllers, dataUrl, json, pageRenderer, params, play, remasterMadeHere, remastered, status, two } from './page.ts';
+import { CrtFilter } from './crt.ts';
 import { controlWords } from '../present/2d/controls.ts';
 import { drawingFiles, introFiles, withArcadeFighters } from './quick.ts';
 import { readProgress, writeProgress } from './save.ts';
@@ -158,6 +159,9 @@ export async function playGame(): Promise<void> {
   let lookOn = settings.look;
   let brightnessOn = settings.brightness;
   let floorFadeOn = settings.floorFade;
+  const crt = new CrtFilter();
+  crt.on = crtAsked();
+  let crtOn = settings.crt;
   let restarting = false;
   const settle = (): void => {
     const state = game.state;
@@ -172,6 +176,8 @@ export async function playGame(): Promise<void> {
     brightnessOn = remake.brightness;
     if (remake.floorFade !== floorFadeOn) floorFade.on = remake.floorFade === 0;
     floorFadeOn = remake.floorFade;
+    if (remake.crt !== crtOn) crt.on = remake.crt === 1;
+    crtOn = remake.crt;
     if ((Object.keys(remake) as (keyof typeof remake)[]).some((key) => remake[key] !== keptSettings[key])) {
       keptSettings = { ...remake };
       writeSettings(keptSettings);
@@ -377,11 +383,11 @@ export async function playGame(): Promise<void> {
    * up, keep black a while.
    */
   const heldSongs: (typeof game.state.world.sound.commands)[number][] = [];
-  const holdSong = (): (typeof game.state.world.sound.commands)[number][] => {
+  const holdSong = (from: readonly (typeof game.state.world.sound.commands)[number][] = game.state.world.sound.commands): (typeof game.state.world.sound.commands)[number][] => {
     const state = game.state;
     const fight = state.scene === Scene.FIGHT;
     const intro = state.scene === Scene.ATTRACT;
-    const commands = [...state.world.sound.commands];
+    const commands = [...from];
     const waiting = (fight && (shown === null || shown.startsWith('scene') || (shown === 'fight' && presenter.moving))) || (intro && shown !== 'intro');
     holdSongs(commands, heldSongs, { waiting, still: fight || intro });
     return commands;
@@ -413,7 +419,8 @@ export async function playGame(): Promise<void> {
     const played = play.matchField(pads[0] | pads[1], ready);
     if (!play.playing || !played) return played;
     rumble.field(play.ownRumble(game.state.rumble.out), performance.now());
-    sound?.field(game.state.world, game.state.vblanks, play.ending ? [] : holdSong());
+    /* The sound of each field once it is final, the other side's words for it in: what a rollback puts right is never heard wrong. */
+    for (const final of play.finalSounds()) sound?.field(final, final.vblank, play.ending ? [] : holdSong(final.sound.commands));
     movie.audible = sound?.running ?? false;
     movie.field(game.state);
     return true;
@@ -492,7 +499,7 @@ export async function playGame(): Promise<void> {
         }
         const intro = prepared;
         const change = state.scene === Scene.FIGHT && state.ogreChange.shows !== OgreChangeShows.NONE && data !== null;
-        const shows = online?.ending === true ? null : change ? 'change' : state.scene === Scene.FIGHT ? (state.drewFight !== 0 && data !== null ? 'fight' : null) : records ? 'records' : intro ? 'intro' : state.held === 0 ? `scene ${state.scene}` : null;
+        const shows = online?.ending === true || online?.holding === true ? null : change ? 'change' : state.scene === Scene.FIGHT ? (state.drewFight !== 0 && data !== null ? 'fight' : null) : records ? 'records' : intro ? 'intro' : state.held === 0 ? `scene ${state.scene}` : null;
         /*
          * An online match's fight seen from this player's side: the picture turned over (`mirror.ts`),
          * a frame that draws the fight alone; a picture held stays as it was drawn.
@@ -531,6 +538,7 @@ export async function playGame(): Promise<void> {
           named = fighters;
           hud.newMatch(data!, world);
         }
+        hud.players = online?.players ?? null;
         hud.prepare(world, width, height);
         pause.prepare(world, width, height);
         view.render(

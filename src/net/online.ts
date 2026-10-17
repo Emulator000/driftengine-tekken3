@@ -82,8 +82,8 @@ export interface Player {
 }
 
 export interface OnlineOptions<S> {
-  /** The server's address, or null where none is set. */
-  readonly url: () => string | null;
+  /** The server's address (or its addresses, tried in turn until one opens), or null where none is set. */
+  readonly url: () => string | readonly string[] | null;
   readonly game: OnlineGame<S>;
   readonly player: () => Player;
   /** The socket to the server (a browser's WebSocket by default). */
@@ -128,6 +128,7 @@ const WHY: Readonly<Record<string, string>> = {
   gone: 'THE OTHER PLAYER WAS DISCONNECTED',
   closed: 'THE SERVER CLOSED THE CONNECTION',
   unreachable: 'THE SERVER CANNOT BE REACHED',
+  insecure: 'THIS PAGE NEEDS A WSS:// SERVER',
   'no server': 'SET THE SERVER FIRST',
   'no answer': 'THE OFFER WAS NOT ANSWERED',
   'no rematch': 'NO REMATCH',
@@ -196,6 +197,9 @@ export class Online<S> {
   rooms: readonly ListedRoom[] = [];
   /** The other player's name, once offered or paired. */
   opponent = '';
+  /** The players on the server and those in its quick match, as it last said (-1 not said). */
+  players = -1;
+  queued = -1;
   /** The queue's offer: when it runs out (the wall clock's milliseconds), and this player's answer (null none yet). */
   offerUntil = 0;
   offerSeconds = 0;
@@ -255,25 +259,53 @@ export class Online<S> {
   /** The connection to the server, made if there is none. */
   connect(): boolean {
     if (this.relay !== null && !this.relay.closedNow) return true;
-    const url = this.options.url();
-    if (url === null) {
+    const given = this.options.url();
+    const urls = given === null ? [] : typeof given === 'string' ? [given] : [...given];
+    if (urls.length === 0) {
       this.ended = whyLine('no server');
       this.state = 'off';
       return false;
     }
-    const relay = new RelayClient(url, this.options.open);
-    this.relay = relay;
     this.state = 'connecting';
     this.ended = '';
-    relay.onEvent = (event) => this.event(event);
-    relay.onClosed = () => {
-      if (this.relay !== relay) return;
-      this.relay = null;
-      this.stop(this.state === 'connecting' ? 'unreachable' : 'closed');
-      this.state = 'off';
-    };
-    relay.say({ do: 'hello', game: GAME, protocol: PROTOCOL, name: this.options.player().name, build: this.options.game.version, roster: rosterWord(this.options.game.roster) });
-    return true;
+    return this.reach(urls, 0, [], false);
+  }
+
+  /**
+   * The server reached by the first of `urls` from `at` that opens: each tried in turn as the one
+   * before it fails to (a bare address tried secure, then plain), what was asked of the one that
+   * failed (`carried`) asked again of the next. `refused`, whether a way was refused as insecure.
+   */
+  private reach(urls: readonly string[], at: number, carried: readonly string[], refused: boolean): boolean {
+    for (let i = at; i < urls.length; i += 1) {
+      let relay: RelayClient;
+      try {
+        relay = new RelayClient(urls[i]!, this.options.open, carried);
+      } catch (error) {
+        /* A secure page may not open a plain `ws://` server (the browser says so as it is asked). */
+        refused ||= (error as { name?: unknown }).name === 'SecurityError';
+        continue;
+      }
+      this.relay = relay;
+      let welcomed = false;
+      relay.onEvent = (event) => {
+        if (event.ev === 'welcome') welcomed = true;
+        this.event(event);
+      };
+      relay.onClosed = () => {
+        if (this.relay !== relay) return;
+        this.relay = null;
+        /* Closed before the server welcomed this player (whatever was asked meanwhile): the next way to it, if one is left. */
+        if (!welcomed && i + 1 < urls.length && this.reach(urls, i + 1, relay.unsent(), refused)) return;
+        this.stop(welcomed ? 'closed' : 'unreachable');
+        this.state = 'off';
+      };
+      if (!carried.some((text) => text.includes('"do":"hello"'))) relay.say({ do: 'hello', game: GAME, protocol: PROTOCOL, name: this.options.player().name, build: this.options.game.version, roster: rosterWord(this.options.game.roster) });
+      return true;
+    }
+    this.ended = whyLine(refused ? 'insecure' : 'unreachable');
+    this.state = 'off';
+    return false;
   }
 
   /** The quick match's queue: paired with the next player of the same game. */
@@ -436,6 +468,12 @@ export class Online<S> {
     if (this.state === 'playing') this.finish('quit', 'quit');
   }
 
+  /** The server's counts, where it gives them (an older server gives none). */
+  private countsFrom(event: { readonly players?: number; readonly queued?: number }): void {
+    if (Number.isInteger(event.players)) this.players = event.players!;
+    if (Number.isInteger(event.queued)) this.queued = event.queued!;
+  }
+
   private lobbyCommand(state: OnlineState, command: { readonly do: string } & Record<string, unknown>): void {
     if (this.state === 'playing' || !this.connect()) return;
     this.relay!.say({ do: 'leave' });
@@ -449,6 +487,7 @@ export class Online<S> {
       case 'welcome':
         this.server = event.name;
         this.motd = event.motd;
+        this.countsFrom(event);
         this.ice = Array.isArray(event.ice) ? event.ice : [];
         if (this.state === 'connecting') this.state = 'lobby';
         return;
@@ -492,6 +531,7 @@ export class Online<S> {
         return;
       case 'pong':
         if (this.session === null && event.t === this.pinged) this.trip(this.now - event.t);
+        this.countsFrom(event);
         return;
       case 'error':
         console.warn(`[tekken3 online] the server: ${event.why}`);

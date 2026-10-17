@@ -106,7 +106,7 @@ export class SoundPlayer {
   }
 
   /** A field's sound (vertical blank `vblank`): its commands (the field's, or `played` as the page passes them on; only the music's before the audio runs) and the banks in its slots. */
-  field(state: FightState, vblank: number, played: readonly FightState['sound']['commands'][number][] = state.sound.commands): void {
+  field(state: { readonly sound: { readonly commands: readonly FightState['sound']['commands'][number][]; readonly vabs: readonly number[]; readonly theater: number }; readonly frameRan: number }, vblank: number, played: readonly FightState['sound']['commands'][number][] = state.sound.commands): void {
     const commands = this.running ? [...played] : played.filter((c) => !VOICE_KEYS.has(c.key));
     for (const c of commands) {
       if (c.key === 'music options') this.set = c.set;

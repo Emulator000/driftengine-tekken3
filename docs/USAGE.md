@@ -72,6 +72,7 @@ address's.
 | `look=light`, `look=normal`, `look=strong` | The remaster's look (as LOOK in REMAKE OPTION) |
 | `brightness=low`, `brightness=normal`, `brightness=high` | The remaster's brightness (as BRIGHTNESS in REMAKE OPTION) |
 | `floorfade=on`, `floorfade=off` | Whether the remaster's floors fade into the dark (as FLOOR FADE in REMAKE OPTION) |
+| `crt=on`, `crt=off` | The CRT filter over the picture (as CRT FILTER in REMAKE OPTION) |
 | `netlag=MS` | Online, each of the other side's presses held that many milliseconds more ([Online](#online)) |
 | `server=ADDRESS` | The online server ONLINE MODE connects to (`host:port`, `ws://…`, `wss://…`), over SERVER on its page; by default the one beside the page (`/relay`) |
 | `stop=N` | Holds the game after `N` fields (sixtieths of a second), for comparing pictures |
@@ -156,8 +157,9 @@ or the app) for every start after.
 | LOOK | LIGHT, NORMAL, STRONG (listed while REMASTER is on: how strongly the remastered picture is graded, its shadows toward teal and its lights toward magenta, its corners darkened and its edges fringed; changed at once) |
 | BRIGHTNESS | LOW, NORMAL, HIGH (listed while REMASTER is on: how brightly the remastered picture is exposed, LOW as it was first drawn; changed at once) |
 | FLOOR FADE | ON, OFF (listed while REMASTER is on: the floors darkened by depth, or away from the stage's lights, as the game darkens its own, an arcade stage's own floors with them; or lit evenly; changed at once) |
+| CRT FILTER | OFF (the default), ON: the picture as a television showed it, soft scanlines (240 down the picture), a faint aperture grille of red, green and blue columns and the corners darkened, the picture under them a little brighter; laid over the picture, so the same with any renderer and quality; changed at once |
 
-The frame rate shows or hides at once. The others change what the game loads: while one differs
+The frame rate and the CRT filter show or hide at once. The others change what the game loads: while one differs
 from the start's, the page says LEAVING RESTARTS THE GAME, and leaving it starts the game again
 (with auto save on, the progress is saved first).
 
@@ -175,7 +177,12 @@ ONLINE MODE, after VS MODE in the mode menu, lists:
 | ROOM | PRIVATE (by its code alone) or LISTED |
 | SIDE | The side your fighter is seen on in the match, LEFT (the default) or RIGHT, whichever the server seats you on |
 | NAME | Your name, as the other player sees it |
-| SERVER | The server's address; empty, the one beside the page |
+| SERVER | The server's address; empty, the one beside the page. A bare `host:port` is tried as `wss://` and as `ws://`, the page's own way first |
+
+The page connects to the server as it opens, and shows under its title the players on it and those
+searching in the quick match; the waiting room shows them in its corner. A browser opened on the
+server's own address shows its page: the same numbers, the fights on now, the rooms, the versions it
+serves and how to play on it ([server/README.md](../server/README.md#its-page)).
 
 Select goes back. The code, the name and the address are entered with the pad (up and down
 through the letters, left and right along them) or with a keyboard and a mouse as a text box is:
@@ -203,8 +210,16 @@ and the room waits on.
 rounds to win, from the state the game powers on with: the host's options and earned characters,
 each player's own buttons. Your progress and records are left as they were. Where the server seats
 you on the other side than SIDE asks, the fight is drawn mirrored: your fighter and its plate on
-your side, the stick's left and right with the picture. A round's end (its replay, the win poses)
-is cut short only once both of you have pressed to skip it; until then it plays on, for both.
+your side, the stick's left and right with the picture. Each player's name shows under their
+fighter's, on a dark tag of its own. A round's end (its replay, the win poses) is cut short only
+once both of you have pressed to skip it; until then it plays on, for both.
+
+What the other player presses is guessed until it arrives, and a guess put right rolls the game
+back and plays it again (see below). So that nothing wrong is heard or seen: a field's sound is
+played once both players' presses for it are in, so a hit a guess missed is still heard and a voice
+is never cut by one a guess played (over a long link the sound comes a little after the picture);
+and a knockout is shown once both players' presses for its field are in, the picture holding a
+moment until then, so a knockout a late press takes back is never seen.
 
 **After the match.** The fight's last picture holds until the match is over, then the waiting room
 comes back under a card with its result: who won, whether you did, and the score since you were
@@ -307,8 +322,10 @@ network drive builds with `--out=` naming a folder on a local disk:
 ### On an Android phone
 
 `npm run android` builds an APK: one activity holding the phone's WebView, serving the game from
-the APK's own files, held in landscape either way up. It asks for no permission, not even the
-network. It writes `out/android/Tekken-3-<version>.apk`, some 750 MB; install it with
+the APK's own files, held in landscape either way up. It asks for one permission, the network, for
+ONLINE MODE, and reaches a server with a certificate (`wss://`) or without one (`ws://`, as
+`npm run relay` and the plain HTTP port of `npm run dev:lan` serve on a home network: a bare
+address in SERVER tries `wss://` and then `ws://`). It writes `out/android/Tekken-3-<version>.apk`, some 750 MB; install it with
 `adb install -r out/android/Tekken-3-<version>.apk`, or copy it to the phone and open it there.
 
 The first build fetches the Android toolchain (a JDK, the Android SDK's command-line tools, platform

@@ -154,6 +154,9 @@ export function applyBrightness(renderer: RendererApi, brightness: number): void
 /** Remastered, whether the floors fade into the dark as the game's do: FLOOR FADE in REMAKE OPTION, or the address's (`?floorfade=on` or `off`); changed as the setting is. */
 export const floorFade = { on: asked(params, 'floorfade', settings.floorFade, ['on', 'off']) !== 'off' };
 
+/** Whether the CRT filter is laid over the picture: CRT FILTER in REMAKE OPTION, or the address's (`?crt=on` or `off`). */
+export const crtAsked = (): boolean => asked(params, 'crt', settings.crt, ['off', 'on']) === 'on';
+
 /** Remastered, the picture's look (0 light, 1 normal, 2 strong), as the remaster draws it. */
 export function applyLook(renderer: RendererApi, look: number): void {
   const { grade, vignette, fringe } = LOOKS[look] ?? LOOKS[1];

@@ -144,6 +144,8 @@ function onlineServer(): Plugin {
       if (process.env.T3_RELAY === '0' || http === null) return;
       const relay = new Relay(readConfig([], process.env), { log: (line) => server.config.logger.info(line) });
       relay.attach(http as Parameters<Relay['attach']>[0], '/relay');
+      /* Its page and numbers at /relay itself, for a browser opened there. */
+      server.middlewares.use('/relay', (request, response) => relay.http(request, response));
       http.once('close', () => void relay.close());
     },
   };

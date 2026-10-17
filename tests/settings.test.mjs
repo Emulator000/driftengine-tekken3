@@ -13,7 +13,7 @@ import { REMAKE_DEFAULTS } from '../src/sim/game/remake-options.ts';
 test('the settings are read back as written, each missing or out of its range at its default', () => {
   const store = new MemoryStore();
   assert.deepEqual(readSettings(store), REMAKE_DEFAULTS);
-  const set = { textures: 1, models: 2, stages: 1, fighters: 1, cloth: 1, picture: 3, frameRate: 1, touchPad: 2, remaster: 1, look: 2, brightness: 0, floorFade: 1 };
+  const set = { textures: 1, models: 2, stages: 1, fighters: 1, cloth: 1, picture: 3, frameRate: 1, touchPad: 2, remaster: 1, look: 2, brightness: 0, floorFade: 1, crt: 1 };
   writeSettings(set, store);
   assert.deepEqual(readSettings(store), set);
   store.write('tekken3.settings', JSON.stringify({ textures: 2, models: -1, stages: 'psx', picture: 1.5, touchPad: 1 }));

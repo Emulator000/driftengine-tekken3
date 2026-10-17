@@ -17,7 +17,7 @@ import { LARGEST, PaintAtlas, TILES, type AtlasPicture } from '../2d/atlas.ts';
 import { LightLayer } from '../2d/light.ts';
 import { setType } from '../2d/type.ts';
 import { INFINITY, layOutHud, progressBar, type BarPart, type PlacedPiece } from './hud-layout.ts';
-import { BAR_RAMPS, CHROME, KEY_RAMPS, MARK_RAMPS, PLATE_RAMPS, TIMER_STYLE, printStyle, nameStyle } from './theme.ts';
+import { BAR_RAMPS, CHROME, KEY_RAMPS, MARK_RAMPS, PLATE_RAMPS, PLAYER_STYLE, TIMER_STYLE, printStyle, nameStyle } from './theme.ts';
 
 type Context = OffscreenCanvasRenderingContext2D;
 
@@ -41,6 +41,8 @@ const CALL_SLACK = 1.12;
 /** A name's capitals and baseline below its line's top; its plate's top and bottom, and how far past the letters it reaches. */
 const NAME = { cap: 12, baseline: 14, plateTop: 9, plateBottom: 19, plateReach: 4 };
 const DIGIT = { width: 16, cap: 38, baseline: 43 };
+/** An online player's name: its capitals and baseline below its line's top, and its box's margin round the letters. */
+const PLAYER = { cap: 7, baseline: 9, margin: 2 };
 /** The calls a fight can print, by font and colour, painted ahead so none is painted mid-fight. */
 const CALLS: readonly (readonly [number, number, string])[] = [
   ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => [2, 8, `ROUND ${n}`] as const),
@@ -128,6 +130,8 @@ export class Hud {
   private readonly renderer: RendererApi;
   private readonly atlas: PaintAtlas;
   private names: readonly string[];
+  /** In an online match, each side's player's name, shown under its fighter's (null none). */
+  players: readonly [string, string] | null = null;
   private data: FightData;
   /** Tekken Force's: its name rows' names as its stage may show them (side, name, costume), and its progress bar's light (made for its first match). */
   private forceNames: readonly (readonly [0 | 1, string, number])[] = [];
@@ -361,6 +365,25 @@ export class Hud {
     return this.type(`call ${font} ${colour} ${text}`, text, printStyle(font, colour), type.cap, block * this.kx * CALL_SLACK);
   }
 
+  /** An online player's name on its own dark box, the box's margin round the letters. */
+  private playerTag(text: string): { picture: AtlasPicture; baseline: number } | null {
+    const { kx, ky } = this;
+    const set = setType(this.atlas.context, text, PLAYER_STYLE, PLAYER.cap * ky);
+    const margin = Math.ceil(PLAYER.margin * kx);
+    const width = set.width + margin * 2;
+    const height = set.height + margin;
+    const picture = this.atlas.picture(`player ${text}`, width, height, (g, left, top) => {
+      g.save();
+      g.fillStyle = 'rgba(0, 0, 0, 0.78)';
+      g.beginPath();
+      g.roundRect(left, top, width, height, margin);
+      g.fill();
+      g.restore();
+      set.paint(g, left + margin, top + margin / 2);
+    });
+    return picture && { picture, baseline: set.baseline + margin / 2 };
+  }
+
   /** A name on its plate: the plate's slanted bar in the costume's colours under the name's lower part. */
   private nameplate(side: 0 | 1, text: string, costume: number): { picture: AtlasPicture; left: number; baseline: number } | null {
     const { kx, ky } = this;
@@ -488,6 +511,13 @@ export class Hud {
         this.put(pass, plate.picture, start - plate.left / this.kx, placed.y + NAME.baseline - plate.baseline / this.ky);
         return;
       }
+      case 'player': {
+        const tag = this.playerTag(piece.text);
+        if (!tag) return;
+        const start = piece.side === 0 ? placed.x : placed.x - tag.picture.width / this.kx;
+        this.put(pass, tag.picture, start, placed.y + PLAYER.baseline - tag.baseline / this.ky);
+        return;
+      }
       case 'call': {
         const set = this.call(piece.font, piece.colour, this.words(piece.text), placed.w);
         if (!set) return;
@@ -512,7 +542,7 @@ export class Hud {
     /* A fight drawn mirrored has the HUD drawn upright over it, each plate showing the fighter now on its side (`mirror.ts`). */
     this.transform.set([1 / half, 0, 0, -2 / LINES, -MIDDLE / half, 1]);
     upright(this.transform);
-    const { back, front } = layOutHud(state, this.names, this.data, mirror.on);
+    const { back, front } = layOutHud(state, this.names, this.data, mirror.on, this.players);
     for (const [pass, pieces] of [
       [this.back, back],
       [this.front, front],

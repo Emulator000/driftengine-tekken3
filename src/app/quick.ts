@@ -14,7 +14,8 @@ import type { FightTables } from '../sim/fight/match.ts';
 import { Hud } from '../present/hud/hud.ts';
 import { PauseScreen } from '../present/hud/pause.ts';
 import { loadTypefaces } from '../present/2d/typefaces.ts';
-import { assetBytes, assetImage, dataBytes, floorFade, image, json, pageQuality, pageRenderer, params, play, remastered, status, two } from './page.ts';
+import { assetBytes, assetImage, crtAsked, dataBytes, floorFade, image, json, pageQuality, pageRenderer, params, play, remastered, status, two } from './page.ts';
+import { CrtFilter } from './crt.ts';
 import { asked, settings } from './settings.ts';
 import { startSound } from './sound.ts';
 
@@ -179,6 +180,7 @@ export const introFiles = (intro: number, pairs: readonly number[]): DrawingFile
 
 export async function playQuickMatch(): Promise<void> {
   const { renderer, backend } = await pageRenderer();
+  new CrtFilter().on = crtAsked();
   status.textContent = 'loading';
   const [{ tables, arena, commands }] = await Promise.all([loadFightTables(json).then(withArcadeFighters), loadTypefaces()]);
   const manifest = (await json('manifest.json')) as { kazuya?: boolean };

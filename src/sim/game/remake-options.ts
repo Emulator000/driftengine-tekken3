@@ -5,7 +5,7 @@
  * whether from the arcade's data), whether the cloth is kept clear of the legs, the picture's
  * quality, the frame rate shown, the touch pad, and the remaster (the fight drawn with the
  * engine's lighting and the assets made on this machine) and, listed while it is on, its look, its
- * brightness and whether its floors fade. Where they are kept, and what they do,
+ * brightness and whether its floors fade; and the CRT filter over the picture. Where they are kept, and what they do,
  * is the page's: those that change what is loaded take effect on a restart, which the page makes
  * when the player leaves this page, and the page says so under its list while one differs from the
  * start's.
@@ -17,9 +17,9 @@ import type { GameState, RemakeSettings } from './state.ts';
 export const REMAKE_PAGE = 0x10;
 
 /** Each setting's values: 0 is the default, but for the look's and the brightness's, the middle of their three. */
-export const REMAKE_DEFAULTS: Readonly<RemakeSettings> = { textures: 0, models: 0, stages: 0, fighters: 0, cloth: 0, picture: 0, frameRate: 0, touchPad: 0, remaster: 0, look: 1, brightness: 1, floorFade: 0 };
+export const REMAKE_DEFAULTS: Readonly<RemakeSettings> = { textures: 0, models: 0, stages: 0, fighters: 0, cloth: 0, picture: 0, frameRate: 0, touchPad: 0, remaster: 0, look: 1, brightness: 1, floorFade: 0, crt: 0 };
 
-/** The settings a restart applies: all but the frame rate's and the remaster's look, brightness and floors. */
+/** The settings a restart applies: all but the frame rate's, the remaster's look, brightness and floors, and the CRT filter's. */
 export const RESTARTED: readonly (keyof RemakeSettings)[] = ['textures', 'models', 'stages', 'fighters', 'cloth', 'picture', 'touchPad', 'remaster'];
 
 const setting = (value: keyof RemakeSettings, label: string, names: readonly string[], byDefault = 0): OptionsItem => ({ value, label, names, sideways: 1, count: names.length, button: 0, set: byDefault, draw: 2, modes: 0 });
@@ -50,6 +50,7 @@ export const REMAKE_OPTIONS: OptionsPage = {
     setting('look', 'LOOK', ['LIGHT', 'NORMAL', 'STRONG'], 1),
     setting('brightness', 'BRIGHTNESS', ['LOW', 'NORMAL', 'HIGH'], 1),
     setting('floorFade', 'FLOOR FADE', ['ON', 'OFF']),
+    setting('crt', 'CRT FILTER', ['OFF', 'ON']),
     { value: 'page', label: 'EXIT', names: [], sideways: 0, count: 0, button: 1, set: 0, draw: 1, modes: 0 },
   ],
 };

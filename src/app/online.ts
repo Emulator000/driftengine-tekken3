@@ -10,6 +10,7 @@
  */
 import pkg from '../../package.json';
 import { Online, REMATCH_MS, type Start } from '../net/online.ts';
+import { serverAddresses } from '../net/address.ts';
 import { StateSnapshotter } from '../net/snapshot.ts';
 import { ROLLBACK_DEPTH } from '../net/session.ts';
 import { mirroredStick } from '../net/wire.ts';
@@ -19,11 +20,12 @@ import { Game } from '../sim/game/game.ts';
 import { MenuMode, mapPads, startMode } from '../sim/game/menu.ts';
 import { FightStep } from '../sim/game/fight-scene.ts';
 import { lookOf } from '../sim/game/select.ts';
-import { CODE_LENGTH, CODE_LETTERS, caretAt, DEFAULT_DELAY, Editing, MOST_DELAY, OnlineScreen, OnlineStatus, TYPED_ENTER, TYPED_ESCAPE, typing } from '../sim/game/online-page.ts';
+import { CODE_LENGTH, CODE_LETTERS, caretAt, DEFAULT_DELAY, Editing, MOST_DELAY, ONLINE_PAGE, OnlineScreen, OnlineStatus, TYPED_ENTER, TYPED_ESCAPE, typing } from '../sim/game/online-page.ts';
 import { Scene, type GameState } from '../sim/game/state.ts';
 import { SCREEN } from '../present/scenes/screen.ts';
 import { canvas, params } from './page.ts';
 import { freeCameraBarred } from './free-camera.ts';
+import { MatchJournal, type FieldSound } from './match-journal.ts';
 import { addressBounds, ClipboardBridge, codeBounds, copied, edit, insert, nameBounds, placeCaret, type Bounds, type Field } from './text-field.ts';
 
 /** Where the page's settings are kept on this device. */
@@ -78,18 +80,9 @@ function writeKept(kept: Kept): void {
   }
 }
 
-/**
- * The server's address: `?server=`, else the page's setting, else the relay the dev server runs
- * beside the page (`/relay` on its own address); a bare `host:port` taken as a WebSocket's, secure
- * where the page is. Null in an app with none set.
- */
-export function serverUrl(setting: string, page: { readonly protocol: string; readonly host: string } = location): string | null {
-  const raw = (params.get('server') ?? setting).trim();
-  const secure = page.protocol === 'https:';
-  if (raw === '') return page.protocol === 'http:' || page.protocol === 'https:' ? `${secure ? 'wss' : 'ws'}://${page.host}/relay` : null;
-  if (/^wss?:\/\//i.test(raw)) return raw;
-  if (/^https?:\/\//i.test(raw)) return raw.replace(/^http/i, 'ws');
-  return `${secure ? 'wss' : 'ws'}://${raw}`;
+/** The server's addresses to try (`serverAddresses`): `?server=`, else the page's setting. */
+export function serverUrls(setting: string, page: { readonly protocol: string; readonly host: string } = location): string[] {
+  return serverAddresses(params.get('server') ?? setting, page);
 }
 
 export interface OnlineHooks {
@@ -119,6 +112,8 @@ export class OnlinePlay {
   /** The last match's result as the card says it, and the matches this player and the other have won since they were paired. */
   private result: readonly [string, string] = ['', ''];
   private readonly score = [0, 0];
+  /** Whether ONLINE MODE's page has called its server since it opened. */
+  private called = false;
   /** The browser's clipboard for the page's text, and whether a drag over it is selecting. */
   private readonly clipboard = new ClipboardBridge();
   private dragging = false;
@@ -130,7 +125,7 @@ export class OnlinePlay {
     const online = game.state.online;
     Object.assign(online, { delay: this.kept.delay, listed: this.kept.listed, side: this.kept.side, name: this.kept.name, server: params.get('server') ?? this.kept.server });
     this.online = new Online({
-      url: () => serverUrl(this.game.state.online.server),
+      url: () => serverUrls(this.game.state.online.server),
       player: () => ({ name: this.kept.name, delay: this.kept.delay, keys: this.localKeys(), fighter: this.localFighter() }),
       lagMs: Math.max(0, Number(params.get('netlag') ?? 0) || 0),
       game: {
@@ -159,6 +154,42 @@ export class OnlinePlay {
     });
   }
 
+  /** The match's fields as played, kept until final (`match-journal.ts`): their sound sent then, the picture held over a knockout not yet final. */
+  private journal = new MatchJournal();
+
+  private noteField(field: number): void {
+    const state = this.game.state;
+    const world = state.world;
+    const sound = { sound: { commands: [...world.sound.commands], vabs: [...world.sound.vabs], theater: world.sound.theater }, frameRan: world.frameRan, vblank: state.vblanks };
+    this.journal.note(field, sound, state.scene === Scene.FIGHT && (world.fighters[0]!.health === 0 || world.fighters[1]!.health === 0));
+  }
+
+  /** The sound of each field played that is final now (the other side's words for it in), not given out before, in order. */
+  finalSounds(): FieldSound[] {
+    const session = this.online.session;
+    if (session === null) return [];
+    const sounds = this.journal.finalSounds(session.final);
+    for (const { sound, vblank } of sounds) {
+      const keyed = sound.commands.filter((c) => c.key === 'on').length;
+      if (keyed > 0) this.heard.set(vblank, keyed);
+    }
+    for (const at of this.heard.keys()) if (this.heard.size > PRESSES_KEPT) this.heard.delete(at);
+    return sounds;
+  }
+
+  /** The match's newest sounds given out, for the page's probe: each field's vertical blank and the voices it keyed on. */
+  private readonly heard = new Map<number, number>();
+
+  /**
+   * Whether the picture holds as it is: the newest field has a fighter knocked out in a knockout
+   * not final yet, which a word of the other side's still to come may take back. Once final the
+   * fight is drawn on, the knockout in it; taken back, it was never seen.
+   */
+  get holding(): boolean {
+    const session = this.online.session;
+    return session !== null && this.local !== null && this.journal.holding(session.final);
+  }
+
   /** The match's newest presses, for the page's probe: each field's pads' words and the game's buttons newly down for them, by field (a field played again in a rollback put right). */
   private readonly presses = new Map<number, readonly [number, number, number, number]>();
 
@@ -174,7 +205,14 @@ export class OnlinePlay {
     const session = this.online.session;
     const page = this.game.state.online;
     const presses = [...this.presses.entries()].sort(([a], [b]) => a - b).map(([field, [raw0, game0, raw1, game1]]) => ({ field, pads: [raw0.toString(16), raw1.toString(16)], buttons: [game0.toString(16), game1.toString(16)] }));
-    return { state: this.online.state, page: { status: page.status, warming: page.warming, card: page.card, answer: page.answer, fresh: this.game.state.world.input.fresh[0] }, ...(session === null ? {} : { field: session.tick, session: session.state, ahead: session.ahead, ...session.quality, theyWait: this.online.theyWait, direct: this.online.direct, presses }) };
+    return { state: this.online.state, page: { status: page.status, warming: page.warming, card: page.card, answer: page.answer, fresh: this.game.state.world.input.fresh[0] }, ...(session === null ? {} : { field: session.tick, session: session.state, ahead: session.ahead, ...session.quality, theyWait: this.online.theyWait, direct: this.online.direct, presses, heard: [...this.heard.entries()] }) };
+  }
+
+  /** While a match is played, each seat's player's name (the host's first), for the HUD to show under the fighters'. */
+  get players(): readonly [string, string] | null {
+    if (this.local === null) return null;
+    const [own, other] = [this.kept.name, this.online.opponent];
+    return this.online.seat === 0 ? [own, other] : [other, own];
   }
 
   /** Whether a match is being played (the page steps it, not the local game). */
@@ -262,7 +300,15 @@ export class OnlinePlay {
         break;
       case 'server':
         this.online.disconnect();
+        this.called = false;
         break;
+    }
+    /* ONLINE MODE's page open: its server called as the page opens (and again once its address changes), so its players are counted there. */
+    const state = this.game.state;
+    if (state.scene !== Scene.OPTIONS || state.optionsScreen.page !== ONLINE_PAGE) this.called = false;
+    else if (!this.called && this.online.state === 'off') {
+      this.called = true;
+      this.online.connect();
     }
     if (online.delay !== this.kept.delay || online.listed !== this.kept.listed || online.side !== this.kept.side || online.name !== this.kept.name || (online.server !== this.kept.server && params.get('server') === null)) {
       Object.assign(this.kept, { delay: online.delay, listed: online.listed, side: online.side, name: online.name, server: params.get('server') === null ? online.server : this.kept.server });
@@ -280,7 +326,7 @@ export class OnlinePlay {
     const o = this.online;
     online.status = STATUS[o.state] ?? OnlineStatus.OFF;
     online.rooms = o.rooms.map((room) => ({ ...room }));
-    const address = serverUrl(online.server) ?? 'NONE SET';
+    const address = serverUrls(online.server)[0] ?? 'NONE SET';
     const server = o.server !== '' ? o.server : address.replace(/^wss?:\/\//, '').toUpperCase();
     switch (o.state) {
       case 'connecting':
@@ -314,6 +360,9 @@ export class OnlinePlay {
         online.lines = o.ended !== '' ? [first, o.ended] : [first];
       }
     }
+    /* How many are about, while the server is heard from (its pongs carry it). */
+    const heard = o.state !== 'off' && o.state !== 'connecting' && 0 <= o.players;
+    online.players = heard ? `${o.players} ${o.players === 1 ? 'PLAYER' : 'PLAYERS'} ONLINE${0 <= o.queued ? `  ${o.queued} SEARCHING` : ''}` : '';
   }
 
   /**
@@ -423,10 +472,13 @@ export class OnlinePlay {
     this.shareData(this.match);
     console.log(`[tekken3 online] a match with ${this.online.opponent}, this side the ${seat === 0 ? 'first' : 'second'} pad, input delay ${start.delay}`);
     this.presses.clear();
+    this.journal = new MatchJournal();
+    this.heard.clear();
     return {
       step: (words, field) => {
         game.field(words);
         this.notePresses(field, words);
+        this.noteField(field);
       },
       snapshotter: this.match,
     };

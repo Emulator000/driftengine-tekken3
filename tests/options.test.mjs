@@ -263,6 +263,12 @@ test('REMAKE OPTION changes the remake\'s settings, says a restart applies one, 
   press(RIGHT);
   assert.equal(state.remake.settings.floorFade, 1);
   assert.ok(!restartWanted({ remake: { ...state.remake, settings: { ...state.remake.started, brightness: 2, floorFade: 1 } } }), 'the brightness and the floors change at once');
+  press(DOWN);
+  assert.equal(state.remake.settings.crt, 0, 'the CRT filter off unless asked for');
+  press(RIGHT);
+  assert.equal(state.remake.settings.crt, 1);
+  assert.ok(!restartWanted({ remake: { ...state.remake, settings: { ...state.remake.started, crt: 1 } } }), 'the CRT filter laid at once');
+  press(UP);
   for (let i = 0; i < 3; i += 1) press(UP);
   press(LEFT);
   assert.ok(!texts(state).includes('LOOK') && !texts(state).includes('BRIGHTNESS') && !texts(state).includes('FLOOR FADE'), 'the remaster off: its lines not listed');

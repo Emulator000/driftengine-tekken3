@@ -31,6 +31,7 @@ export type HudPiece =
   | { readonly kind: 'mark'; readonly lit: boolean }
   | { readonly kind: 'team'; readonly crossed: boolean; readonly beaten: boolean }
   | { readonly kind: 'name'; readonly side: 0 | 1; readonly text: string; readonly costume: number }
+  | { readonly kind: 'player'; readonly side: 0 | 1; readonly text: string }
   | { readonly kind: 'key'; readonly index: number }
   | { readonly kind: 'call'; readonly font: number; readonly colour: number; readonly text: string };
 
@@ -59,6 +60,8 @@ const MARKS = { x: [0x97, 0xca], step: [-0xe, 0xe], y: 0x46, width: 0xf, height:
 /** Team Battle's members' marks: each side's first, the step between them, their line and size. */
 const TEAM_MARKS = { x: [0x9c, 0xca], step: [-9, 9], y: 0x40, width: 10, height: 0x18 };
 const NAMES = { x: [14, 354], y: 66, height: 16 };
+/** An online player's name, under their fighter's: its line's top and height. */
+const PLAYERS = { y: 84, height: 11 };
 /** The printer's fonts' cells: each glyph's advance, width and height. */
 const FONTS = [
   { advance: 9, width: 10, height: 16 },
@@ -216,13 +219,18 @@ function gauges(state: FightState): PlacedPiece[] {
   return added;
 }
 
-/** The back's pieces, in the order they are added (drawn last to first); `swapped`, each side's place showing the other side's. */
-function back(state: FightState, names: readonly string[], swapped = false): PlacedPiece[] {
+/**
+ * The back's pieces, in the order they are added (drawn last to first); `swapped`, each side's place
+ * showing the other side's; `players`, in an online match, each side's player's name under its fighter's.
+ */
+function back(state: FightState, names: readonly string[], swapped = false, players: readonly string[] | null = null): PlacedPiece[] {
   const hud = state.hud;
   const added: PlacedPiece[] = [];
   const of = (side: number): number => (swapped ? 1 - side : side);
   for (const side of [0, 1] as const) {
     added.push({ x: NAMES.x[side]!, y: NAMES.y, w: 0, h: NAMES.height, piece: { kind: 'name', side, text: names[of(side)] ?? '', costume: state.fighters[of(side)]!.rosterCode & 3 } });
+    const player = players?.[of(side)] ?? '';
+    if (player !== '') added.push({ x: NAMES.x[side]!, y: PLAYERS.y, w: 0, h: PLAYERS.height, piece: { kind: 'player', side, text: player } });
   }
   [0, 1].map((side) => hud.teamMarks[of(side)] ?? []).forEach((marks, side) => {
     marks.forEach((mark, i) => {
@@ -259,9 +267,9 @@ function back(state: FightState, names: readonly string[], swapped = false): Pla
  * plate showing the other side's fighter, so the fighter on the left has the left plate, and each
  * call at its mirrored place.
  */
-export function layOutHud(state: FightState, names: readonly string[], data?: Pick<FightData, 'roster' | 'force'>, swapped = false): { back: PlacedPiece[]; front: PlacedPiece[] } {
+export function layOutHud(state: FightState, names: readonly string[], data?: Pick<FightData, 'roster' | 'force'>, swapped = false, players: readonly string[] | null = null): { back: PlacedPiece[]; front: PlacedPiece[] } {
   if (state.mode === TEKKEN_FORCE && data !== undefined) return { back: state.hud.back === 0 ? [] : forceBack(state, data), front: [...keys(state), ...calls(state, true)] };
-  return { back: state.hud.back === 0 ? [] : back(state, names, swapped), front: [...gauges(state), ...calls(state, false, swapped)] };
+  return { back: state.hud.back === 0 ? [] : back(state, names, swapped, players), front: [...gauges(state), ...calls(state, false, swapped)] };
 }
 
 /** Tekken Force's progress bar this field, in drawing order (its marker, the final box, the segments from the last, the lines, the cursor). */

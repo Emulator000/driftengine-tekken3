@@ -15,7 +15,8 @@ network play with nothing else to run (`npm run dev:lan`, both opening the addre
 
 ## On a server of its own
 
-The folder runs alone: Node 20 or later and its one package.
+The folder runs alone: Node 20 or later and its packages (the WebSocket's, and the two typefaces
+of its page).
 
 ```sh
 cd server
@@ -36,6 +37,17 @@ Players then set **SERVER** on ONLINE MODE's page to its address (`relay.example
 `GET /health` answers `ok clients=N rooms=N queued=N`. Its log names each player by name and
 address as they connect, are offered, paired and leave (behind a proxy, the address the proxy
 passes in `X-Forwarded-For`); Ctrl+C stops it at once.
+
+## Its page
+
+A browser opened on the server's address (`http://relay.example:8790/`, `https://relay.example/`
+behind a proxy, `/relay` on the dev server's) shows its page, read again every three seconds: a
+lamp lit green while the server answers (red, and since when, once it stops), the players on it,
+the fights on now, the players in the quick match, the rooms waiting and those listed, the game's
+versions it serves and those being played, its own version, and how to play on it, with the
+address to set as SERVER. It says it is an unofficial server, affiliated with none of the game's
+rights holders. `GET /status.json` gives the same numbers as JSON, to any page. Neither shows a
+player's address.
 
 ## Opening it to the internet
 
@@ -62,9 +74,10 @@ this server, over the same TCP connection, and the line over the picture says VI
 would say DIRECT. A TURN server of your own (coturn, say) can be named in `--ice` for those
 players; it has ports of its own to open, as its documentation says.
 
-A bare `host:port` in **SERVER** is taken as `ws://` on a page opened over HTTP (`npm run dev`)
-and as `wss://` on one opened over HTTPS (`npm run dev:lan`), which connects only to a server with
-a certificate.
+A bare `host:port` in **SERVER** is tried both ways, the page's own first: `ws://` then `wss://`
+on a page opened over HTTP (`npm run dev`), `wss://` then `ws://` on one opened over HTTPS
+(`npm run dev:lan`, the Android app). A browser's page opened over HTTPS connects only to a server
+with a certificate; the apps reach either.
 
 ## Settings
 

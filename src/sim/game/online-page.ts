@@ -79,6 +79,8 @@ export interface OnlineState {
   status: number;
   /** The lines under the list, and the wait's, as the app words them. */
   lines: string[];
+  /** How many players the server has and how many wait in its quick match, as the app words it (empty: not known). */
+  players: string;
   rooms: OnlineRoom[];
   /** Whether the Options open on this page (the menu's ONLINE MODE). */
   opens: number;
@@ -96,7 +98,7 @@ export interface OnlineState {
 }
 
 export function blankOnline(): OnlineState {
-  return { screen: OnlineScreen.LIST, cursor: 0, roomCursor: 0, caret: 0, anchor: 0, scroll: 0, editing: Editing.NONE, code: '', text: '', delay: DEFAULT_DELAY, listed: 0, side: 0, name: 'PLAYER', server: '', ask: '', typed: '', status: OnlineStatus.OFF, lines: [], rooms: [], opens: 0, warming: 0, pending: '', offerLeft: 0, answer: 0, card: 0 };
+  return { screen: OnlineScreen.LIST, cursor: 0, roomCursor: 0, caret: 0, anchor: 0, scroll: 0, editing: Editing.NONE, code: '', text: '', delay: DEFAULT_DELAY, listed: 0, side: 0, name: 'PLAYER', server: '', ask: '', typed: '', status: OnlineStatus.OFF, lines: [], players: '', rooms: [], opens: 0, warming: 0, pending: '', offerLeft: 0, answer: 0, card: 0 };
 }
 
 /** Whether a text is being entered: the keyboard types for the page then, not for the pads. */
@@ -126,6 +128,8 @@ const CODE_BOX = { cell: 40, left: 0xb8 - 80, y: 194 } as const;
 const CENTRE = 0xb8;
 const TITLE_Y = 40;
 const LINES_Y = 344;
+/** The server's players, under the title. */
+const PLAYERS_Y = 62;
 const LINE_STEP = 20;
 const Colour = { ITEM: 10, PICKED: 5, VALUE: 6, DEFAULT: 1, LINE: 6, WARN: 5, GREY: 9 } as const;
 
@@ -266,6 +270,7 @@ function listFrame(game: GameState, data: Data): 'leave' | 'warm' | null {
   } else if (leave) sound(game, data, Sound.BACK);
   if (leave) online.ask = 'leave';
   title(game, 'ONLINE MODE');
+  if (online.players !== '') centred(game, Colour.VALUE, PLAYERS_Y, online.players);
   let y = LIST.y;
   LABELS.forEach((label, i) => {
     const picked = i === online.cursor;
@@ -515,8 +520,11 @@ export function warmUpFrame(game: GameState, data: Data, centre: number, place: 
   const [line = '', detail = ''] = online.lines;
   const hosting = online.status === OnlineStatus.HOSTING;
   const text = `${line}${'.'.repeat((game.world.vsyncSeen >> 4) & 3)}`.padEnd(line.length + 3, ' ');
-  print(game, 0, Colour.PICKED, centre * 2 - 12 - text.length * ADVANCE, hosting ? 416 : 434, text);
-  if (hosting) print(game, 0, Colour.VALUE, centre * 2 - 12 - detail.length * ADVANCE, 434, detail);
+  const players = online.players;
+  const bottom = players === '' ? 434 : 416;
+  print(game, 0, Colour.PICKED, centre * 2 - 12 - text.length * ADVANCE, hosting ? bottom - 18 : bottom, text);
+  if (hosting) print(game, 0, Colour.VALUE, centre * 2 - 12 - detail.length * ADVANCE, bottom, detail);
+  if (players !== '') print(game, 0, Colour.DEFAULT, centre * 2 - 12 - players.length * ADVANCE, 434, players);
   return null;
 }
 

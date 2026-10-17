@@ -4,13 +4,14 @@
  * and they play the same game; a room hosted is joined by its code, and listed in the room list
  * while it waits; players are paired whatever fighters each has, unless one chose a fighter the
  * other lacks, and another version is refused; a player leaving ends the other's
- * match; a match over asks both for a rematch; the server's settings come from a file, the environment and the command line in turn.
+ * match; a match over asks both for a rematch; the server's counts are told, and a way to it that fails gives way to the next; its page for a browser says how busy it is and how to play on it; the server's settings come from a file, the environment and the command line in turn.
  */
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import WebSocket from 'ws';
 
@@ -280,6 +281,72 @@ test("a match over asks both for a rematch: two yeses play again, a no or no ans
     b.online.disconnect();
     await relay.close();
   }
+});
+
+test("the server's players and its queue told with each pong; a way to it that fails tried no more, what was asked of it asked of the next", async () => {
+  const { relay, url } = await server();
+  /* The first way to the server one no server answers on: the next one, the real one, reached. */
+  const dead = 'ws://127.0.0.1:9/';
+  const a = side([dead, url], { name: 'A' });
+  const b = side(url, { name: 'B' });
+  try {
+    a.online.quickMatch();
+    await frames([a, b], () => a.online.state === 'queued', 300);
+    assert.equal(a.online.state, 'queued', 'the quick match asked before the way failed, carried to the next');
+    b.online.connect();
+    await frames([a, b], () => b.online.state === 'lobby' && b.online.players === 2 && b.online.queued === 1, 300);
+    assert.deepEqual([b.online.players, b.online.queued], [2, 1], 'two on the server, one of them in the quick match');
+  } finally {
+    a.online.disconnect();
+    b.online.disconnect();
+    await relay.close();
+  }
+});
+
+test("the server's page, for a browser: how busy it is, its versions, and the address to play on it, no player's address in it", async () => {
+  const { relay, url } = await server(['--name', 'HOME SERVER']);
+  const port = new URL(url).port;
+  const a = side(url, { name: 'Host' });
+  const b = side(url, { name: 'Guest' });
+  const c = side(url, { name: 'Waiter', version: '0.6.4' });
+  try {
+    a.online.host(true);
+    await frames([a, b, c], () => a.online.state === 'hosting' && a.online.code !== '');
+    c.online.quickMatch();
+    b.online.connect();
+    await frames([a, b, c], () => b.online.state === 'lobby' && c.online.queued === 1);
+    let status = await fetch(`http://127.0.0.1:${port}/status.json`).then((r) => r.json());
+    const pkg = JSON.parse(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../package.json'), 'utf8'));
+    assert.deepEqual({ name: status.name, version: status.version, oldest: status.oldest }, { name: 'HOME SERVER', version: pkg.version, oldest: '0.6.0' }, "the server's own version the game's");
+    assert.deepEqual([status.players, status.queued, status.fights, status.rooms], [3, 1, 0, 1]);
+    assert.deepEqual(status.listed, [{ title: "HOST'S ROOM", host: 'HOST', version: '0.6.1' }]);
+    assert.deepEqual(status.versions, { '0.6.1': 2, '0.6.4': 1 }, 'the versions being played');
+    assert.ok(!JSON.stringify(status).includes('127.0.0.1'), 'no player addressed');
+    b.online.join(a.online.code);
+    await frames([a, b, c], () => a.online.state === 'offered' && b.online.state === 'offered');
+    a.online.answer(true);
+    b.online.answer(true);
+    await frames([a, b, c], () => a.online.state === 'playing' && b.online.state === 'playing');
+    status = await fetch(`http://127.0.0.1:${port}/status.json`).then((r) => r.json());
+    assert.deepEqual([status.fights, status.rooms, status.listed.length], [1, 0, 0], 'a fight on, its room no longer waiting');
+    const page = await fetch(`http://127.0.0.1:${port}/`);
+    assert.equal(page.headers.get('content-type'), 'text/html; charset=utf-8');
+    const html = await page.text();
+    assert.ok(html.includes(`"ws://127.0.0.1:${port}"`), 'the address to type in SERVER');
+    assert.ok(html.includes('"/status.json"'));
+    assert.ok(html.includes('id="lamp"'), 'the lamp lit while the server answers');
+    assert.ok(html.includes('An unofficial server') && html.includes('Bandai Namco Entertainment or Sony Interactive Entertainment'), 'says it is unofficial and whose it is not');
+    assert.equal((await fetch(`http://127.0.0.1:${port}/nothing`)).status, 404);
+  } finally {
+    for (const one of [a, b, c]) one.online.disconnect();
+    await relay.close();
+  }
+});
+
+test('the server is versioned with the game', () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const game = JSON.parse(readFileSync(path.join(here, '../package.json'), 'utf8')).version;
+  assert.equal(JSON.parse(readFileSync(path.join(here, '../server/package.json'), 'utf8')).version, game, 'server/package.json carries the version the game has');
 });
 
 test("at a room the host is asked: a no sends the guest away with the reason, the room waiting on", async () => {

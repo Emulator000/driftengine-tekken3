@@ -147,6 +147,17 @@ export function nameStyle(costume: number): TypeStyle {
   };
 }
 
+/** An online player's name under their fighter's: plain white on its own dark box, so it reads over any stage. */
+export const PLAYER_STYLE: TypeStyle = {
+  face: DISPLAY,
+  fill: [
+    [0, '#ffffff'],
+    [1, '#d8d8d8'],
+  ],
+  outlines: [],
+  tracking: 0.04,
+};
+
 /** The timer's numerals: white running to grey at the foot, a grey bevel under them, a black outline. */
 export const TIMER_STYLE: TypeStyle = {
   face: NUMERALS,

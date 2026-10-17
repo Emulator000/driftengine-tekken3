@@ -1,5 +1,5 @@
 /** The online matches' server (`relay.mjs`), as the dev server runs it beside the page. */
-import type { Server } from 'node:http';
+import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 
 export interface RelayConfig {
   readonly [setting: string]: unknown;
@@ -15,5 +15,7 @@ export declare class Relay {
   constructor(config: RelayConfig, options?: { readonly now?: () => number; readonly log?: (line: string) => void });
   listen(): Promise<number>;
   attach(server: Server, path: string): void;
+  /** Its HTTP answers: its page, its numbers (`status.json`) and its health. */
+  http(request: IncomingMessage & { readonly originalUrl?: string | undefined }, response: ServerResponse): void;
   close(): Promise<void>;
 }

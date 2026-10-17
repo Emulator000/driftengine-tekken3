@@ -152,6 +152,11 @@ export class MatchSession<S> {
     return this.field;
   }
 
+  /** The newest field both pads' own words are in for: it, and every field before it, final (no rollback reaches them); -1 none yet. */
+  get final(): number {
+    return this.session.confirmed;
+  }
+
   /** How many fields this side has waited for the other in this stall. */
   get stalling(): number {
     return this.stallRun;

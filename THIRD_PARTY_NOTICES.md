@@ -21,8 +21,8 @@ Fetched by npm at install time; no dependency source is vendored into this repos
 | `@webgpu/types` | BSD-3-Clause |
 | Other transitive packages (see `package-lock.json`) | as each declares |
 
-The two typefaces are bundled into a build (`npm run build`) as the Open Font License allows; their
-license travels with their packages.
+The two typefaces are bundled into a build (`npm run build`), and served by the online server to
+its page, as the Open Font License allows; their license travels with their packages.
 
 ## Tools run on the user's machine
 

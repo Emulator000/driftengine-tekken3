@@ -447,6 +447,8 @@ export interface RemakeSettings {
   brightness: number;
   /** Whether the remaster's floors fade into the dark as the game's do: on (the default) or off. */
   floorFade: number;
+  /** The CRT filter over the picture: off (the default) or on. */
+  crt: number;
 }
 
 /**
