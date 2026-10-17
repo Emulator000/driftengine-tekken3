@@ -284,11 +284,19 @@ have been made on your machine, and the lowest picture quality leaves it off.
   grain, the floors it draws anew and some stages' detail
   ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md#the-remasters-tools) lists them and their
   licences). Nothing is downloaded but the tools and their weights, into `.cache/remaster/`.
-- **What it needs.** Linux (for now), uv (<https://docs.astral.sh/uv/>) for its Python, curl, unzip
-  and sha256sum to fetch its tools, a Vulkan driver for Z-Image (stable-diffusion.cpp's Vulkan
-  build: a GPU's driver, or Mesa's lavapipe on the CPU), about 25 GB of disk, and a GPU to be quick:
-  an AMD one (ROCm) or an NVIDIA one (CUDA, untried) runs PBRify's models, found by itself
-  (`--cpu`, `--rocm` or `--cuda` names it); on the CPU they take many hours.
+- **What it needs.** An x64 PC with Linux or Windows, or a Mac with Apple silicon on macOS 26 or
+  later (Windows and the Mac untried); uv (<https://docs.astral.sh/uv/>) for its Python; about 25 GB
+  of disk; and a GPU to be quick. Z-Image runs through stable-diffusion.cpp's Vulkan build on Linux
+  and Windows (a GPU's Vulkan driver, or on Linux Mesa's lavapipe on the CPU) and its Metal build on
+  a Mac. PBRify's models run on an AMD GPU through ROCm (Linux), an NVIDIA one through CUDA (Linux
+  or Windows, untried) or a Mac's through Metal, found by itself (`--cpu`, `--rocm`, `--cuda` or
+  `--mps` names it); on the CPU they take many hours.
+
+  | | uv | Also |
+  | --- | --- | --- |
+  | Windows | `winget install astral-sh.uv` | the latest Microsoft Visual C++ Redistributable (x64), which stable-diffusion.cpp's build and PyTorch need: `winget install Microsoft.VCRedist.2015+.x64` (it updates one installed before) |
+  | macOS | `brew install uv` | |
+  | Linux | `curl -LsSf https://astral.sh/uv/install.sh \| sh`, or your distribution's `uv` | |
 - **Like everything converted from your disc and your board**, what it makes is in an ignored
   folder (`public/assets/remaster/`) and is for your own devices: never commit, upload or share it.
   An app built with `npm run desktop` after `npm run remaster` carries it (some 3 GB more); one

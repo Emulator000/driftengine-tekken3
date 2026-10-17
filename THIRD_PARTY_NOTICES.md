@@ -52,7 +52,8 @@ Not part of this repository and never distributed with it: `npm run remaster` fe
 SHA-256) and runs them there on the user's own imported data. What they make stays on that machine.
 
 - **stable-diffusion.cpp** (<https://github.com/leejet/stable-diffusion.cpp>), MIT: runs the image
-  model that draws a floor's stones and a stage's detail anew (`scripts/remaster/generate.py`).
+  model that draws a floor's stones and a stage's detail anew (`scripts/remaster/generate.py`): its
+  release's Vulkan build on Linux and Windows, its Metal build on a Mac (`scripts/remaster/tools.mjs`).
 - **Z-Image-Turbo** (Tongyi-MAI, <https://huggingface.co/Tongyi-MAI/Z-Image-Turbo>), Apache-2.0: that
   image model, as GGUF quantized by stable-diffusion.cpp's author, and its autoencoder (FLUX.1's, by
   Black Forest Labs, Apache-2.0), as Comfy-Org packages it; with **Qwen3-4B-Instruct-2507** (Qwen, Apache-2.0) as its text encoder, as GGUF

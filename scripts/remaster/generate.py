@@ -7,11 +7,10 @@ and the skies of the stages that have their own. A part already written is left 
 that stops picks up where it was. `all` makes every part, then lists them in manifest.json, which
 the game looks for before it offers the remaster.
 
-    npm run remaster                  (the tools fetched, then all)
-    scripts/remaster/py scripts/remaster/generate.py all
-    scripts/remaster/py scripts/remaster/generate.py all-stages skies
+    npm run remaster                         (the tools fetched, then all)
+    npm run remaster -- all-stages skies     (the tools fetched, then those jobs)
 
-The weights and the binary come from scripts/remaster/fetch.sh, into .cache/remaster/.
+The weights, the binary and this Python come from scripts/remaster/tools.mjs, into .cache/remaster/.
 """
 import hashlib
 import json
@@ -33,8 +32,10 @@ ASSETS = ROOT + '/public/assets/'
 OUT = ROOT + '/public/assets/remaster/'
 CACHE = ROOT + '/.cache/remaster/'
 DAT = '4x-PBRify_UpscalerV4.pth'
-SD = [CACHE + 'bin/sd/sd-cli', '--diffusion-model', CACHE + 'weights/zimage/z_image_turbo-Q4_K.gguf', '--vae', CACHE + 'weights/vae/ae.safetensors',
-      '--llm', CACHE + 'weights/qwen3/Qwen3-4B-Instruct-2507-Q4_K_M.gguf', '--cfg-scale', '1.0', '--steps', '8', '--rng', 'cpu', '--vae-tiling', '--backend', 'te=cpu']
+# stable-diffusion.cpp, run in .cache/remaster/ with its files named from there: a path outside it
+# with letters the system's code page lacks (Windows gives a program its arguments in it) would not open.
+SD = [CACHE + 'bin/sd/' + ('sd-cli.exe' if os.name == 'nt' else 'sd-cli'), '--diffusion-model', 'weights/zimage/z_image_turbo-Q4_K.gguf', '--vae', 'weights/vae/ae.safetensors',
+      '--llm', 'weights/qwen3/Qwen3-4B-Instruct-2507-Q4_K_M.gguf', '--cfg-scale', '1.0', '--steps', '8', '--rng', 'cpu', '--vae-tiling', '--backend', 'te=cpu']
 
 GRASS = 'seamless top-down photograph of dense short lush green grass lawn, natural soft daylight, evenly lit, high detail texture'
 SAND = 'seamless top-down photograph of pale dry sandy dirt ground with small pebbles and a few dry grass blades, natural soft daylight, evenly lit, high detail texture'
@@ -70,13 +71,14 @@ def draw(args, out, label):
     """
     if os.path.exists(out):
         return
-    cmd = SD + args + ['-o', out]
+    cmd = SD + [os.path.relpath(a, CACHE) if a.startswith(CACHE) else a for a in args + ['-o', out]]
     env = {k: v for k, v in os.environ.items() if k != 'LD_LIBRARY_PATH'}
     P.free()
     t = time.time()
-    done = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    run = lambda c: subprocess.run(c, cwd=CACHE, env=env, capture_output=True, text=True, encoding='utf-8', errors='replace')
+    done = run(cmd)
     if done.returncode != 0:
-        done = subprocess.run(cmd + ['--offload-to-cpu'], env=env, capture_output=True, text=True)
+        done = run(cmd + ['--offload-to-cpu'])
     if done.returncode != 0:
         raise SystemExit('stable-diffusion.cpp failed:\n' + '\n'.join(l for l in (done.stdout + done.stderr).splitlines() if l.startswith(('[E]', '[W]')))[-3000:])
     log(label, os.path.basename(out), f'{time.time() - t:.1f}s')

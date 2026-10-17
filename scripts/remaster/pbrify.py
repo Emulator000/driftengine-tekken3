@@ -1,5 +1,12 @@
-"""PBRify's upscaler and material models over a picture in tiles, on the GPU where PyTorch has one, else the CPU."""
+"""
+PBRify's upscaler and material models over a picture in tiles, on the GPU where PyTorch has one
+(CUDA's, ROCm's, which PyTorch names alike, or a Mac's through Metal), else the CPU; on the CPU
+alone where REMASTER_DEVICE is `cpu`.
+"""
 import os
+
+# On a Mac, an operation Metal's PyTorch lacks runs on the CPU rather than stopping the run.
+os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
 
 import numpy as np
 import torch
@@ -7,7 +14,10 @@ from PIL import Image, ImageFilter
 from spandrel import ModelLoader
 
 W = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '.cache', 'remaster', 'weights', 'pbrify') + os.sep
-DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+DEVICE = ('cpu' if os.environ.get('REMASTER_DEVICE') == 'cpu' else 'cuda' if torch.cuda.is_available()
+          else 'mps' if torch.backends.mps.is_available() else 'cpu')
+# The tile's side by device: a Mac's GPU shares its memory with everything else.
+TILE = {'cuda': 512, 'mps': 256}.get(DEVICE, 192)
 _models = {}
 
 
@@ -25,7 +35,7 @@ def run(name, rgb, tile=None, pad=16):
     """rgb: float32 HxWx3 in 0..1. Returns float32 (H*s)x(W*s)xC."""
     m = model(name)
     s = m.scale
-    tile = tile or (512 if DEVICE == 'cuda' else 192)
+    tile = tile or TILE
     h, w, _ = rgb.shape
     src = np.pad(rgb, ((pad, pad), (pad, pad), (0, 0)), mode='reflect')
     out = None
@@ -45,6 +55,8 @@ def free():
     """The GPU memory PyTorch keeps cached, given back."""
     if DEVICE == 'cuda':
         torch.cuda.empty_cache()
+    elif DEVICE == 'mps':
+        torch.mps.empty_cache()
 
 
 def load(path):
