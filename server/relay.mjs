@@ -11,8 +11,10 @@
  * play a match as (a game says its own and the older ones it also plays; the match is played as the
  * newest the two share, and both are told it as they are paired), and each one's fighter one whose
  * data the other has. Two players the queue brings together, or
- * a room's host and the player joining it, are offered each other first: both must say yes within
- * the offer's seconds. In the queue a no puts both back in it, kept apart from each other a while, and
+ * a room's host and the player joining it, are offered each other first, and only while both games
+ * say they are available (in the waiting room's fight; a game that says nothing of it always is):
+ * both must say yes within the offer's seconds. In the queue a no puts both back in it, kept apart
+ * from each other a while and offered each other again after it where neither has found another, and
  * an offer not answered in time puts both back to look again; at a room a no or no answer sends the
  * guest away, the room waiting on. Two players in a room are paired: text messages between them
  * (`peer`) and binary ones (the pads' words) are passed on as they are, until one leaves (a quick
@@ -45,7 +47,9 @@ export const PROTOCOL = 1;
 const GAME = 'tekken3';
 
 /** Seconds two players who said no to each other are kept apart. */
-const APART_SECONDS = 120;
+const APART_SECONDS = 30;
+/** Seconds past an offer's own an answer is still taken: one said in time may reach the server late. */
+const ANSWER_GRACE = 2;
 /** Seconds a match's result waits for the second player's word on it, once the first has said it. */
 const RESULT_SECONDS = 15;
 /** Hours a player's streak of wins is kept after they were last on the server. */
@@ -345,7 +349,7 @@ export class Relay {
   }
 
   connected(socket, request) {
-    const client = { id: (this.ids += 1), address: addressOf(request), offer: null, socket, hello: false, name: 'PLAYER', build: '', plays: [], own: '', roster: 0n, fighter: -1, room: null, seat: -1, queued: false, heard: this.now(), window: this.now(), count: 0, alive: true };
+    const client = { id: (this.ids += 1), address: addressOf(request), offer: null, socket, hello: false, name: 'PLAYER', build: '', plays: [], own: '', roster: 0n, fighter: -1, available: true, room: null, joining: null, seat: -1, queued: false, heard: this.now(), window: this.now(), count: 0, alive: true };
     this.clients.add(client);
     socket.on('pong', () => (client.alive = true));
     socket.on('message', (data, binary) => this.message(client, data, binary));
@@ -383,13 +387,20 @@ export class Relay {
         return this.hello(client, command);
       case 'host':
         client.fighter = fighterOf(command.fighter);
+        if (typeof command.available === 'boolean') client.available = command.available;
         return this.host(client, command);
       case 'join':
         client.fighter = fighterOf(command.fighter);
+        if (typeof command.available === 'boolean') client.available = command.available;
         return this.join(client, command);
       case 'queue':
         client.fighter = fighterOf(command.fighter);
+        if (typeof command.available === 'boolean') client.available = command.available;
         return this.enqueue(client);
+      case 'available':
+        client.available = command.available !== false;
+        if (client.available) this.lookAgain();
+        return;
       case 'answer':
         return this.answer(client, command.yes === true);
       case 'unqueue':
@@ -429,7 +440,7 @@ export class Relay {
     client.roster = rosterOf(roster);
     this.log(`[relay] ${who(client)} connected (${this.clients.size} on the server)`);
     /* Its streak to a game that keeps an id, which so learns the server counts them. */
-    this.tell(client, { ev: 'welcome', name: this.config.name, motd: this.config.motd, ice: this.config.ice, protocol: PROTOCOL, rooms: this.rooms.size, ...this.counts(), ...(client.own === '' ? {} : { wins: this.winsOf(client) }) });
+    this.tell(client, { ev: 'welcome', name: this.config.name, motd: this.config.motd, ice: this.config.ice, protocol: PROTOCOL, availability: true, rooms: this.rooms.size, ...this.counts(), ...(client.own === '' ? {} : { wins: this.winsOf(client) }) });
   }
 
   /** A player's streak of wins (0 for one whose game keeps no id). */
@@ -504,7 +515,7 @@ export class Relay {
     let code;
     do code = Array.from({ length: CODE_LENGTH }, () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]).join('');
     while (this.rooms.has(code));
-    const room = { code, listed: listed === true, title: cleanTitle(title) || `${client.name}'S ROOM`, pass: typeof pass === 'string' ? pass.slice(0, 32) : '', seats: [client, null], quick: false, offering: null, match: null };
+    const room = { code, listed: listed === true, title: cleanTitle(title) || `${client.name}'S ROOM`, pass: typeof pass === 'string' ? pass.slice(0, 32) : '', seats: [client, null], quick: false, offering: null, joining: null, match: null };
     this.rooms.set(code, room);
     client.room = room;
     client.seat = 0;
@@ -515,26 +526,52 @@ export class Relay {
     const room = this.rooms.get(String(code ?? '').toUpperCase());
     if (room === undefined || room.quick) return this.tell(client, { ev: 'refused', why: 'no room' });
     if (room.seats[0] === client) return this.tell(client, { ev: 'refused', why: 'own room' });
-    if (room.seats[1] !== null || room.offering !== null) return this.tell(client, { ev: 'refused', why: 'full' });
+    if (room.seats[1] !== null || room.offering !== null || (room.joining !== null && room.joining !== client)) return this.tell(client, { ev: 'refused', why: 'full' });
     if (room.pass !== '' && room.pass !== pass) return this.tell(client, { ev: 'refused', why: 'password' });
     if (!compatible(room.seats[0], client)) return this.tell(client, { ev: 'refused', why: 'different game', theirs: sideOf(room.seats[0]) });
     this.leave(client, 'left');
-    this.offer(room.seats[0], client, room);
+    /* The room held for this player, offered once both are available. */
+    room.joining = client;
+    client.joining = room;
+    this.lookAgain();
   }
 
   enqueue(client) {
     this.leave(client, 'left');
+    this.queue.push(client);
+    client.queued = true;
+    this.tell(client, { ev: 'queued', waiting: this.queue.length });
+    this.lookAgain();
+  }
+
+  /**
+   * The offers that can be made now: each player in the queue, in turn, offered the first after them
+   * who can play them, both available and not kept apart (the first the host); and each room's host
+   * the player waiting to join it, both available.
+   */
+  lookAgain() {
     const now = this.now();
-    const other = this.queue.find((one) => compatible(one, client) && !(now < (this.apart.get(pairKey(one, client)) ?? 0)));
-    if (other === undefined) {
-      this.queue.push(client);
-      client.queued = true;
-      this.tell(client, { ev: 'queued', waiting: this.queue.length });
-      return;
+    const apart = (a, b) => now < (this.apart.get(pairKey(a, b)) ?? 0);
+    for (let i = 0; i < this.queue.length; i += 1) {
+      const one = this.queue[i];
+      if (!one.available) continue;
+      const j = this.queue.findIndex((other, k) => k > i && other.available && compatible(one, other) && !apart(one, other));
+      if (j < 0) continue;
+      const other = this.queue[j];
+      this.queue.splice(j, 1);
+      this.queue.splice(i, 1);
+      one.queued = false;
+      other.queued = false;
+      this.offer(one, other, null);
+      i -= 1;
     }
-    this.queue.splice(this.queue.indexOf(other), 1);
-    other.queued = false;
-    this.offer(other, client, null);
+    for (const room of this.rooms.values()) {
+      const guest = room.joining;
+      if (guest === null || room.offering !== null || !room.seats[0].available || !guest.available) continue;
+      room.joining = null;
+      guest.joining = null;
+      this.offer(room.seats[0], guest, room);
+    }
   }
 
   /** Two players offered each other (the first the host), from the queue or at a room (`room`, held for them meanwhile). */
@@ -582,7 +619,7 @@ export class Relay {
       let code;
       do code = Array.from({ length: CODE_LENGTH }, () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]).join('');
       while (this.rooms.has(code));
-      const room = { code, listed: false, title: '', pass: '', seats: [first, null], quick: true, offering: null, match: null };
+      const room = { code, listed: false, title: '', pass: '', seats: [first, null], quick: true, offering: null, joining: null, match: null };
       this.rooms.set(code, room);
       first.room = room;
       first.seat = 0;
@@ -596,9 +633,16 @@ export class Relay {
   /** The offers whose time is up. */
   expireOffers() {
     const now = this.now();
-    for (const offer of [...this.offers]) if (offer.until <= now) this.settle(offer, 'expired');
+    for (const offer of [...this.offers]) if (offer.until + ANSWER_GRACE * 1000 <= now) this.settle(offer, 'expired');
     for (const room of this.rooms.values()) if (room.match != null && room.match.until !== 0 && room.match.until <= now) this.settleMatch(room);
-    for (const [key, until] of this.apart) if (until <= now) this.apart.delete(key);
+    let ended = false;
+    for (const [key, until] of this.apart) {
+      if (until > now) continue;
+      this.apart.delete(key);
+      ended = true;
+    }
+    /* Two kept apart may be offered each other again. */
+    if (ended) this.lookAgain();
   }
 
   /** The second player seated: both told who the other is and which side they play. */
@@ -631,6 +675,10 @@ export class Relay {
       this.queue.splice(this.queue.indexOf(client), 1);
       client.queued = false;
     }
+    if (client.joining !== null) {
+      client.joining.joining = null;
+      client.joining = null;
+    }
     if (client.offer !== null) this.settle(client.offer, 'gone', client);
     const room = client.room;
     if (room === null) return;
@@ -643,6 +691,12 @@ export class Relay {
       } else this.settleMatch(room);
     }
     this.rooms.delete(room.code);
+    /* The player waiting to join it told it is gone. */
+    if (room.joining !== null) {
+      this.tell(room.joining, { ev: 'refused', why: 'no room' });
+      room.joining.joining = null;
+      room.joining = null;
+    }
     if (apart && room.quick && room.seats[0] !== null && room.seats[1] !== null) this.apart.set(pairKey(room.seats[0], room.seats[1]), this.now() + APART_SECONDS * 1000);
     for (const one of room.seats) {
       if (one === null) continue;

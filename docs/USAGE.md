@@ -190,7 +190,9 @@ Select goes back. The code, the name and the address are entered with the pad (u
 through the letters, left and right along them) or with a keyboard and a mouse as a text box is:
 typed, the arrows, Home and End (with Shift, selecting), Backspace and Delete, Ctrl+A, Ctrl+C,
 Ctrl+X and Ctrl+V, the mouse placing the caret, dragging a selection and selecting all with a
-double click.
+double click. On a touch screen (a phone, the Android app) a text box of the page's own stands at
+the top while a text is entered, holding it: a tap opens the phone's keyboard on it, a long press
+pastes, and its Done (Enter) keeps the text.
 
 **The waiting room.** A quick match, a room created or a room joined starts with Practice's select:
 you choose your fighter (L1 and R1 choose your side, as SIDE does); your partner is drawn at
@@ -200,12 +202,16 @@ Practice's menus as ever, and RESET (in them, or Select with Start held) leaves 
 ONLINE MODE's page. The free camera is off in online play.
 
 **An opponent found.** Every pairing asks both of you: the quick match's, and a room's host with
-the player joining it. The fight holds under a card with their name and a bar running down the
+the player joining it, and only while both of you are in the waiting room's fight, playing: not on
+its select, not paused, the page in sight (with a server from 0.7.2; a player of an older version
+is asked whenever they wait). The fight holds under a card with their name and a bar running down the
 seconds the server gives (10 by default): start says yes, select no, the two buttons the waiting
 fight does not fight with (a press counts once the card has settled, half a second, as the two
 answers show). Both yes, a card names the other player a moment and the match starts. In the
-quick match a no puts both of you back in the queue, kept apart from each other a while, and a card
-not answered in time puts both back to look again; at a room, the guest is sent away (saying why)
+quick match a no puts both of you back in the queue, kept apart from each other 30 seconds, then
+offered each other again where neither has found another; a card not answered in time puts both
+back to look again (a yes is still taken a moment after the bar runs out, as it may reach the
+server late); at a room, the guest is sent away (saying why)
 and the room waits on.
 
 **The match.** Versus, your fighters as chosen, on a stage drawn at random, no handicap, three
@@ -234,7 +240,7 @@ comes back under a card with its result: who won, whether you did, and the score
 paired. Start asks for a rematch, select goes back to the waiting room, within 30 seconds. Both of
 you asking, the same two fighters fight again on a stage drawn anew; a no from either, or no answer
 in time, puts both back in the waiting room, waiting again (a quick match's two kept apart from
-each other a while; a room joined goes back to ONLINE MODE's page). A reset by either player ends
+each other 30 seconds; a room joined goes back to ONLINE MODE's page). A reset by either player ends
 the match too, the one who reset going back to the page.
 
 **Your streak of wins.** The server counts the matches each player wins without a loss: one more for

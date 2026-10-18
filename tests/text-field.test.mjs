@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { addressBounds, codeBounds, copied, edit, insert, nameBounds, placeCaret, selection } from '../src/app/text-field.ts';
+import { addressBounds, codeBounds, copied, edit, insert, nameBounds, placeCaret, replaced, selection } from '../src/app/text-field.ts';
 import { CODE_LENGTH, CODE_LETTERS } from '../src/sim/game/online-page.ts';
 
 const key = (k, { control = false, shift = false } = {}) => ({ key: k, control, shift });
@@ -61,4 +61,11 @@ test('the mouse puts the caret, Shift or a drag the selection to there', () => {
   const dragged = placeCaret(pressed, 9, true);
   assert.equal(copied(dragged), 'lhost');
   assert.deepEqual(placeCaret(f, 99, false), { value: 'localhost:8790', caret: 14, anchor: 14 });
+});
+
+test("a field given a whole text (a phone's own text box) holds what it takes of it, in capitals where it folds, its caret at the end", () => {
+  assert.deepEqual(replaced('wss://relay.example:8790/', addressBounds), { value: 'wss://relay.example:8790/', caret: 25, anchor: 25 });
+  assert.deepEqual(replaced('Mr. ok!_x', nameBounds), { value: 'MR. OKX', caret: 7, anchor: 7 }, 'letters it takes, in capitals');
+  assert.equal(replaced('ABCDEFGHIJKLMNOP', nameBounds).value, 'ABCDEFGHIJKL', 'no more than its most');
+  assert.deepEqual(replaced('', addressBounds), { value: '', caret: 0, anchor: 0 });
 });

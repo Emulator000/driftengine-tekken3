@@ -34,7 +34,7 @@ export interface ListedRoom {
 /** What the server says. */
 export type ServerEvent =
   /** `wins`, this player's streak of wins, from a server that counts them (to a game that sent its id). */
-  | { readonly ev: 'welcome'; readonly name: string; readonly motd: string; readonly ice: readonly unknown[]; readonly players: number; readonly queued?: number; readonly rooms: number; readonly wins?: number }
+  | { readonly ev: 'welcome'; readonly name: string; readonly motd: string; readonly ice: readonly unknown[]; readonly players: number; readonly queued?: number; readonly rooms: number; readonly wins?: number; readonly availability?: boolean }
   | { readonly ev: 'hosting'; readonly code: string; readonly listed: boolean }
   | { readonly ev: 'queued'; readonly waiting: number }
   | { readonly ev: 'offer'; readonly peer: { readonly name: string }; readonly seconds: number }

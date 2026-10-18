@@ -83,6 +83,9 @@ export function insert(it: Field, text: string, bounds: Bounds): Field {
   return fieldOf(model);
 }
 
+/** A field holding what it takes of `text` alone, its caret at the end: a whole text typed elsewhere (a phone's own text box). */
+export const replaced = (text: string, bounds: Bounds): Field => insert({ value: '', caret: 0, anchor: 0 }, text, bounds);
+
 /** The caret put at `at`, the selection dragged there from its anchor when `extend`. */
 export function placeCaret(it: Field, at: number, extend: boolean): Field {
   const caret = Math.max(0, Math.min(it.value.length, at));

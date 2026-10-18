@@ -26,6 +26,8 @@ import { canvas, params } from './page.ts';
 import { freeCameraBarred } from './free-camera.ts';
 import { MatchJournal, type FieldSound } from './match-journal.ts';
 import { addressBounds, ClipboardBridge, codeBounds, copied, edit, insert, nameBounds, placeCaret, type Bounds, type Field } from './text-field.ts';
+import { touchDevice } from './touch.ts';
+import { TouchTyping, type Typed } from './touch-typing.ts';
 
 /** Where the page's settings are kept on this device. */
 const KEPT = 'tekken3-online';
@@ -112,6 +114,8 @@ export class OnlinePlay {
   /** The match's snapshotter, told of each match's data as it is made. */
   private match: StateSnapshotter<GameState> | null = null;
   private readonly readout: HTMLElement;
+  /** On a touch screen, the box a text is entered in with the system's keyboard and paste. */
+  private readonly touchTyping: TouchTyping | null;
   /** Whether a match just ended (the page shows its page again), and the fields the match has been past Versus. */
   private endedNow = false;
   private pastFields = 0;
@@ -154,7 +158,19 @@ export class OnlinePlay {
     this.readout = document.createElement('div');
     Object.assign(this.readout.style, { position: 'fixed', top: '6px', left: '50%', transform: 'translateX(-50%)', font: "12px 'Russo One', sans-serif", color: '#fff', textShadow: '0 1px 2px #000, 0 0 4px #000', whiteSpace: 'pre', textAlign: 'center', pointerEvents: 'none', opacity: '0.85', display: 'none' });
     document.body.append(this.readout);
+    const { phone, touchScreen } = touchDevice();
+    this.touchTyping =
+      phone || touchScreen
+        ? new TouchTyping({
+            field: () => this.field(),
+            setField: (field) => this.setField(field),
+            bounds: () => this.bounds(),
+            ended: (kept) => (this.game.state.online.typed += kept ? TYPED_ENTER : TYPED_ESCAPE),
+          })
+        : null;
     document.addEventListener('keydown', (event) => this.typed(event), { capture: true });
+    /* A page put out of sight runs no fields: the server told at once that this player is not to be offered anyone. */
+    document.addEventListener('visibilitychange', () => this.online.setAvailable(this.inWaitingFight()));
     /* No free camera in online play (it holds the game, and the other side's goes on) or over a text being typed. */
     freeCameraBarred.now = () => this.local !== null || this.game.state.online.warming !== 0 || typing(this.game.state);
     canvas.addEventListener('pointerdown', (event) => this.pointed(event, false));
@@ -216,7 +232,7 @@ export class OnlinePlay {
     const session = this.online.session;
     const page = this.game.state.online;
     const presses = [...this.presses.entries()].sort(([a], [b]) => a - b).map(([field, [raw0, game0, raw1, game1]]) => ({ field, pads: [raw0.toString(16), raw1.toString(16)], buttons: [game0.toString(16), game1.toString(16)] }));
-    return { state: this.online.state, page: { status: page.status, warming: page.warming, card: page.card, answer: page.answer, fresh: this.game.state.world.input.fresh[0] }, ...(session === null ? {} : { field: session.tick, session: session.state, ahead: session.ahead, ...session.quality, theyWait: this.online.theyWait, direct: this.online.direct, presses, heard: [...this.heard.entries()] }) };
+    return { state: this.online.state, page: { status: page.status, warming: page.warming, card: page.card, answer: page.answer, fresh: this.game.state.world.input.fresh[0], available: this.inWaitingFight(), practicePaused: this.game.state.practice.paused }, ...(session === null ? {} : { field: session.tick, session: session.state, ahead: session.ahead, ...session.quality, theyWait: this.online.theyWait, direct: this.online.direct, presses, heard: [...this.heard.entries()] }) };
   }
 
   /** While a match is played, each seat's player's name (the host's first) and their streak of wins, for the HUD to show under the fighters'. */
@@ -330,8 +346,23 @@ export class OnlinePlay {
     }
     const pasted = this.clipboard.take();
     if (pasted !== null && this.editable()) this.setField(insert(this.field(), pasted, this.bounds()));
+    this.online.setAvailable(this.inWaitingFight());
+    this.touchTyping?.frame(this.editable() ? this.typedNow() : null);
     this.online.frame(0);
     this.tell();
+  }
+
+  /** What is being entered, as the touch screen's box names it. */
+  private typedNow(): Typed {
+    const online = this.game.state.online;
+    if (online.screen === OnlineScreen.CODE) return { label: 'ROOM CODE', address: false };
+    return online.editing === Editing.NAME ? { label: 'YOUR NAME', address: false } : { label: 'SERVER ADDRESS', address: true };
+  }
+
+  /** Whether this player is in the waiting room's fight, playing (not loading it, not in Practice's menu, not choosing a character), the page in sight: offered an opponent only then. */
+  private inWaitingFight(): boolean {
+    const state = this.game.state;
+    return state.online.warming === 2 && state.scene === Scene.FIGHT && state.step === FightStep.FIGHTING && state.practice.paused === 0 && state.world.pause.paused === 0 && document.visibilityState === 'visible';
   }
 
   /** The page's lines: how the connection goes, in the game's words. */
@@ -592,7 +623,7 @@ export class OnlinePlay {
    * events carry their text.
    */
   private typed(event: KeyboardEvent): void {
-    if (!this.editable() || event.altKey) return;
+    if (!this.editable() || event.altKey || this.touchTyping?.owns(event.target) === true) return;
     const online = this.game.state.online;
     if (event.key === 'Enter' || event.key === 'Escape') {
       online.typed += event.key === 'Enter' ? TYPED_ENTER : TYPED_ESCAPE;

@@ -23,8 +23,8 @@ import { releaseCode } from './lib/release.mjs';
 
 const quiet = { log: () => {} };
 
-async function server(settings = []) {
-  const relay = new Relay(readConfig(['--host', '127.0.0.1', '--port', '0', ...settings], {}), quiet);
+async function server(settings = [], now = undefined) {
+  const relay = new Relay(readConfig(['--host', '127.0.0.1', '--port', '0', ...settings], {}), { ...quiet, ...(now === undefined ? {} : { now }) });
   const port = await relay.listen();
   return { relay, url: `ws://127.0.0.1:${port}/` };
 }
@@ -422,6 +422,91 @@ test("a no puts both back in the queue, kept apart; an offer not answered in tim
   }
 });
 
+test("a no keeps the two apart thirty seconds, then offers them each other again where neither has found another", async () => {
+  const clock = { ms: 0 };
+  const { relay, url } = await server([], () => Date.now() + clock.ms);
+  const [a, b] = [side(url, { name: 'A' }), side(url, { name: 'B' })];
+  try {
+    a.online.quickMatch();
+    await frames([a, b], () => a.online.state === 'queued');
+    b.online.quickMatch();
+    await frames([a, b], () => a.online.state === 'offered' && b.online.state === 'offered');
+    b.online.answer(false);
+    await frames([a, b], () => a.online.state === 'queued' && b.online.state === 'queued');
+    clock.ms = 29_000;
+    await sleep(400);
+    await frames([a, b], () => false, 30);
+    assert.deepEqual([a.online.state, b.online.state], ['queued', 'queued'], 'kept apart a while');
+    clock.ms = 31_000;
+    await frames([a, b], () => a.online.state === 'offered' && b.online.state === 'offered', 200);
+    assert.deepEqual([a.online.state, b.online.state], ['offered', 'offered'], 'then offered each other again');
+  } finally {
+    for (const one of [a, b]) one.online.disconnect();
+    await relay.close();
+  }
+});
+
+test("a player is offered only while their game says it is available (in the waiting room's fight, playing, in sight): one that is not waits in the queue unoffered until it is; a game that says nothing of it is taken as available", async () => {
+  const { relay, url } = await server();
+  const [a, b] = [side(url, { name: 'A' }), side(url, { name: 'B' })];
+  try {
+    a.online.setAvailable(false);
+    a.online.quickMatch();
+    await frames([a, b], () => a.online.state === 'queued');
+    b.online.quickMatch();
+    await frames([a, b], () => false, 40);
+    assert.deepEqual([a.online.state, b.online.state], ['queued', 'queued'], 'not offered while one is not available');
+    a.online.setAvailable(true);
+    await frames([a, b], () => a.online.state === 'offered' && b.online.state === 'offered', 120);
+    assert.deepEqual([a.online.state, b.online.state], ['offered', 'offered'], 'offered once it is');
+  } finally {
+    for (const one of [a, b]) one.online.disconnect();
+    await relay.close();
+  }
+});
+
+test("a yes that reaches the server a moment after the offer's time is up still counts", async () => {
+  const clock = { ms: 0 };
+  const { relay, url } = await server([], () => Date.now() + clock.ms);
+  const [a, b] = [side(url, { name: 'A' }), side(url, { name: 'B' })];
+  try {
+    a.online.quickMatch();
+    await frames([a, b], () => a.online.state === 'queued');
+    b.online.quickMatch();
+    await frames([a, b], () => a.online.state === 'offered' && b.online.state === 'offered');
+    a.online.answer(true);
+    await frames([a, b], () => false, 10);
+    clock.ms = 10_500;
+    await sleep(400);
+    b.online.answer(true);
+    const paired = (one) => one.online.state === 'greeting' || one.online.state === 'playing';
+    await frames([a, b], () => paired(a) && paired(b), 200);
+    assert.ok(paired(a) && paired(b), `both yeses taken, the two paired (${a.online.state} ${b.online.state})`);
+  } finally {
+    for (const one of [a, b]) one.online.disconnect();
+    await relay.close();
+  }
+});
+
+test("a room's host is offered the player joining only while both are available, the one joining waiting until then", async () => {
+  const { relay, url } = await server();
+  const [a, b] = [side(url, { name: 'Host' }), side(url, { name: 'Guest' })];
+  try {
+    a.online.setAvailable(false);
+    a.online.host(false);
+    await frames([a, b], () => a.online.state === 'hosting' && a.online.code !== '');
+    b.online.join(a.online.code);
+    await frames([a, b], () => false, 40);
+    assert.deepEqual([a.online.state, b.online.state], ['hosting', 'joining'], 'the guest waits while the host is not available');
+    a.online.setAvailable(true);
+    await frames([a, b], () => a.online.state === 'offered' && b.online.state === 'offered', 120);
+    assert.deepEqual([a.online.state, b.online.state], ['offered', 'offered'], 'offered once it is');
+  } finally {
+    for (const one of [a, b]) one.online.disconnect();
+    await relay.close();
+  }
+});
+
 test("a match over asks both for a rematch: two yeses play again, a no or no answer sends both back to waiting, a quick match's two kept apart", async () => {
   const { relay, url } = await server();
   const shift = { ms: 0 };
@@ -704,7 +789,8 @@ test("at a room the host is asked: a no sends the guest away with the reason, th
     assert.equal(host.online.code, code, 'the same room');
     guest.online.join(code);
     await frames([host, guest], () => guest.online.state === 'offered');
-    await frames([host, guest], () => guest.online.state === 'lobby', 400);
+    /* The offer's second, and the seconds an answer may still come in after it. */
+    await frames([host, guest], () => guest.online.state === 'lobby', 1200);
     assert.equal(guest.online.ended, 'THE OFFER WAS NOT ANSWERED');
     assert.equal(host.online.state, 'hosting', 'the room waits on');
   } finally {

@@ -246,6 +246,9 @@ export class Online<S> {
   seat: 0 | 1 = 0;
   /** The version the pairing's matches are played as: the server's word as they were paired (where it says one), the game's own otherwise. */
   playsAs = '';
+  /** Whether this player may be offered an opponent now (`setAvailable`), and whether the server waits for its word on it (it says so at its welcome). */
+  private available = true;
+  private serverWaits = false;
   /** Why the last match or attempt ended, as a line (the empty string while none has). */
   ended = '';
   /** The round trip to the server, or through it to the other player while paired, in milliseconds. */
@@ -365,20 +368,31 @@ export class Online<S> {
 
   /** The quick match's queue: paired with the next player of the same game. */
   quickMatch(): void {
-    this.lobbyCommand('queued', { do: 'queue', fighter: this.side.fighter });
+    this.lobbyCommand('queued', { do: 'queue', fighter: this.side.fighter, available: this.available });
+  }
+
+  /**
+   * Whether this player may be offered an opponent now (in the waiting room's fight, playing, the
+   * page in sight): told the server as it changes, where the server waits for the word (an older
+   * server offers whoever waits).
+   */
+  setAvailable(available: boolean): void {
+    if (available === this.available) return;
+    this.available = available;
+    if (this.serverWaits && (this.state === 'queued' || this.state === 'hosting' || this.state === 'joining')) this.relay?.say({ do: 'available', available });
   }
 
   /** A room of this player's own, its code to give the other player; listed in the server's room list or not. */
   host(listed: boolean, pass = ''): void {
     /* Its code is the server's to give: none until then. */
     this.code = '';
-    this.lobbyCommand('hosting', { do: 'host', listed, pass, fighter: this.side.fighter });
+    this.lobbyCommand('hosting', { do: 'host', listed, pass, fighter: this.side.fighter, available: this.available });
   }
 
   /** The room with this code. */
   join(code: string, pass = ''): void {
     this.code = code;
-    this.lobbyCommand('joining', { do: 'join', code, pass, fighter: this.side.fighter });
+    this.lobbyCommand('joining', { do: 'join', code, pass, fighter: this.side.fighter, available: this.available });
   }
 
   /** The server's room list, asked for now and every few seconds while `listing`. */
@@ -577,6 +591,7 @@ export class Online<S> {
         this.countsFrom(event);
         this.wins = Number.isInteger(event.wins) ? event.wins! : -1;
         this.ice = Array.isArray(event.ice) ? event.ice : [];
+        this.serverWaits = event.availability === true;
         if (this.state === 'connecting') this.state = 'lobby';
         return;
       case 'hosting':
