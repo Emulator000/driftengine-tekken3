@@ -21,8 +21,8 @@ export const ONLINE_PAGE = 0x11;
 /** The connection as the page tells it. */
 export const OnlineStatus = { OFF: 0, CONNECTING: 1, LOBBY: 2, QUEUED: 3, HOSTING: 4, JOINING: 5, GREETING: 6, PLAYING: 7, OFFERED: 8, RESULT: 9 } as const;
 
-/** The page's screens: its list, the wait, the code's entry, the room list, a text's entry. */
-export const OnlineScreen = { LIST: 0, WAIT: 1, CODE: 2, ROOMS: 3, TEXT: 4 } as const;
+/** The page's screens: its list, the wait, the code's entry, the room list, a text's entry, the fights to watch. */
+export const OnlineScreen = { LIST: 0, WAIT: 1, CODE: 2, ROOMS: 3, TEXT: 4, FIGHTS: 5 } as const;
 
 /** The text being entered on the text screen. */
 export const Editing = { NONE: 0, NAME: 1, SERVER: 2 } as const;
@@ -38,8 +38,9 @@ const NAME_LETTERS = ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-';
 const SERVER_LETTERS = 'abcdefghijklmnopqrstuvwxyz0123456789.:/-_';
 const NAME_LENGTH = 12;
 const SERVER_LENGTH = 96;
-/** The rooms the room list shows at once. */
+/** The rooms the room list shows at once, and the fights the fights' list does (each two lines). */
 const ROOM_ROWS = 8;
+const FIGHT_ROWS = 7;
 
 /** The keys a keyboard gives the page while a text is entered: confirm, go back (the editing itself is the page's own). */
 export const TYPED_ENTER = '\n';
@@ -52,6 +53,15 @@ export interface OnlineRoom {
   readonly host: string;
   readonly locked: boolean;
   readonly same: boolean;
+}
+
+/** A fight under way the fights' list shows: its room's code, its players' names and streaks (the host's first), how many watch it, and whether this game can show it. */
+export interface OnlineFight {
+  readonly code: string;
+  readonly names: readonly string[];
+  readonly wins: readonly number[];
+  readonly watchers: number;
+  readonly watchable: boolean;
 }
 
 /** The page's state: its own (screens, cursors, text, settings) and what the app tells it and is asked. */
@@ -84,6 +94,9 @@ export interface OnlineState {
   /** This player's streak of wins as the app words it (empty: none, or a server that counts none). */
   wins: string;
   rooms: OnlineRoom[];
+  /** The fights under way, as the app tells them, and the one picked. */
+  fights: OnlineFight[];
+  fightCursor: number;
   /** Whether the Options open on this page (the menu's ONLINE MODE). */
   opens: number;
   /**
@@ -102,7 +115,7 @@ export interface OnlineState {
 }
 
 export function blankOnline(): OnlineState {
-  return { screen: OnlineScreen.LIST, cursor: 0, roomCursor: 0, caret: 0, anchor: 0, scroll: 0, editing: Editing.NONE, code: '', text: '', delay: DEFAULT_DELAY, listed: 0, side: 0, name: 'PLAYER', server: '', ask: '', typed: '', status: OnlineStatus.OFF, lines: [], players: '', wins: '', rooms: [], opens: 0, warming: 0, pending: '', offerLeft: 0, answer: 0, card: 0, fight: 0 };
+  return { screen: OnlineScreen.LIST, cursor: 0, roomCursor: 0, caret: 0, anchor: 0, scroll: 0, editing: Editing.NONE, code: '', text: '', delay: DEFAULT_DELAY, listed: 0, side: 0, name: 'PLAYER', server: '', ask: '', typed: '', status: OnlineStatus.OFF, lines: [], players: '', wins: '', rooms: [], fights: [], fightCursor: 0, opens: 0, warming: 0, pending: '', offerLeft: 0, answer: 0, card: 0, fight: 0 };
 }
 
 /** Whether a text is being entered: the keyboard types for the page then, not for the pads. */
@@ -125,7 +138,7 @@ const BARS = 4;
 const BAR = { colour: 0xff4020, height: 0x16, margin: 3 } as const;
 /** The selected letters' ground: a warm orange (0xBBGGRR), clear on the Options' blue. */
 const SELECTED = 0x1868d8;
-const LIST = { x: 20, y: 84, step: 26, width: 324 } as const;
+const LIST = { x: 20, y: 84, step: 24, width: 324 } as const;
 /** The text's line on the text screen (its letters, its window's left and line), and the code's boxes. */
 const TEXT_BOX = { cells: 36, left: 0xb8 - ((36 * 9) >> 1), y: 196, height: 22 } as const;
 const CODE_BOX = { cell: 40, left: 0xb8 - 80, y: 194 } as const;
@@ -137,8 +150,8 @@ const PLAYERS_Y = 62;
 const LINE_STEP = 20;
 const Colour = { ITEM: 10, PICKED: 5, VALUE: 6, DEFAULT: 1, LINE: 6, WARN: 5, GREY: 9 } as const;
 
-const Item = { QUICK: 0, HOST: 1, JOIN: 2, ROOMS: 3, DELAY: 4, ROOM: 5, SIDE: 6, NAME: 7, SERVER: 8, EXIT: 9 } as const;
-const LABELS = ['QUICK MATCH', 'CREATE ROOM', 'JOIN ROOM', 'ROOM LIST', 'INPUT DELAY', 'ROOM', 'SIDE', 'NAME', 'SERVER', 'EXIT'] as const;
+const Item = { QUICK: 0, HOST: 1, JOIN: 2, ROOMS: 3, WATCH: 4, DELAY: 5, ROOM: 6, SIDE: 7, NAME: 8, SERVER: 9, EXIT: 10 } as const;
+const LABELS = ['QUICK MATCH', 'CREATE ROOM', 'JOIN ROOM', 'ROOM LIST', 'SPECTATE', 'INPUT DELAY', 'ROOM', 'SIDE', 'NAME', 'SERVER', 'EXIT'] as const;
 const ROOM_KINDS = ['PRIVATE', 'LISTED'] as const;
 /** The side this player's fighter is seen on in an online match, whichever the server seats them: the other side's view mirrored. */
 const SIDES = ['LEFT', 'RIGHT'] as const;
@@ -202,6 +215,9 @@ export function onlineFrame(game: GameState, data: Data): 'leave' | 'warm' | nul
       return codeFrame(game, data, typed) ? warmUp(online, 'join') : null;
     case OnlineScreen.ROOMS:
       return roomsFrame(game, data) ? warmUp(online, 'join') : null;
+    case OnlineScreen.FIGHTS:
+      fightsFrame(game, data);
+      return null;
     case OnlineScreen.TEXT:
       textFrame(game, data, typed);
       return null;
@@ -259,6 +275,11 @@ function listFrame(game: GameState, data: Data): 'leave' | 'warm' | null {
         online.roomCursor = 0;
         online.screen = OnlineScreen.ROOMS;
         break;
+      case Item.WATCH:
+        online.ask = 'fights';
+        online.fightCursor = 0;
+        online.screen = OnlineScreen.FIGHTS;
+        break;
       case Item.NAME:
       case Item.SERVER:
         online.editing = online.cursor === Item.NAME ? Editing.NAME : Editing.SERVER;
@@ -278,7 +299,7 @@ function listFrame(game: GameState, data: Data): 'leave' | 'warm' | null {
   let y = LIST.y;
   LABELS.forEach((label, i) => {
     const picked = i === online.cursor;
-    if (picked) bar(game, LIST.x, y, i <= Item.ROOMS || i === Item.EXIT ? label.length * ADVANCE : LIST.width);
+    if (picked) bar(game, LIST.x, y, i <= Item.WATCH || i === Item.EXIT ? label.length * ADVANCE : LIST.width);
     print(game, 0, picked ? Colour.PICKED : Colour.ITEM, LIST.x, y, label);
     const value = i === Item.DELAY ? String(online.delay) : i === Item.ROOM ? ROOM_KINDS[online.listed]! : i === Item.SIDE ? SIDES[online.side]! : i === Item.NAME ? online.name : i === Item.SERVER ? fit(online.server.toUpperCase(), 22) : '';
     const byDefault = (i === Item.DELAY && online.delay === DEFAULT_DELAY) || (i === Item.ROOM && online.listed === 0) || (i === Item.SIDE && online.side === 0);
@@ -406,6 +427,67 @@ function roomsFrame(game: GameState, data: Data): boolean {
   });
   prompts(game, Colour.ITEM, CENTRE, 400, [['BUTTON', 'JOIN'], ['SELECT', 'BACK']]);
   return joined;
+}
+
+/** The fights' list's rows and its scrollbar: where the rows start, each row's height, the scrollbar's place across and its width. */
+const FIGHTS = { y: 96, row: 40, barX: LIST.x + LIST.width + 10, barWidth: 4 } as const;
+
+/**
+ * The fights under way: up and down to pick (the list scrolled to keep the cursor in it, a
+ * scrollbar beside it when there are more than it shows), a button to watch one this game can
+ * show, select back. Each fight two lines: its players either side of VS, and under each their
+ * streak, and between them how many watch it.
+ */
+function fightsFrame(game: GameState, data: Data): void {
+  const online = game.online;
+  const { fresh, repeats } = pads(game);
+  const fights = online.fights;
+  const down = ((repeats & DOWN) !== 0 ? 1 : 0) - ((repeats & UP) !== 0 ? 1 : 0);
+  if (down !== 0 && fights.length > 0) {
+    online.fightCursor = (online.fightCursor + down + fights.length) % fights.length;
+    sound(game, data, Sound.MOVE);
+  }
+  online.fightCursor = Math.min(online.fightCursor, Math.max(0, fights.length - 1));
+  const fight = fights[online.fightCursor];
+  if ((fresh & SELECT) !== 0) {
+    online.ask = 'unfights';
+    online.screen = OnlineScreen.LIST;
+    sound(game, data, Sound.BACK);
+  } else if ((fresh & CHOOSE) !== 0 && fight !== undefined && fight.watchable) {
+    online.code = fight.code;
+    online.ask = 'watch';
+    sound(game, data, Sound.DECIDE);
+  }
+  title(game, 'SPECTATE');
+  if (online.players !== '') centred(game, Colour.VALUE, PLAYERS_Y, online.players);
+  if (fights.length === 0) centred(game, Colour.LINE, 200, online.status === OnlineStatus.LOBBY ? 'NO FIGHTS ARE ON' : 'CONNECTING');
+  const first = Math.max(0, Math.min(online.fightCursor - (FIGHT_ROWS >> 1), fights.length - FIGHT_ROWS));
+  fights.slice(first, first + FIGHT_ROWS).forEach((one, row) => {
+    const y = FIGHTS.y + row * FIGHTS.row;
+    const picked = first + row === online.fightCursor;
+    if (picked) bar(game, LIST.x, y, LIST.width);
+    const colour = !one.watchable ? Colour.GREY : picked ? Colour.PICKED : Colour.ITEM;
+    const [left = '', right = ''] = one.names;
+    print(game, 0, colour, LIST.x, y, left);
+    print(game, 0, colour, LIST.x + ((LIST.width - 2 * ADVANCE) >> 1), y, 'VS');
+    print(game, 0, colour, LIST.x + LIST.width - right.length * ADVANCE, y, right);
+    const under = y + 18;
+    const streak = (wins: number | undefined): string => (wins !== undefined && wins > 0 ? `WINS ${wins}` : '');
+    const [ours, theirs] = [streak(one.wins[0]), streak(one.wins[1])];
+    if (ours !== '') print(game, 0, one.watchable ? Colour.VALUE : Colour.GREY, LIST.x, under, ours);
+    if (theirs !== '') print(game, 0, one.watchable ? Colour.VALUE : Colour.GREY, LIST.x + LIST.width - theirs.length * ADVANCE, under, theirs);
+    const middle = !one.watchable ? 'CANNOT WATCH' : one.watchers > 0 ? `${one.watchers} WATCHING` : '';
+    if (middle !== '') centred(game, one.watchable ? Colour.DEFAULT : Colour.GREY, under, middle);
+  });
+  /* The scrollbar: its track the rows' height, its thumb the rows shown, where they are among all. */
+  if (FIGHT_ROWS < fights.length) {
+    const track = FIGHT_ROWS * FIGHTS.row - 8;
+    const thumb = Math.max(12, Math.round((track * FIGHT_ROWS) / fights.length));
+    const at = Math.round(((track - thumb) * first) / (fights.length - FIGHT_ROWS));
+    tile(game, FIGHTS.barX, FIGHTS.y - 4 + at, FIGHTS.barWidth, thumb, BAR.colour, BARS);
+    tile(game, FIGHTS.barX, FIGHTS.y - 4, FIGHTS.barWidth, track, 0x404040, BARS);
+  }
+  prompts(game, Colour.ITEM, CENTRE, 400, [['BUTTON', 'WATCH'], ['SELECT', 'BACK']]);
 }
 
 /**

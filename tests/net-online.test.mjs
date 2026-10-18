@@ -39,7 +39,7 @@ const OWN_KEYS = [12, 12, 12, 12, 0, 1, 2, 3];
 
 function side(url, { version = '0.6.1', plays, roster = EVERY, fighter = 0, name = 'A', delay = 2, now, keys = DEFAULT_KEYS, id } = {}) {
   const chosen = { fighter };
-  const log = { began: null, ended: null, begun: 0, waited: 0, optionsAs: null };
+  const log = { began: null, ended: null, begun: 0, waited: 0, optionsAs: null, steps: [] };
   const state = { at: [0, 0], mix: 1, fields: 0 };
   const game = {
     version,
@@ -56,8 +56,10 @@ function side(url, { version = '0.6.1', plays, roster = EVERY, fighter = 0, name
       log.begun += 1;
       /* Every match from the same start, as the game's own begins from the state it powers on with. */
       Object.assign(state, { at: [0, 0], mix: 1, fields: 0 });
+      log.steps = [];
       return {
-        step: ([a, b]) => {
+        step: ([a, b], field) => {
+          log.steps[field] = [a, b];
           state.at[0] += a & 1;
           state.at[1] += b & 1;
           state.mix = (Math.imul(state.mix ^ (a * 7 + b), 0x01000193) + state.fields) >>> 0;
@@ -287,6 +289,61 @@ test("two games that play a level match point as a draw agree on it in the match
     d.online.answer(true);
     await frames([c, d], () => c.online.state === 'playing' && d.online.state === 'playing');
     assert.equal(c.log.began.start.draws, undefined, `no word of it in the start (the host's seat ${c.log.began.seat}, the older's ${d.log.began.seat})`);
+  } finally {
+    for (const one of sides) one.online.disconnect();
+    await relay.close();
+  }
+});
+
+test("a fight between two games that tape it can be watched: listed with both players' names and streaks, its start and every press so far given to the one watching, the presses after as they come, each the press its player's game played; the watcher told as it ends", async () => {
+  const { relay, url } = await server();
+  const sides = [];
+  try {
+    const [a, b] = await playing(url);
+    const c = side(url, { name: 'Watcher' });
+    sides.push(a, b, c);
+    c.online.connect();
+    await frames([a, b, c], () => c.online.state === 'lobby' && a.online.session?.tick > 90 && b.online.session?.tick > 90, 800);
+    c.online.listFights();
+    await frames([a, b, c], () => c.online.fights.length === 1, 200);
+    const [fight] = c.online.fights;
+    assert.ok(fight !== undefined, 'the fight listed');
+    assert.deepEqual([fight.names, fight.watchable], [['HOST', 'GUEST'], true], 'by its players, which this game can watch');
+    c.online.watch(fight.code);
+    await frames([a, b, c], () => c.online.state === 'watching' && Math.min(...(c.online.tape?.words.map((w) => w.length) ?? [0])) > 240, 900);
+    const tape = c.online.tape;
+    assert.ok(tape !== null, 'the fight given');
+    assert.equal(tape.start.match, a.log.began.start.match, 'its start');
+    const final = Math.min(a.online.session.final, b.online.session.final, tape.words[0].length, tape.words[1].length);
+    assert.ok(final > 200, `presses to compare (${final})`);
+    for (let field = 0; field < final; field += 1) {
+      assert.deepEqual([tape.words[0][field], tape.words[1][field]], a.log.steps[field], `field ${field} as the host played it`);
+    }
+    a.online.disconnect();
+    await frames([b, c], () => c.online.state !== 'watching', 300);
+    assert.equal(c.online.state, 'lobby', 'back once the fight is over');
+    assert.equal(c.online.tape, null);
+  } finally {
+    for (const one of sides) one.online.disconnect();
+    await relay.close();
+  }
+});
+
+test("a fight where one game does not tape (one before 0.7.5) is not listed", async () => {
+  const { relay, url } = await server();
+  const sides = [];
+  try {
+    const [a, b] = await playing(url);
+    /* The guest's game sends none of its presses, as an older one. */
+    const say = b.online.relay.say.bind(b.online.relay);
+    b.online.relay.say = (command) => (command.do === 'words' ? undefined : say(command));
+    const c = side(url, { name: 'Watcher' });
+    sides.push(a, b, c);
+    c.online.connect();
+    await frames([a, b, c], () => c.online.state === 'lobby' && a.online.session?.tick > 90, 800);
+    c.online.listFights();
+    await frames([a, b, c], () => false, 60);
+    assert.equal(c.online.fights.length, 0);
   } finally {
     for (const one of sides) one.online.disconnect();
     await relay.close();

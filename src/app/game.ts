@@ -476,9 +476,26 @@ export async function playGame(): Promise<void> {
     online?.afterField();
   };
 
+  /**
+   * A field of a watched fight: its data loaded as it comes, its fields played from its players'
+   * presses (`OnlinePlay.watchField`), each one heard as a local field is, the songs a catch-up
+   * passed over first.
+   */
+  const watchField = (play: OnlinePlay, pads: readonly [number, number]): boolean => {
+    const next = game.upcoming();
+    if (next !== null) fightData(next);
+    const ready = !game.blocked() && drawingReady();
+    return play.watchField(pads[0] | pads[1], ready, (songs) => {
+      sound?.field(game.state.world, game.state.vblanks, holdSong([...songs, ...game.state.world.sound.commands]));
+      movie.audible = sound?.running ?? false;
+      movie.field(game.state);
+    });
+  };
+
   play(
     {
       field(pads) {
+        if (online?.watching === true) return watchField(online, pads);
         if (online?.playing === true) return onlineField(online, pads);
         const next = game.upcoming();
         if (next !== null) fightData(next);
@@ -560,12 +577,16 @@ export async function playGame(): Promise<void> {
           () => {
             hud.drawFront();
             presenter.renderOverFight(state, width, height);
+            /* A watched fight's SPECTATING and its menu, over it. */
+            const menu = online?.watchOverlay() ?? null;
+            if (menu !== null) presenter.renderOverFight(menu, width, height);
             pause.draw();
             presenter.renderDissolve(width, height, now);
           },
         );
       },
-      moving: () => presenter.moving || (introSetUp(game.state) && !introWarmed(game.state.attract.intro)),
+      /* A watched fight's menu drawn while it is open, though no field plays under it. */
+      moving: () => presenter.moving || (introSetUp(game.state) && !introWarmed(game.state.attract.intro)) || online?.watchMenuOpen === true,
       fighting: () => shown === 'fight',
       probe: () => ({ scene: game.state.scene, sceneState: game.state.step, sound: sound?.probe() ?? null, song: songProbe(), movie: movie.probe(), online: online?.probe() ?? null }),
       about: () => {

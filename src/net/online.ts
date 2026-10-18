@@ -13,12 +13,12 @@ import type { MessageSink, PeerId, Snapshotter, Transport, TransportState } from
 import { Peering, browserPeerConnection, switchableSocket } from './peering.ts';
 import type { ChannelLike, PeerLike, SignalKind, SwitchableSocket } from './peering.ts';
 import { GAME, PROTOCOL, RelayClient } from './relay.ts';
-import type { ListedRoom, ServerEvent, SocketLike } from './relay.ts';
+import type { ListedFight, ListedRoom, ServerEvent, SocketLike } from './relay.ts';
 import { DEFAULT_INPUT_DELAY, MatchSession } from './session.ts';
 import type { ConnectionQuality, SessionState } from './session.ts';
 
 /** Where this side is: each is a line a player can be shown. */
-export type OnlineState = 'off' | 'connecting' | 'lobby' | 'queued' | 'offered' | 'hosting' | 'joining' | 'greeting' | 'playing' | 'result' | 'ended';
+export type OnlineState = 'off' | 'connecting' | 'lobby' | 'queued' | 'offered' | 'hosting' | 'joining' | 'greeting' | 'playing' | 'result' | 'ended' | 'watching';
 
 /** What a side says of itself once paired. */
 export interface Hello {
@@ -46,6 +46,21 @@ export interface Hello {
    * the match is then played by the old rule.
    */
   readonly draws?: boolean;
+}
+
+/**
+ * A fight watched, as the server gives it: its room's code, its match's start and number, the
+ * version it is played as, its players' names and streaks (the host's first), and each side's
+ * presses so far, by field from the match's first.
+ */
+export interface Tape {
+  readonly code: string;
+  readonly match: number;
+  readonly start: Start;
+  readonly as: string;
+  readonly names: readonly [string, string];
+  readonly wins: readonly [number, number];
+  readonly words: readonly [number[], number[]];
 }
 
 /** A fighter chosen: its roster id and its costume. */
@@ -131,6 +146,8 @@ export const PLAYS_AS = '0.7.0';
  */
 export const ALSO_PLAYS: Readonly<Record<string, readonly string[]>> = { '0.6.5': ['wallHit', 'carried', 'splatted', 'splatHits', 'walls'] };
 
+/** Fields of this side's own presses sent to the server at a time, for those watching the fight. */
+const WORDS_EVERY = 15;
 /** Frames between round trips measured: twice a second. */
 const PING_EVERY = 30;
 /** Round trips the shown one is the mean of. */
@@ -156,6 +173,7 @@ const RELAY_TOO_AFTER = 30;
 /** Each reason a side is refused or a match ends, as a player is shown it. */
 const WHY: Readonly<Record<string, string>> = {
   'no room': 'NO ROOM WITH THAT CODE',
+  'no fight': 'THE FIGHT IS OVER',
   full: 'THAT ROOM IS FULL',
   password: 'WRONG PASSWORD',
   'different game': 'THEIR GAME DIFFERS',
@@ -236,6 +254,12 @@ export class Online<S> {
   code = '';
   /** The rooms the server last listed. */
   rooms: readonly ListedRoom[] = [];
+  /** The fights under way the server lists, as last asked for; the one watched, while one is. */
+  fights: readonly ListedFight[] = [];
+  tape: Tape | null = null;
+  /** Whether the server keeps fights for watching (it says so at its welcome), and this side's own presses of the match under way, by field, and how many of them the server has been sent. */
+  private serverTapes = false;
+  private taped: { readonly match: number; readonly words: number[]; sent: number } | null = null;
   /** The other player's name, once offered or paired. */
   opponent = '';
   /** The players on the server and those in its quick match, as it last said (-1 not said). */
@@ -288,6 +312,7 @@ export class Online<S> {
   /** The frame the other side was last heard from. */
   private heardAt = 0;
   private listing = false;
+  private listingFights = false;
   /** The host's start, decided and waiting for its moment (`GREETING_HOLD_MS`); the last match's start, a rematch's ground; the other player's rematch answer. */
   private starting: { readonly start: Start; readonly at: number } | null = null;
   private lastStart: Start | null = null;
@@ -380,6 +405,27 @@ export class Online<S> {
     this.lobbyCommand('queued', { do: 'queue', fighter: this.side.fighter, available: this.available });
   }
 
+  /** The fights under way (`fights`, as the server answers), asked for now and every few seconds while `on`. */
+  listFights(on = true): void {
+    this.listingFights = on;
+    if (on && this.connect()) this.relay!.say({ do: 'fights' });
+  }
+
+  /** Watching the fight in the room `code`: out of the queue or a room, its start and its presses given as they come (`tape`). */
+  watch(code: string): void {
+    this.tape = null;
+    this.listingFights = false;
+    this.lobbyCommand('watching', { do: 'watch', code });
+  }
+
+  /** No longer watching. */
+  unwatch(): void {
+    if (this.state !== 'watching') return;
+    this.relay?.say({ do: 'unwatch' });
+    this.tape = null;
+    this.state = 'lobby';
+  }
+
   /**
    * Whether this player may be offered an opponent now (in the waiting room's fight, playing, the
    * page in sight): told the server as it changes, where the server waits for the word (an older
@@ -418,6 +464,8 @@ export class Online<S> {
   matchOver(winner = -1): void {
     if (this.state !== 'playing') return;
     if (0 <= this.wins && this.lastStart !== null) this.relay?.say({ do: 'result', match: this.lastStart.match, winner });
+    this.sendTaped(true);
+    this.taped = null;
     this.tail = this.session;
     this.session = null;
     this.state = 'result';
@@ -512,6 +560,7 @@ export class Online<S> {
     }
     if (this.theyWait && this.frames - this.theyWaitAt > WAIT_EVERY * 3) this.theyWait = false;
     if (this.state === 'lobby' && this.listing && this.frames % ROOMS_EVERY === 0) this.relay?.say({ do: 'rooms' });
+    if (this.state === 'lobby' && this.listingFights && this.frames % ROOMS_EVERY === 0) this.relay?.say({ do: 'fights' });
     if (this.frames % PING_EVERY === 0) this.ping();
     const session = this.session;
     this.holding = false;
@@ -549,6 +598,7 @@ export class Online<S> {
       }
     }
     const played = session.advance(word);
+    this.sendTaped(false);
     const state: SessionState = session.state;
     /* A wait this long over the direct channel: it may carry nothing any more, while the server's pings still come. */
     if (state === 'stalled' && session.stalling > RELAY_TOO_AFTER && this.wire?.direct === true) {
@@ -601,6 +651,7 @@ export class Online<S> {
         this.wins = Number.isInteger(event.wins) ? event.wins! : -1;
         this.ice = Array.isArray(event.ice) ? event.ice : [];
         this.serverWaits = event.availability === true;
+        this.serverTapes = event.spectate === true;
         if (this.state === 'connecting') this.state = 'lobby';
         return;
       case 'hosting':
@@ -626,6 +677,27 @@ export class Online<S> {
         return;
       case 'rooms':
         this.rooms = event.rooms;
+        return;
+      case 'fights':
+        this.fights = Array.isArray(event.fights) ? event.fights : [];
+        return;
+      case 'tape': {
+        if (this.state !== 'watching' || event.start === null || typeof event.start !== 'object') return;
+        const [first = '', second = ''] = event.names;
+        const [won = 0, theirs = 0] = event.wins;
+        this.tape = { code: event.code, match: event.match, start: event.start as Start, as: event.as, names: [first, second], wins: [won, theirs], words: [[...(event.words[0] ?? [])], [...(event.words[1] ?? [])]] };
+        return;
+      }
+      case 'words': {
+        const own = this.tape?.words[event.seat];
+        if (own !== undefined && event.from === own.length) own.push(...event.words);
+        return;
+      }
+      case 'watched':
+        if (this.state !== 'watching') return;
+        this.tape = null;
+        this.state = 'lobby';
+        this.ended = whyLine('no fight');
         return;
       case 'paired':
         this.opponentWins = Number.isInteger(event.peer.wins) ? event.peer.wins! : -1;
@@ -766,7 +838,16 @@ export class Online<S> {
     this.heardAt = this.frames;
     /* What the last match left in the transport is no word of this one's. */
     this.transport?.drain(() => {});
-    const { step, snapshotter } = this.options.game.begin(start, this.seat, this.playsAs);
+    const { step: played, snapshotter } = this.options.game.begin(start, this.seat, this.playsAs);
+    /* This side's own presses kept, each field's the first time it is played, for those watching (its own press never guessed); the host gives the match's start. */
+    const match = Number.isInteger(start.match) ? start.match : 0;
+    const taped = { match, words: [] as number[], sent: 0 };
+    this.taped = taped;
+    if (this.serverTapes && this.seat === 0) this.relay?.say({ do: 'tape', match, start, as: this.playsAs });
+    const step = (words: readonly [number, number], field: number): void => {
+      if (field === taped.words.length) taped.words.push(words[this.seat]);
+      played(words, field);
+    };
     this.session = new MatchSession({ step, snapshotter, transport: this.transport!, self: this.seat, inputDelay: [start.delay, start.delay], match: Number.isInteger(start.match) ? start.match : 0 });
     this.state = 'playing';
     this.ended = '';
@@ -825,7 +906,19 @@ export class Online<S> {
   }
 
   /** Whatever was paired or played ended for `why`; back in the lobby. */
+  /** This side's presses the server has not had yet, a batch at a time (`all`, every one left, as the match ends), where it keeps fights. */
+  private sendTaped(all: boolean): void {
+    const taped = this.taped;
+    if (taped === null || !this.serverTapes) return;
+    const left = taped.words.length - taped.sent;
+    if (left === 0 || (!all && left < WORDS_EVERY)) return;
+    this.relay?.say({ do: 'words', match: taped.match, from: taped.sent, words: taped.words.slice(taped.sent) });
+    taped.sent = taped.words.length;
+  }
+
   private stop(why: string): void {
+    this.sendTaped(true);
+    this.taped = null;
     const playing = this.session !== null;
     this.session = null;
     this.tail = null;

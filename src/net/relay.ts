@@ -34,7 +34,7 @@ export interface ListedRoom {
 /** What the server says. */
 export type ServerEvent =
   /** `wins`, this player's streak of wins, from a server that counts them (to a game that sent its id). */
-  | { readonly ev: 'welcome'; readonly name: string; readonly motd: string; readonly ice: readonly unknown[]; readonly players: number; readonly queued?: number; readonly rooms: number; readonly wins?: number; readonly availability?: boolean }
+  | { readonly ev: 'welcome'; readonly name: string; readonly motd: string; readonly ice: readonly unknown[]; readonly players: number; readonly queued?: number; readonly rooms: number; readonly wins?: number; readonly availability?: boolean; readonly spectate?: boolean }
   | { readonly ev: 'hosting'; readonly code: string; readonly listed: boolean }
   | { readonly ev: 'queued'; readonly waiting: number }
   | { readonly ev: 'offer'; readonly peer: { readonly name: string }; readonly seconds: number }
@@ -47,7 +47,21 @@ export type ServerEvent =
   | { readonly ev: 'pong'; readonly t: number; readonly players?: number; readonly queued?: number }
   /** This player's streak of wins and the other's (where their game keeps an id), as a match's result changes them. */
   | { readonly ev: 'wins'; readonly wins: number; readonly peer?: number }
+  /** The fights under way that can be watched, and one watched: its start and its presses so far, then each batch as it comes, and its end. */
+  | { readonly ev: 'fights'; readonly fights: readonly ListedFight[] }
+  | { readonly ev: 'tape'; readonly code: string; readonly match: number; readonly start: unknown; readonly as: string; readonly names: readonly string[]; readonly wins: readonly number[]; readonly words: readonly (readonly number[])[] }
+  | { readonly ev: 'words'; readonly seat: number; readonly from: number; readonly words: readonly number[] }
+  | { readonly ev: 'watched'; readonly why: string }
   | { readonly ev: 'error'; readonly why: string };
+
+/** A fight under way, as the server lists it: its room's code, its players' names and streaks, how many watch it, and whether this game can show it (a version it plays, both fighters' data). */
+export interface ListedFight {
+  readonly code: string;
+  readonly names: readonly string[];
+  readonly wins: readonly number[];
+  readonly watchers: number;
+  readonly watchable: boolean;
+}
 
 const OPEN = 1;
 /** Commands held while the socket opens, at most. */

@@ -362,7 +362,7 @@ export class ScenePresenter {
   }
 
   /** Over the fight, what its mode drew of its own (practice's menus and HUD): the printer's runs and its draws, in the fight's units. */
-  renderOverFight(game: GameState, width: number, height: number): void {
+  renderOverFight(game: Pick<GameState, 'printed' | 'drawn'>, width: number, height: number): void {
     if (game.printed.length === 0 && game.drawn.length === 0) return;
     this.fightLayer.begin(width, height);
     drawScene(game, this.fightLayer, this.drawnContext());

@@ -7,7 +7,10 @@ version: a game says its own and the older ones it also plays (0.7.1 plays 0.6.5
 its own), and both are told the newest the two share; an older server pairs the same versions alone.
 Two players are offered each other only while both games say they are in the waiting room's fight
 (a game of 0.7.1 or before always is); two who said no are kept apart 30 seconds, then offered each
-other again where neither has found another. It holds none of the game's data, and runs no game: each player
+other again where neither has found another. A fight whose two games (0.7.5 or later) tape it, each
+sending its own presses and the host the match's start, is listed under SPECTATE, and a player
+watching it is given its start and every press so far, then the presses as they come; the server
+keeps them, in memory, while the fight goes on. It holds none of the game's data, and runs no game: each player
 plays from their own disc on their own machine, and once the two reach each other directly (WebRTC)
 the pads' words go straight between them.
 

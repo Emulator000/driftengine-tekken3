@@ -262,7 +262,7 @@ function inputIcon(layer: ScreenLayer, controller: Controller, d: Extract<SceneD
 }
 
 /** The printer's runs and the scene's draws, together in the original's order. */
-export function drawScene(game: GameState, layer: ScreenLayer, context: DrawnContext): void {
+export function drawScene(game: Pick<GameState, 'printed' | 'drawn'>, layer: ScreenLayer, context: DrawnContext): void {
   /* Everything in the order it was drawn, the runs among the rest where they were printed. */
   const all: { layer: number; run?: PrintRun; drawn?: SceneDraw }[] = [];
   const runs = game.printed;

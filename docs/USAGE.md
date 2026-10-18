@@ -175,6 +175,7 @@ ONLINE MODE, after VS MODE in the mode menu, lists:
 | CREATE ROOM | Opens a room and shows its code, to give the other player; with ROOM set to LISTED it shows in the server's room list too |
 | JOIN ROOM | The room with the code you enter |
 | ROOM LIST | The rooms the server lists; those you cannot join (another version, or a host playing a fighter you lack) greyed, CANNOT JOIN |
+| SPECTATE | The fights under way on the server, each its two players (VS between them), their streaks of wins and how many watch it, seven at a time with a scrollbar beside them; a button watches one (one your game cannot show, of another version or with a fighter you lack, greyed: CANNOT WATCH) |
 | INPUT DELAY | The fields your presses wait before they count, 0 to 6 (2 by default): the larger of both players' is the match's |
 | ROOM | PRIVATE (by its code alone) or LISTED |
 | SIDE | The side your fighter is seen on in the match, LEFT (the default) or RIGHT, whichever the server seats you on |
@@ -193,6 +194,15 @@ Ctrl+X and Ctrl+V, the mouse placing the caret, dragging a selection and selecti
 double click. On a touch screen (a phone, the Android app) a text box of the page's own stands at
 the top while a text is entered, holding it: a tap opens the phone's keyboard on it, a long press
 pastes, and its Done (Enter) keeps the text.
+
+**Watching a fight.** A fight chosen under SPECTATE is shown from where it stands, whatever its
+round: your game plays it from its players' own presses, the fields before now at once, then live,
+a moment behind them, its music and sound as theirs, SPECTATING at the foot of the screen, in the
+middle. You watch only: start opens a menu over it,
+CONTINUE (or select) going back to it, LEAVE back to the fights' list. A rematch of the same two
+goes on in the same way; the fight over, the list again (THE FIGHT IS OVER). Only fights between
+two games of 0.7.5 or later, on a server of 0.7.5 or later, can be watched: each game sends the
+server its own presses for it.
 
 **The waiting room.** A quick match, a room created or a room joined starts with Practice's select:
 you choose your fighter (L1 and R1 choose your side, as SIDE does); your partner is drawn at

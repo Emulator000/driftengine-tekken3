@@ -22,7 +22,9 @@
  * each other directly (WebRTC) and use this only for what they cannot; the servers they ask for
  * that (STUN, TURN) are told them in the welcome. Each player's streak of matches won is kept here,
  * in memory, by the id their game sends at its hello: the games say who won each match, and leaving
- * one under way loses it.
+ * one under way loses it. A fight whose two games tape it (each sends its own presses, the host the
+ * match's start) can be watched: the fights under way are listed, and a player watching one is given
+ * its start and every press so far, then the presses as they come, until it ends.
  *
  *   node server/relay.mjs [--config file.json] [--host 0.0.0.0] [--port 8790] [--path /] ...
  *
@@ -50,6 +52,9 @@ const GAME = 'tekken3';
 const APART_SECONDS = 30;
 /** Seconds past an offer's own an answer is still taken: one said in time may reach the server late. */
 const ANSWER_GRACE = 2;
+/** The most presses a fight's record keeps for each side (fifteen minutes of fields), and the most fights listed. */
+const MOST_TAPE = 60 * 60 * 15;
+const MOST_FIGHTS = 200;
 /** Seconds a match's result waits for the second player's word on it, once the first has said it. */
 const RESULT_SECONDS = 15;
 /** Hours a player's streak of wins is kept after they were last on the server. */
@@ -349,7 +354,7 @@ export class Relay {
   }
 
   connected(socket, request) {
-    const client = { id: (this.ids += 1), address: addressOf(request), offer: null, socket, hello: false, name: 'PLAYER', build: '', plays: [], own: '', roster: 0n, fighter: -1, available: true, room: null, joining: null, seat: -1, queued: false, heard: this.now(), window: this.now(), count: 0, alive: true };
+    const client = { id: (this.ids += 1), address: addressOf(request), offer: null, socket, hello: false, name: 'PLAYER', build: '', plays: [], own: '', roster: 0n, fighter: -1, available: true, room: null, joining: null, watching: null, seat: -1, queued: false, heard: this.now(), window: this.now(), count: 0, alive: true };
     this.clients.add(client);
     socket.on('pong', () => (client.alive = true));
     socket.on('message', (data, binary) => this.message(client, data, binary));
@@ -401,6 +406,16 @@ export class Relay {
         client.available = command.available !== false;
         if (client.available) this.lookAgain();
         return;
+      case 'tape':
+        return this.tape(client, command);
+      case 'words':
+        return this.words(client, command);
+      case 'fights':
+        return this.listFights(client);
+      case 'watch':
+        return this.watch(client, command);
+      case 'unwatch':
+        return this.unwatch(client);
       case 'answer':
         return this.answer(client, command.yes === true);
       case 'unqueue':
@@ -440,7 +455,7 @@ export class Relay {
     client.roster = rosterOf(roster);
     this.log(`[relay] ${who(client)} connected (${this.clients.size} on the server)`);
     /* Its streak to a game that keeps an id, which so learns the server counts them. */
-    this.tell(client, { ev: 'welcome', name: this.config.name, motd: this.config.motd, ice: this.config.ice, protocol: PROTOCOL, availability: true, rooms: this.rooms.size, ...this.counts(), ...(client.own === '' ? {} : { wins: this.winsOf(client) }) });
+    this.tell(client, { ev: 'welcome', name: this.config.name, motd: this.config.motd, ice: this.config.ice, protocol: PROTOCOL, availability: true, spectate: true, rooms: this.rooms.size, ...this.counts(), ...(client.own === '' ? {} : { wins: this.winsOf(client) }) });
   }
 
   /** A player's streak of wins (0 for one whose game keeps no id). */
@@ -515,7 +530,7 @@ export class Relay {
     let code;
     do code = Array.from({ length: CODE_LENGTH }, () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]).join('');
     while (this.rooms.has(code));
-    const room = { code, listed: listed === true, title: cleanTitle(title) || `${client.name}'S ROOM`, pass: typeof pass === 'string' ? pass.slice(0, 32) : '', seats: [client, null], quick: false, offering: null, joining: null, match: null };
+    const room = { code, listed: listed === true, title: cleanTitle(title) || `${client.name}'S ROOM`, pass: typeof pass === 'string' ? pass.slice(0, 32) : '', seats: [client, null], quick: false, offering: null, joining: null, match: null, tape: null, watchers: new Set() };
     this.rooms.set(code, room);
     client.room = room;
     client.seat = 0;
@@ -619,7 +634,7 @@ export class Relay {
       let code;
       do code = Array.from({ length: CODE_LENGTH }, () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]).join('');
       while (this.rooms.has(code));
-      const room = { code, listed: false, title: '', pass: '', seats: [first, null], quick: true, offering: null, joining: null, match: null };
+      const room = { code, listed: false, title: '', pass: '', seats: [first, null], quick: true, offering: null, joining: null, match: null, tape: null, watchers: new Set() };
       this.rooms.set(code, room);
       first.room = room;
       first.seat = 0;
@@ -658,6 +673,63 @@ export class Relay {
     this.log(`[relay] ${room.quick ? 'quick match' : `room ${room.code}`}: ${who(first)} and ${who(second)}`);
   }
 
+  /** A match's start, from its host as it begins: the fight's record started afresh, and given anew to those watching it. */
+  tape(client, { match, start, as }) {
+    const room = client.room;
+    if (room === null || client.seat !== 0 || room.seats[1] === null || start === null || typeof start !== 'object') return;
+    room.tape = { match: Number(match) || 0, start, as: String(as ?? client.build).slice(0, 64), words: [[], []] };
+    for (const one of room.watchers) this.tellTape(one, room);
+  }
+
+  /** A player's own presses, of the match under way, for its fields `from` on: kept, and passed to those watching. */
+  words(client, { match, from, words }) {
+    const tape = client.room?.tape;
+    if (tape == null || client.seat < 0 || Number(match) !== tape.match || !Array.isArray(words)) return;
+    const own = tape.words[client.seat];
+    if (from !== own.length || MOST_TAPE < own.length + words.length) return;
+    const kept = words.map((word) => (Number.isInteger(word) ? word & 0xffff : 0));
+    own.push(...kept);
+    for (const one of client.room.watchers) this.tell(one, { ev: 'words', seat: client.seat, from, words: kept });
+  }
+
+  /** The fights under way whose two games tape them, as this player is told them: who plays, their streaks, whether this player's game can show it. */
+  listFights(client) {
+    const fights = [];
+    for (const room of this.rooms.values()) {
+      const tape = room.tape;
+      if (tape == null || room.seats[1] === null || tape.words[0].length === 0 || tape.words[1].length === 0) continue;
+      const [first, second] = room.seats;
+      const fighters = Array.isArray(tape.start.fighters) ? tape.start.fighters.map((fighter) => (Number.isInteger(fighter?.roster) ? fighter.roster : -1)) : [];
+      const watchable = client.plays.includes(tape.as) && fighters.every((fighter) => hasFighter(client, fighter));
+      fights.push({ code: room.code, names: [first.name, second.name], wins: [this.winsOf(first), this.winsOf(second)], watchers: room.watchers.size, watchable });
+      if (fights.length === MOST_FIGHTS) break;
+    }
+    this.tell(client, { ev: 'fights', fights });
+  }
+
+  /** Watching a fight: out of whatever this player waited in, its start and every press so far given, the presses after as they come. */
+  watch(client, { code }) {
+    const room = this.rooms.get(String(code ?? '').toUpperCase());
+    if (room === undefined || room.tape == null || room.seats[1] === null) return this.tell(client, { ev: 'refused', why: 'no fight' });
+    this.leave(client, 'left');
+    client.watching = room;
+    room.watchers.add(client);
+    this.tellTape(client, room);
+  }
+
+  tellTape(client, room) {
+    const tape = room.tape;
+    const [first, second] = room.seats;
+    this.tell(client, { ev: 'tape', code: room.code, match: tape.match, start: tape.start, as: tape.as, names: [first.name, second.name], wins: [this.winsOf(first), this.winsOf(second)], words: tape.words });
+  }
+
+  /** No longer watching. */
+  unwatch(client) {
+    if (client.watching === null) return;
+    client.watching.watchers.delete(client);
+    client.watching = null;
+  }
+
   list(client) {
     const rooms = [...this.rooms.values()]
       .filter((room) => room.listed && room.seats[1] === null && room.offering === null)
@@ -671,6 +743,7 @@ export class Relay {
    * and back in the lobby too; `apart`, a quick match's two kept apart a while (no rematch).
    */
   leave(client, why, apart = false) {
+    this.unwatch(client);
     if (client.queued) {
       this.queue.splice(this.queue.indexOf(client), 1);
       client.queued = false;
@@ -691,6 +764,12 @@ export class Relay {
       } else this.settleMatch(room);
     }
     this.rooms.delete(room.code);
+    /* Those watching its fight told it is over. */
+    for (const one of room.watchers) {
+      one.watching = null;
+      this.tell(one, { ev: 'watched', why: 'over' });
+    }
+    room.watchers.clear();
     /* The player waiting to join it told it is gone. */
     if (room.joining !== null) {
       this.tell(room.joining, { ev: 'refused', why: 'no room' });
