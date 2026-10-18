@@ -377,17 +377,23 @@ async function versusGameOf(load, left = []) {
   return { state: game.state, game, snapshotter, field: (words) => game.field(words), scene: () => game.state.scene, Snapshotter };
 }
 
-test("a Versus game of this release with the walls off and one of 0.6.5 pick their characters, fight and stay the same game over a bad link, the fields the walls added left out of this one's fingerprint", { skip, timeout: 300_000 }, async (t) => {
-  const older = releaseCode('0.6.5');
-  if (older === null) return t.skip('no git, or no tag v0.6.5, to play beside');
+/**
+ * This release's Versus game beside one of `version`'s own code, as two players' games: they pick
+ * their characters, fight and stay the same game over a bad link, the fields of the state that
+ * version lacks left out of this one's fingerprint; `check` sees both games as they start.
+ */
+async function besideRelease(t, version, check = () => {}) {
+  const older = releaseCode(version);
+  if (older === null) return t.skip(`no git, or no tag v${version}, to play beside`);
   try {
     const { ALSO_PLAYS } = await import('../src/net/online.ts');
-    const left = ALSO_PLAYS['0.6.5'];
+    const left = ALSO_PLAYS[version];
+    assert.ok(left !== undefined, `${version} is played`);
     const games = [await versusGameOf(older.load), await versusGameOf((file) => import(`../${file}`), left)];
-    assert.equal(games[1].state.world.options.walls, 0, "no walls on this release's side");
-    /* As they start: the same fingerprint with the walls' fields left out, another with them in. */
+    check(games);
+    /* As they start: the same fingerprint with those fields left out, another with them in. */
     assert.equal(games[1].snapshotter.digestNow(), games[0].snapshotter.digestNow(), 'the same game as they start');
-    assert.notEqual(new StateSnapshotter(games[1].state, ['remake', 'online']).digestNow(), games[0].snapshotter.digestNow(), "the walls' fields in, they differ");
+    assert.notEqual(new StateSnapshotter(games[1].state, ['remake', 'online']).digestNow(), games[0].snapshotter.digestNow(), "the fields it lacks in, they differ");
     const match = pair(games, { latencyMs: 45, jitterMs: 20, loss: 0.05, reorder: 0.05, reorderMs: 20 });
     run(match, 2400, versusScript);
     const [a, b] = match.sides;
@@ -403,4 +409,9 @@ test("a Versus game of this release with the walls off and one of 0.6.5 pick the
   } finally {
     older.remove();
   }
-});
+}
+
+test("a Versus game of this release with the walls off and one of 0.6.5 pick their characters, fight and stay the same game over a bad link, the fields the walls added left out of this one's fingerprint", { skip, timeout: 300_000 }, (t) =>
+  besideRelease(t, '0.6.5', (games) => assert.equal(games[1].state.world.options.walls, 0, "no walls on this release's side")));
+
+test("a Versus game of this release and one of 0.7.0 pick their characters, fight and stay the same game over a bad link, the field of the players who see the fight from the other side left out of this one's fingerprint", { skip, timeout: 300_000 }, (t) => besideRelease(t, '0.7.0'));

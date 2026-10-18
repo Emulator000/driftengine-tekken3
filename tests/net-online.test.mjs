@@ -37,7 +37,7 @@ const EVERY = Array.from({ length: 23 }, (_, i) => i);
 const DEFAULT_KEYS = [12, 12, 12, 12, 1, 3, 2, 0];
 const OWN_KEYS = [12, 12, 12, 12, 0, 1, 2, 3];
 
-function side(url, { version = '0.6.1', plays, roster = EVERY, fighter = 0, name = 'A', delay = 2, now, keys = DEFAULT_KEYS, id } = {}) {
+function side(url, { version = '0.6.1', plays, roster = EVERY, fighter = 0, name = 'A', delay = 2, now, keys = DEFAULT_KEYS, id, seen } = {}) {
   const chosen = { fighter };
   const log = { began: null, ended: null, begun: 0, waited: 0, optionsAs: null, steps: [] };
   const state = { at: [0, 0], mix: 1, fields: 0 };
@@ -75,7 +75,7 @@ function side(url, { version = '0.6.1', plays, roster = EVERY, fighter = 0, name
       log.waited += 1;
     },
   };
-  const online = new Online({ url: () => url, game, player: () => ({ name, delay, keys, fighter: { roster: chosen.fighter, costume: 0 }, ...(id === undefined ? {} : { id }) }), open: (at) => new WebSocket(at), peerConnection: null, now });
+  const online = new Online({ url: () => url, game, player: () => ({ name, delay, keys, fighter: { roster: chosen.fighter, costume: 0 }, ...(id === undefined ? {} : { id }), ...(seen === undefined ? {} : { side: seen }) }), open: (at) => new WebSocket(at), peerConnection: null, now });
   return { online, state, log, pick: (to) => (chosen.fighter = to) };
 }
 
@@ -130,10 +130,10 @@ test('a quick match pairs two players, the host starts it and both play the same
   }
 });
 
-/** Two sides paired by a quick match and playing, through `relay`'s `url`. */
-async function playing(url) {
-  const a = side(url, { name: 'Host' });
-  const b = side(url, { name: 'Guest' });
+/** Two sides paired by a quick match and playing, through `relay`'s `url`, the host's and the guest's options `host` and `guest`. */
+async function playing(url, host = {}, guest = {}) {
+  const a = side(url, { name: 'Host', ...host });
+  const b = side(url, { name: 'Guest', ...guest });
   a.online.quickMatch();
   await frames([a, b], () => a.online.state === 'queued');
   b.online.quickMatch();
@@ -222,7 +222,8 @@ test("a side holding for the other goes into the fight once the other has been n
   const { relay, url } = await server();
   const [a, b] = await playing(url);
   try {
-    /* The guest never says it is ready, and goes in as one told the host already is. */
+    /* The guest's hello as one before 0.7.6's, which may go in without a word; it never says it is ready, and goes in as one told the host already is. */
+    a.online.theirs = { ...a.online.theirs, saysReady: undefined };
     const send = b.online.relay.toPeer.bind(b.online.relay);
     b.online.relay.toPeer = (message) => (message.k === 'ready' ? undefined : send(message));
     const line = a.online.session.tick + 40;
@@ -235,6 +236,52 @@ test("a side holding for the other goes into the fight once the other has been n
   } finally {
     a.online.disconnect();
     b.online.disconnect();
+    await relay.close();
+  }
+});
+
+test("a side ready for the fight holds on its last loading field for as long as the other is heard loading, however slowly the other's frames come, where the other always says when it is ready: neither shows the fight before both can", async () => {
+  const { relay, url } = await server();
+  const [a, b] = await playing(url);
+  try {
+    assert.equal(a.online.theirs.saysReady, true, 'the guest says in its hello that it always says so');
+    const line = a.online.session.tick + 40;
+    /* Up to the line together; there the guest loads, its frames coming a sixtieth as often as the host's (a slow phone's), for well over the three seconds an older one is waited. */
+    await toTheFight(a, b, line, () => true, () => a.online.session.tick === line && b.online.session.tick === line, 600);
+    let frame = 0;
+    for (; frame < 1200; frame += 1) {
+      a.online.frame(0, true, a.online.session.tick === line);
+      if (frame % 60 === 0) b.online.frame(0, false, true);
+      await sleep(4);
+    }
+    assert.equal(a.online.state, 'playing', `the host still waits for the guest (${a.online.ended})`);
+    assert.equal(a.online.session.tick, line, 'on its last loading field, not in the fight without the other');
+    const done = await toTheFight(a, b, line, () => true, () => a.online.session.tick > line + 60 && b.online.session.tick > line + 60, 900);
+    assert.ok(done < 900, `both went on into the fight once the guest was ready (${a.online.session.tick} ${b.online.session.tick})`);
+    assert.equal(a.online.session.desync, null);
+  } finally {
+    a.online.disconnect();
+    b.online.disconnect();
+    await relay.close();
+  }
+});
+
+test("where both players ask to be seen on the same side, the start says which of them sees the fight from the other side; both seen as they asked, neither; with a game that says nothing of its side (one before 0.7.6), no word of it", async () => {
+  const { relay, url } = await server();
+  const sides = [];
+  try {
+    for (const [host, guest, turned] of [[0, 0, 2], [1, 1, 1], [0, 1, undefined], [1, 0, 3]]) {
+      const pair = await playing(url, { seen: host }, { seen: guest });
+      sides.push(...pair);
+      assert.equal(pair[0].log.began.start.turned, turned, `the host asking for side ${host}, the guest for ${guest}`);
+      assert.equal(pair[1].log.began.start.turned, turned, 'the guest begun by the same start');
+      for (const one of pair) one.online.disconnect();
+    }
+    const older = await playing(url, { seen: 0 }, {});
+    sides.push(...older);
+    assert.equal(older[0].log.began.start.turned, undefined, 'the guest said nothing of its side: no word of it');
+  } finally {
+    for (const one of sides) one.online.disconnect();
     await relay.close();
   }
 });

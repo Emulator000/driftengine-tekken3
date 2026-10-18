@@ -46,6 +46,19 @@ export interface Hello {
    * the match is then played by the old rule.
    */
   readonly draws?: boolean;
+  /**
+   * The side this player asks to see their fighter on (0 the left, 1 the right): where the seat the
+   * server gave them is the other, they see the fight from the other side. Absent from an older
+   * version's hello, whose moves into the screen go by the game's view whatever its player sees.
+   */
+  readonly side?: number;
+  /**
+   * Whether this side says it is ready on every fight's last loading field, and while it loads says
+   * so by the clock as well as by its frames: the other then holds for that word as long as it
+   * hears from it, however long the loading takes. Absent from an older version's hello: one that
+   * says nothing for a few seconds is taken to have gone into the fight.
+   */
+  readonly saysReady?: boolean;
 }
 
 /**
@@ -80,6 +93,8 @@ export interface Start {
   readonly match: number;
   /** 1 where both sides said they play a level match point as a draw (`Hello`'s `draws`): the match is played so. */
   readonly draws?: number;
+  /** A bit a seat (the host's 1): its player sees the fight from the other side (`Hello`'s `side`), its moves into the screen going by that view. Absent where none does or a side said nothing of its side. */
+  readonly turned?: number;
 }
 
 /** The game an online match plays, as the page gives it. */
@@ -113,6 +128,8 @@ export interface Player {
   readonly fighter: Fighter;
   /** The id this player's game keeps (hex digits), by which a server counts their streak of wins; none, no streak counted. */
   readonly id?: string;
+  /** The side this player asks to see their fighter on (0 the left, 1 the right). */
+  readonly side?: number;
 }
 
 export interface OnlineOptions<S> {
@@ -137,14 +154,20 @@ export interface OnlineOptions<S> {
  * players and those of every release back to that one play each other; one that changes any of
  * them sets it to its own version.
  */
-export const PLAYS_AS = '0.7.0';
+export const PLAYS_AS = '0.7.6';
 
 /**
  * The older versions this release also plays a match as, each with the fields of the state its own
- * matches have and that version's has not: a match as one is played without the remake's walls, and
- * those fields (all at rest) left out of its fingerprint.
+ * matches have and that version's has not: a match as one is played without what those fields
+ * hold (the remake's walls; the moves into the screen of a player who sees the fight from the
+ * other side going by that view), and those fields (all at rest) left out of its fingerprint.
  */
-export const ALSO_PLAYS: Readonly<Record<string, readonly string[]>> = { '0.6.5': ['wallHit', 'carried', 'splatted', 'splatHits', 'walls'] };
+export const ALSO_PLAYS: Readonly<Record<string, readonly string[]>> = { '0.7.0': ['depthTurned'], '0.6.5': ['wallHit', 'carried', 'splatted', 'splatHits', 'walls', 'depthTurned'] };
+
+/** Whether a match played as version `as` has `field` of the state: every one but those that version lacks. */
+export function playedWith(as: string, field: string): boolean {
+  return !(ALSO_PLAYS[as] ?? []).includes(field);
+}
 
 /** Fields of this side's own presses sent to the server at a time, for those watching the fight. */
 const WORDS_EVERY = 15;
@@ -154,6 +177,8 @@ const PING_EVERY = 30;
 const PING_WINDOW = 8;
 /** Frames between the heartbeats a side sends while it cannot play on (it is loading), and between its words that it is ready for the fight while it holds for the other. */
 const WAIT_EVERY = 15;
+/** Milliseconds at most between those heartbeats, however slowly a loading side's frames come. */
+const WAIT_MS = 250;
 /** Frames a side holding for the other may hear nothing from it before the other is taken for gone: five seconds. */
 const HOLD_SILENCE = 300;
 /** Frames a side holds for the other's word that it is ready while the other says nothing of loading: three seconds, past which the other went into the fight without saying so. */
@@ -309,6 +334,8 @@ export class Online<S> {
   /** The match this side last held for the other in, and the frame it began to. */
   private heldFor = -1;
   private heldSince = 0;
+  /** When this side last said it is loading. */
+  private waitSaidAt = -Infinity;
   /** The frame the other side was last heard from. */
   private heardAt = 0;
   private listing = false;
@@ -566,13 +593,17 @@ export class Online<S> {
     this.holding = false;
     if (session === null) return false;
     if (!ready) {
-      if (this.frames % WAIT_EVERY === 0) this.relay?.toPeer({ k: 'wait' });
+      if (this.frames % WAIT_EVERY === 0 || this.now - this.waitSaidAt >= WAIT_MS) {
+        this.relay?.toPeer({ k: 'wait' });
+        this.waitSaidAt = this.now;
+      }
       return false;
     }
     /*
      * The fight's last loading field, this side ready: it says so, and with another that starts each
      * fight together holds there until that one has said so too, both then going into the fight on
-     * the same field rather than one stopping in it for the other. One that has said nothing of
+     * the same field rather than one stopping in it for the other. One that always says so
+     * (`saysReady`) is held for while it is heard from; an older one that has said nothing of
      * loading for `READY_WAIT` went in without saying it was ready (as a 0.7.0 game that played a
      * match before the pairing does): this side goes in after it.
      */
@@ -591,7 +622,7 @@ export class Online<S> {
           this.finish('disconnected', 'left');
           return false;
         }
-        if (this.theyWait || this.frames - this.heldSince < READY_WAIT) {
+        if (this.theyWait || this.theirs.saysReady === true || this.frames - this.heldSince < READY_WAIT) {
           this.holding = true;
           return false;
         }
@@ -747,8 +778,8 @@ export class Online<S> {
     this.wire = switchableSocket(this.relay!.forInputs);
     const transport = new WebSocketTransport({ socket: this.wire.socket, self: seat });
     this.transport = (this.options.lagMs ?? 0) > 0 ? new LateTransport(transport, this.options.lagMs!, () => this.now) : transport;
-    const { name, delay, keys, fighter } = this.options.player();
-    const hello: Hello = { k: 'hello', version: this.playsAs, roster: rosterWord(this.options.game.roster), name, delay, keys, fighter, together: true, draws: true };
+    const { name, delay, keys, fighter, side } = this.options.player();
+    const hello: Hello = { k: 'hello', version: this.playsAs, roster: rosterWord(this.options.game.roster), name, delay, keys, fighter, together: true, draws: true, saysReady: true, ...(side === undefined ? {} : { side: side === 1 ? 1 : 0 }) };
     this.relay!.toPeer(hello);
   }
 
@@ -828,7 +859,9 @@ export class Online<S> {
     const { keyChoices, defaultKeys } = this.options.game;
     const keys = (k: readonly number[]): readonly number[] => (Array.isArray(k) && k.length === 8 && k.every((n) => Number.isInteger(n) && 0 <= n && n < keyChoices) ? [...k] : [...defaultKeys]);
     const fighter = (f: Fighter | undefined): Fighter => ({ roster: Number.isInteger(f?.roster) ? f!.roster : 0, costume: Number.isInteger(f?.costume) ? f!.costume & 3 : 0 });
-    const start: Start = { k: 'start', options: this.options.game.options(this.playsAs), delay, keys: [keys(ours.keys), keys(theirs.keys)], fighters: [fighter(ours.fighter), fighter(theirs.fighter)], match: 1, ...(theirs.draws === true ? { draws: 1 } : {}) };
+    /* A player whose seat is not the side they asked for sees the fight from the other side, where both said which they asked for. */
+    const turned = ours.side === undefined || (theirs.side !== 0 && theirs.side !== 1) ? 0 : (ours.side === 1 ? 1 : 0) | (theirs.side === 1 ? 0 : 2);
+    const start: Start = { k: 'start', options: this.options.game.options(this.playsAs), delay, keys: [keys(ours.keys), keys(theirs.keys)], fighters: [fighter(ours.fighter), fighter(theirs.fighter)], match: 1, ...(theirs.draws === true ? { draws: 1 } : {}), ...(turned !== 0 ? { turned } : {}) };
     this.starting = { start, at: this.now + GREETING_HOLD_MS };
   }
 

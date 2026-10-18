@@ -3,8 +3,9 @@
 ONLINE MODE's players meet through this server. It pairs two players (a quick match, a room by its
 code, the room list) and passes their messages between them: the pads' words, the match's setup and
 the direct connection's signalling. Two players are paired where their games play a match as the same
-version: a game says its own and the older ones it also plays (0.7.1 plays 0.6.5's matches as well as
-its own), and both are told the newest the two share; an older server pairs the same versions alone.
+version: a game says its own and the older ones it also plays (0.7.6 plays 0.7.0's and 0.6.5's
+matches as well as its own), and both are told the newest the two share; an older server pairs the
+same versions alone.
 Two players are offered each other only while both games say they are in the waiting room's fight
 (a game of 0.7.1 or before always is); two who said no are kept apart 30 seconds, then offered each
 other again where neither has found another. A fight whose two games (0.7.5 or later) tape it, each

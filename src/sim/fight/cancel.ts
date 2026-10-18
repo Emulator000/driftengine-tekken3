@@ -171,6 +171,13 @@ function classifyAttack(state: FightState, f: Fighter, opponent: Fighter): void 
   state.attackClasses[f.slot] = kind;
 }
 
+/**
+ * The side of the opponent a fighter stands on as its player sees the fight: the other one where
+ * that player sees it from the other side, so the moves the side picks between, one into the
+ * screen and one out of it, go by that player's screen.
+ */
+const sideSeen = (state: FightState, f: Fighter): number => (f.side !== 0 ? 1 : 0) ^ ((state.match.depthTurned >> f.slot) & 1);
+
 /** An entry's extra test, 1 to 0x44, with its parameter. */
 export function cancelTest(state: FightState, data: FightData, entry: Cancel, f: Fighter, opponent: Fighter): boolean {
   const test = entry.test;
@@ -268,13 +275,13 @@ export function cancelTest(state: FightState, data: FightData, entry: Cancel, f:
     case 0x3d:
       return f.health === 0;
     case 0x3e:
-      return f.side === 0;
+      return sideSeen(state, f) === 0;
     case 0x3f:
-      return f.side !== 0;
+      return sideSeen(state, f) !== 0;
     case 0x40:
-      return f.side === 0 && f.facingOffSize >= 0x4001;
+      return sideSeen(state, f) === 0 && f.facingOffSize >= 0x4001;
     case 0x41:
-      return f.side !== 0 && f.facingOffSize >= 0x4001;
+      return sideSeen(state, f) !== 0 && f.facingOffSize >= 0x4001;
     case 0x42:
       return f.launched === 0 && f.health !== 0;
     case 0x43:

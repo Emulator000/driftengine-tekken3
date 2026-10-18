@@ -535,12 +535,15 @@ export async function playGame(): Promise<void> {
         if (shows !== null) mirror.on = online?.mirroredSide === true && shows === 'fight';
         placeDisplay();
         if (shows === null) {
+          online?.drawn(false);
           presenter.hold(width, height, now);
           return;
         }
         /* A cut: the frame before it dissolves into this one (from black after a 3D frame). */
         if (shown !== null && shows !== shown) presenter.cut(now, shown.startsWith('scene'));
         shown = shows;
+        /* The waiting room's fight counted as on the screen once no dissolve is over it. */
+        online?.drawn(shows === 'fight' && !presenter.moving);
         if (records) {
           fightFor(data!).view.render(state.world, aspect, undefined, () => presenter.render(state, width, height, true, now), true);
           return;

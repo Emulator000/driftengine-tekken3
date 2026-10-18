@@ -214,7 +214,9 @@ ONLINE MODE's page. The free camera is off in online play.
 **An opponent found.** Every pairing asks both of you: the quick match's, and a room's host with
 the player joining it, and only while both of you are in the waiting room's fight, playing: not on
 its select, not paused, the page in sight (with a server from 0.7.2; a player of an older version
-is asked whenever they wait). The fight holds under a card with their name and a bar running down the
+is asked whenever they wait), and from 0.7.6 with the fight on your screen a second already, never
+while the versus screen before it, or the dissolve from it, still shows, however long your device
+takes to show the fight. The fight holds under a card with their name and a bar running down the
 seconds the server gives (10 by default): start says yes, select no, the two buttons the waiting
 fight does not fight with (a press counts once the card has settled, half a second, as the two
 answers show). Both yes, a card names the other player a moment and the match starts. In the
@@ -230,7 +232,11 @@ game powers on with: the host's options and earned characters, each player's own
 you on the other side than SIDE asks (both of you asking for the same one), you see the fight from
 the other side of the stage, the game's camera turned half round the fighters as Tekken's own online play does
 it: your fighter and its plate on your side, the stage's far side behind them, nothing drawn
-mirrored, the stick's left and right with the picture. A level round (a double knockout, or the time
+mirrored, the stick's left and right with the picture. Between two games of 0.7.6 or later, the
+moves into and out of the screen go by your view too: a sidestep up (a tap up, or L2) goes into
+your screen and a sidestep down out of it, as do the moves a character makes into the screen or out
+of it, while up held still jumps and down held still crouches; with an older game they go by the
+other side's view, as the game's camera sees the fight. A level round (a double knockout, or the time
 up with your health alike) gives each of you a round; where that brings both of you to the rounds
 that win the match, the match is a draw (DRAW GAME), between two games of 0.7.4 or later (with an
 older one, the game's own tie-break gives it to the host). Each player's name shows under their
@@ -238,9 +244,11 @@ fighter's, on a dark tag of its own, and their streak of wins, where the server 
 foot of the screen under their side as Versus shows a streak (WIN:1, WINS:3). The versus screen counts the matches on your pairing: FIGHT 1, then FIGHT 2 at the first rematch
 and so on (a 0.6.5 game shows FIGHT 1 at each). Both of you stay on the versus screen until both
 games have the fight loaded and ready, and go into it together; the one ready first shows WAITING FOR
-the other, or that it IS LOADING (with a 0.6.5 or 0.6.6 game, which does not say when it is ready,
-the one ready first goes on as before; with one that says nothing of loading or of being ready for
-three seconds, it goes in after it). A round's end (its replay, the win poses) is cut short only
+the other, or that it IS LOADING. Between two games of 0.7.6 or later it waits however long the other
+takes to load, so long as it hears from it (a game loading says so a few times a second, however
+slowly its frames come); with a 0.6.5 or 0.6.6 game, which does not say when it is ready, the one
+ready first goes on as before, and with one of 0.6.7 to 0.7.5 that says nothing of loading or of
+being ready for three seconds, it goes in after it. A round's end (its replay, the win poses) is cut short only
 once both of you have pressed to skip it; until then it plays on, for both.
 
 What the other player presses is guessed until it arrives, and a guess put right rolls the game
@@ -279,10 +287,11 @@ of the match. `?netlag=MS` holds each of the
 other side's presses that many milliseconds more, to try a match over a slower link.
 
 Two players are paired, and a room is joined, only where they can play each other: a version both
-games play a match as, and each one's fighter one whose data the other has. 0.7.1 plays its own
-matches with the 0.7.0 and later players, and those of 0.6.5, 0.6.6 and 0.6.7 with theirs, without
-the walls (whatever REACHABLE WALLS says; the line over the picture says AS 0.6.5, NO WALLS); the
-server pairs them so from its 0.7.1 on. A player without Kazuya, say, is
+games play a match as, and each one's fighter one whose data the other has. 0.7.6 plays its own
+matches with the 0.7.6 and later players, those of 0.7.0 with the 0.7.0 to 0.7.5 players (the line
+over the picture says AS 0.7.0), and those of 0.6.5, 0.6.6 and 0.6.7 with theirs, without the walls
+(whatever REACHABLE WALLS says; the line over the picture says AS 0.6.5, NO WALLS); the server pairs
+them so from its 0.7.1 on. A player without Kazuya, say, is
 paired with one who has him unless either of you chose him, and a room whose host plays him shows
 greyed in the room list. ONLINE MODE says why a pairing cannot be made (THE OTHER PLAYER HAS
 VERSION 0.6.0, YOU LACK KAZUYA, THE OTHER PLAYER LACKS KAZUYA). The rest of the game's data may

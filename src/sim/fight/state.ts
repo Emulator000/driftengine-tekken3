@@ -1216,6 +1216,8 @@ export interface FightState {
     /** An online match: a scene cut short only once both players ask (`skipAsks`, a bit a side, kept till both have). */
     online: number;
     skipAsks: number;
+    /** A bit a pad: its player sees the fight from the other side, its moves into and out of the screen going by that view. */
+    depthTurned: number;
     winner: number;
     challenger: number;
     goesOn: number;

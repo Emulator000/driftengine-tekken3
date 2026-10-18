@@ -8,7 +8,7 @@
  * the keyboard and the mouse edit it as a text field (`text-field.ts`), the clipboard with them;
  * while a match is played, a line over the picture says how its connection goes.
  */
-import { ALSO_PLAYS, Online, PLAYS_AS, REMATCH_MS, type Start } from '../net/online.ts';
+import { ALSO_PLAYS, Online, PLAYS_AS, REMATCH_MS, playedWith, type Start } from '../net/online.ts';
 import { serverAddresses } from '../net/address.ts';
 import { StateSnapshotter } from '../net/snapshot.ts';
 import { ROLLBACK_DEPTH } from '../net/session.ts';
@@ -24,6 +24,7 @@ import { printRuns } from '../sim/game/printer.ts';
 import { Scene, type GameState, type SceneDraw } from '../sim/game/state.ts';
 import { SCREEN } from '../present/scenes/screen.ts';
 import { canvas, params } from './page.ts';
+import { Available } from './available.ts';
 import { freeCameraBarred } from './free-camera.ts';
 import { MatchJournal, type FieldSound } from './match-journal.ts';
 import { addressBounds, ClipboardBridge, codeBounds, copied, edit, insert, nameBounds, placeCaret, type Bounds, type Field } from './text-field.ts';
@@ -130,6 +131,7 @@ export class OnlinePlay {
   private pastFields = 0;
   /** What the waiting room waits for again once a match is over (a quick match, a room), or null (ONLINE MODE's page then). */
   private resume: string | null = null;
+  private readonly available = new Available();
   /** The last match's result as the card says it, and the matches this player and the other have won since they were paired. */
   private result: readonly [string, string] = ['', ''];
   private readonly score = [0, 0];
@@ -155,7 +157,7 @@ export class OnlinePlay {
     Object.assign(online, { delay: this.kept.delay, listed: this.kept.listed, side: this.kept.side, name: this.kept.name, server: params.get('server') ?? this.kept.server });
     this.online = new Online({
       url: () => serverUrls(this.game.state.online.server),
-      player: () => ({ name: this.kept.name, delay: this.kept.delay, keys: this.localKeys(), fighter: this.localFighter(), id: this.kept.id }),
+      player: () => ({ name: this.kept.name, delay: this.kept.delay, keys: this.localKeys(), fighter: this.localFighter(), id: this.kept.id, side: this.kept.side }),
       lagMs: Math.max(0, Number(params.get('netlag') ?? 0) || 0),
       game: {
         version: PLAYS_AS,
@@ -306,13 +308,12 @@ export class OnlinePlay {
     return [...this.game.state.options.keys[0]!];
   }
 
-  /** The host's options for the match, its stage (the home stage of a fighter both have, at random), and its walls (REACHABLE WALLS's for an online match). */
-  /** The host's options for a match played as version `as`: the walls where it is this release's own, none (nor a word of them) against an older one. */
+  /** The host's options for a match played as version `as`, its stage (the home stage of a fighter both have, at random), and its walls (REACHABLE WALLS's for an online match) where that version has them, none (nor a word of them) where it has not. */
   private decided(as: string): Record<string, unknown> {
     const { options, records } = this.game.state;
     const homes = this.hooks.roster.filter((fighter) => fighter <= LAST_STAGE_ROSTER);
     const stage = (homes[crypto.getRandomValues(new Uint32Array(1))[0]! % Math.max(1, homes.length)] ?? 0) * 4;
-    const walls = as === PLAYS_AS ? { walls: wallsFor(MenuMode.VERSUS, this.game.state.remake.settings.walls, true) } : {};
+    const walls = playedWith(as, 'walls') ? { walls: wallsFor(MenuMode.VERSUS, this.game.state.remake.settings.walls, true) } : {};
     return { ...Object.fromEntries(DECIDED.map((key) => [key, options[key]])), earnedRoster: records.earnedRoster, extraCostumes: records.extraCostumes, stage, ...walls };
   }
 
@@ -403,10 +404,14 @@ export class OnlinePlay {
     return online.editing === Editing.NAME ? { label: 'YOUR NAME', address: false } : { label: 'SERVER ADDRESS', address: true };
   }
 
-  /** Whether this player is in the waiting room's fight, playing (not loading it, not in Practice's menu, not choosing a character), the page in sight: offered an opponent only then. */
+  /** Whether this player is in the waiting room's fight, playing and shown it a moment (`Available`), the page in sight: offered an opponent only then. */
   private inWaitingFight(): boolean {
-    const state = this.game.state;
-    return state.online.warming === 2 && state.scene === Scene.FIGHT && state.step === FightStep.FIGHTING && state.practice.paused === 0 && state.world.pause.paused === 0 && document.visibilityState === 'visible';
+    return this.available.now(this.game.state, document.visibilityState === 'visible');
+  }
+
+  /** A frame drawn: whether it showed the fight, settled. */
+  drawn(fight: boolean): void {
+    this.available.drawn(fight, performance.now());
   }
 
   /** The page's lines: how the connection goes, in the game's words. */
@@ -551,8 +556,10 @@ export class OnlinePlay {
     state.world.match.online = 1;
     /* A level round that brings both to the rounds that win the match a draw, where both games agreed it, rather than the host's by the game's tie-break. */
     if (start.draws === 1) state.world.match.drawRule = 1;
-    /* The remake's walls as the host's REACHABLE WALLS has them for an online match; none in one played as an older version. */
-    state.world.options.walls = as === PLAYS_AS && start.options.walls === 1 ? 1 : 0;
+    /* The remake's walls as the host's REACHABLE WALLS has them for an online match; none in one played as a version without them. */
+    state.world.options.walls = playedWith(as, 'walls') && start.options.walls === 1 ? 1 : 0;
+    /* The players who see the fight from the other side, their moves into the screen going by that view, where the version played has it. */
+    state.world.match.depthTurned = playedWith(as, 'depthTurned') && Number.isInteger(start.turned) ? start.turned! & 3 : 0;
     state.run.onlineStage = typeof start.options.stage === 'number' ? start.options.stage : -1;
     start.fighters.forEach((fighter, n) => {
       state.entrants.roster[n] = fighter.roster;
@@ -602,6 +609,8 @@ export class OnlinePlay {
     this.local = null;
     this.match = null;
     local.snapshotter.restore(local.slot);
+    /* The waiting room's fight back, counted as shown afresh: no offer before it has been on the screen a moment. */
+    this.available.drawn(false, performance.now());
     /* The local fight's own data with it: the match's movesets are not its fighters'. */
     this.game.fightData = local.match;
     stopMusic(this.game.state.world);
@@ -755,7 +764,7 @@ export class OnlinePlay {
       return;
     }
     const session = this.online.session!;
-    const older = this.online.playsAs !== PLAYS_AS ? `   AS ${this.online.playsAs}, NO WALLS` : '';
+    const older = this.online.playsAs !== PLAYS_AS ? `   AS ${this.online.playsAs}${playedWith(this.online.playsAs, 'walls') ? '' : ', NO WALLS'}` : '';
     const lines = [`VS ${this.online.opponent}   ${Math.round(quality.roundTripMs)} MS   DELAY ${quality.inputDelay}   ROLLBACKS ${quality.rollbacks}${quality.deepest > 0 ? ` (UP TO ${quality.deepest})` : ''}   ${this.online.direct ? 'DIRECT' : 'VIA SERVER'}${older}`];
     if (this.online.theyWait) lines.push(`${this.online.opponent} IS LOADING`);
     else if (this.online.holding || (session.state === 'stalled' && session.stalling > 20)) lines.push(`WAITING FOR ${this.online.opponent}`);
