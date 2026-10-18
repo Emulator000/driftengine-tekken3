@@ -52,6 +52,11 @@ export function resetFighter(state: FightState, data: FightData, f: Fighter, opp
   f.targetDistance = FAR;
   f.measuredRoot[0] = f.position[0]!;
   f.measuredRoot[1] = f.position[2]!;
+  /* The remake's walls: no splat carried from the last round's end. */
+  f.wallHit = 0;
+  f.carried = 0;
+  f.splatted = 0;
+  f.splatHits = 0;
   startRound(state, data, f, opponent);
   f.facing = facing;
   f.position[0] = x;

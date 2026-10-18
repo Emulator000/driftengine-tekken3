@@ -17,7 +17,7 @@ import type { GameState, RemakeSettings } from './state.ts';
 export const REMAKE_PAGE = 0x10;
 
 /** Each setting's values: 0 is the default, but for the look's and the brightness's, the middle of their three. */
-export const REMAKE_DEFAULTS: Readonly<RemakeSettings> = { textures: 0, models: 0, stages: 0, fighters: 0, cloth: 0, picture: 0, frameRate: 0, touchPad: 0, remaster: 0, look: 1, brightness: 1, floorFade: 0, crt: 0 };
+export const REMAKE_DEFAULTS: Readonly<RemakeSettings> = { textures: 0, models: 0, stages: 0, fighters: 0, cloth: 0, picture: 0, frameRate: 0, touchPad: 0, remaster: 0, look: 1, brightness: 1, floorFade: 0, walls: 0, crt: 0 };
 
 /** The settings a restart applies: all but the frame rate's, the remaster's look, brightness and floors, and the CRT filter's. */
 export const RESTARTED: readonly (keyof RemakeSettings)[] = ['textures', 'models', 'stages', 'fighters', 'cloth', 'picture', 'touchPad', 'remaster'];
@@ -27,14 +27,14 @@ const setting = (value: keyof RemakeSettings, label: string, names: readonly str
 /** The first page's line that opens this one. */
 export const REMAKE_ITEM: OptionsItem = { value: 'page', label: 'REMAKE OPTION', names: [], sideways: 0, count: 0, button: 1, set: REMAKE_PAGE, draw: 1, modes: 0 };
 
-/** The page: its title on the screen's middle, its list as GAME OPTION's is laid (closer while the remaster's lines are listed), back to the first page. */
+/** The page: its title on the screen's middle, its list closer than GAME OPTION's (closer still while the remaster's lines are listed), back to the first page. */
 export const REMAKE_OPTIONS: OptionsPage = {
   title: 'REMAKE OPTION',
   titleX: 100,
   titleY: 40,
   listX: 20,
   listY: 84,
-  step: 24,
+  step: 22,
   width: 324,
   cancel: 0,
   items: [
@@ -50,6 +50,7 @@ export const REMAKE_OPTIONS: OptionsPage = {
     setting('look', 'LOOK', ['LIGHT', 'NORMAL', 'STRONG'], 1),
     setting('brightness', 'BRIGHTNESS', ['LOW', 'NORMAL', 'HIGH'], 1),
     setting('floorFade', 'FLOOR FADE', ['ON', 'OFF']),
+    setting('walls', 'REACHABLE WALLS', ['ONLINE ONLY', 'ON', 'OFF']),
     setting('crt', 'CRT FILTER', ['OFF', 'ON']),
     { value: 'page', label: 'EXIT', names: [], sideways: 0, count: 0, button: 1, set: 0, draw: 1, modes: 0 },
   ],
@@ -58,8 +59,8 @@ export const REMAKE_OPTIONS: OptionsPage = {
 /** The remaster's own lines, listed while it is on. */
 const REMASTER_ONLY: readonly string[] = ['look', 'brightness', 'floorFade'];
 
-/** The page while the remaster is off: its lines not listed, the rest as GAME OPTION's are spaced. */
-const WITHOUT_REMASTER: OptionsPage = { ...REMAKE_OPTIONS, listY: 100, step: 28, items: REMAKE_OPTIONS.items.filter((item) => !REMASTER_ONLY.includes(item.value)) };
+/** The page while the remaster is off: its lines not listed, the rest spaced a little wider. */
+const WITHOUT_REMASTER: OptionsPage = { ...REMAKE_OPTIONS, listY: 100, step: 26, items: REMAKE_OPTIONS.items.filter((item) => !REMASTER_ONLY.includes(item.value)) };
 
 /** The page as it is listed: the remaster's lines only while it is on. */
 export const remakeOptions = (game: GameState): OptionsPage => (game.remake.settings.remaster === 1 ? REMAKE_OPTIONS : WITHOUT_REMASTER);

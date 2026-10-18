@@ -225,6 +225,10 @@ export function blankFighter(): Fighter {
     travel: new Array<number>(3).fill(0),
     handTravel: new Array<number>(3).fill(0),
     hitTravel: new Array<number>(3).fill(0),
+    wallHit: 0,
+    carried: 0,
+    splatted: 0,
+    splatHits: 0,
     push: new Array<number>(3).fill(0),
     health: 0,
     maxHealth: 0,
@@ -477,6 +481,7 @@ export function blankFightState(): FightState {
         roundTime: 0,
         rounds: 0,
         handicaps: new Array<number>(2).fill(0),
+        walls: 0,
       },
       stageSong: 0,
       stepRemainders: {

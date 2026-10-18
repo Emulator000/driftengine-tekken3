@@ -106,9 +106,8 @@ export async function pageRenderer(): Promise<{ renderer: RendererApi; backend: 
    * reflections march through); and a look of its own: its colour graded (`grade.ts`), the lens's
    * corners a little darker, a faint colour fringe toward the picture's edges, and its lights
    * blooming a little more. On WebGPU the frames are put together by the engine's reconstruction at
-   * its finest, which follows each fighter's own motion, so a fighter that moves stays clean where
-   * the temporal resolve, which knows only the camera's, left its pixels noisy; on WebGL2, which
-   * has no reconstruction, the temporal resolve.
+   * its finest; on WebGL2, which has no reconstruction, by the temporal resolve. Both follow each
+   * fighter's own motion (its mover and its posed skin), so a fighter that moves stays clean.
    */
   const chosen = fightQuality(quality);
   const remaster: RenderQualityOptions = {

@@ -15,7 +15,7 @@ const KEY = 'tekken3.settings';
 /** Where the frame rate's switch was kept before the settings were. */
 const FRAME_RATE_KEY = 'tekken3.fps';
 /** Each setting's values. */
-const COUNTS: Readonly<RemakeSettings> = { textures: 2, models: 3, stages: 2, fighters: 2, cloth: 2, picture: 4, frameRate: 2, touchPad: 3, remaster: 2, look: 3, brightness: 3, floorFade: 2, crt: 2 };
+const COUNTS: Readonly<RemakeSettings> = { textures: 2, models: 3, stages: 2, fighters: 2, cloth: 2, picture: 4, frameRate: 2, touchPad: 3, remaster: 2, look: 3, brightness: 3, floorFade: 2, walls: 3, crt: 2 };
 
 /** The settings kept in `store`, each that is missing or out of its range at its default. */
 export function readSettings(store: KeyValueStore = defaultStore()): RemakeSettings {

@@ -8,6 +8,7 @@
 import { angle4096, cosine, sine } from '../math/angles.ts';
 import { viewMatrix } from './camera.ts';
 import type { FightData, FightState } from './state.ts';
+import { wallsOn } from './walls.ts';
 
 /** The view from the drawn camera and, while the view looks above the horizon, the ground shown. */
 export function layArena(state: FightState, data: FightData): void {
@@ -47,7 +48,7 @@ function sceneryTurn(state: FightState, data: Pick<FightData, 'math'>): number {
   return (step < 0xab ? -step : -0xaa) & 0xfff;
 }
 
-/** The fighters' roots kept for the last four frames, and the scenery's yaw stepped. */
+/** The fighters' roots kept for the last four frames, and the scenery's yaw stepped (held unturned while the remake's walls stand, the stage fixed in place). */
 export function stepScenery(state: FightState, data: Pick<FightData, 'math'>): void {
   if (state.nothingDrawn !== 0) return;
   const scenery = state.scenery;
@@ -58,5 +59,6 @@ export function stepScenery(state: FightState, data: Pick<FightData, 'math'>): v
     scenery.roots[k]![i]!.x = root[0]!;
     scenery.roots[k]![i]!.z = root[2]!;
   });
-  scenery.yaw = (scenery.yaw + sceneryTurn(state, data)) & 0xfff;
+  const turn = sceneryTurn(state, data);
+  if (!wallsOn(state)) scenery.yaw = (scenery.yaw + turn) & 0xfff;
 }

@@ -191,6 +191,15 @@ the first, hidden while a gamepad is connected. Alt+Enter takes the game to full
 once; [docs/USAGE.md](docs/USAGE.md) lists every option (fighters, stage, the computer's sides,
 the endings, the original textures, the viewer) and every command.
 
+### Reachable walls
+
+The original's stages follow the fighters, so nobody ever reaches a wall. With REACHABLE WALLS (in
+REMAKE OPTION; online matches have them unless the host turns them off) the stage stands still and
+its walls can be reached: back a fighter into one and it is pinned there until it gets out (block,
+duck, sidestep, a throw that swaps sides); knock it into one hard and it splats against it, open to
+a short combo. Tekken Ball, Tekken Force and the attract demo keep the original's stages.
+`?quick&walls=on` tries it at once.
+
 ### Online
 
 ONLINE MODE, in the mode menu after VS MODE, plays a Versus fight against someone on another
@@ -204,9 +213,10 @@ go between the two games; each runs the whole match itself, at once from your ow
 put right as it arrives (rollback), straight between the two machines where they can reach each
 other and through the server where not. Both of you need versions that play a match alike (a
 release that changes only how the game is drawn or sounds plays the one before it: 0.6.5, 0.6.6 and
-0.6.7 play each other), and each the data of the fighter the other chose: a player with Kazuya is paired
-with one without him as long as neither of you plays him. The server counts each player's streak of
-wins (WINS, by your name and in the waiting room's corner), in its memory alone.
+0.6.7 play each other; 0.7.0, whose walls change how a match plays, plays 0.7.0), and each the
+data of the fighter the other chose: a player with Kazuya is paired with one without him as long
+as neither of you plays him. The server counts each player's streak of wins (WINS, by your name
+and in the waiting room's corner), in its memory alone.
 
 `npm run dev` and `npm run dev:lan` run the server beside the page, so two players on your home
 network (`npm run dev:lan`) play with nothing else to run. Over the internet, one of you runs the
@@ -371,8 +381,9 @@ field. What is done and what is not yet:
 | Windows, macOS, Linux | Done | Developed and tested on Linux |
 | Kazuya from Tekken 4 | Done | Optional, from your own Tekken 4 disc |
 | The arcade release's stages | Done | Optional, from a dump of your own arcade board: the 14 stages it has, their backgrounds as the board lays them, their floors as far as the board's and drawn under the stage as it draws them, darkening toward their edges as the disc's do, the carousel, the helicopter and the torches; `?stages=psx` draws the disc's |
-| The arcade release's fighters | Done | Optional, from the same dump: the 31 models it has (where it has a stand-in, Julia's second costume, the disc's is drawn), their seams' own weights, their accessories each on its own joint and swung on the board's own springs; `?fighters=psx` draws the disc's. Their coats' panels and the tails they hang from the hips are kept clear of the legs (`?cloth=original` draws them as the board does). They do not close their eyes, as the board has no closed eyes to draw |
-| The remake's settings in the game | Done | REMAKE OPTION in the Options: the textures, the models, the arcade's stages and fighters, the cloth, the picture, the frame rate, the touch pad and a CRT filter (off unless chosen), kept on the device |
+| The arcade release's fighters | Done | Optional, from the same dump: the 31 models it has (where it has a stand-in, Julia's second costume, the disc's is drawn), their seams' own weights, their accessories each on its own joint and swung on the board's own springs; `?fighters=psx` draws the disc's. Their coats' panels and the tails they hang from the hips are kept clear of the legs, as are the tails the disc's models hang from the hips (Hwoarang's belt, in the attract intros too) (`?cloth=original` draws them as the board and the console do). They do not close their eyes, as the board has no closed eyes to draw |
+| The remake's settings in the game | Done | REMAKE OPTION in the Options: the textures, the models, the arcade's stages and fighters, the cloth, the picture, the frame rate, the touch pad, reachable walls (online only unless chosen) and a CRT filter (off unless chosen), kept on the device |
+| Reachable walls | Done | The stage fixed in place with walls 9.6 m from its middle, the stage drawn larger to meet them; fighters pinned at a wall, a push into it moving the pusher, wall splats (a crumple against it on the ground, a drop down it in the air), once a combo, the third hit after making the fighter fall; the camera kept inside them, and the stage between left out where it stands past one (the fighters along it) or high over them (a knockout's shot from above). In online matches unless the host turns them off; offline where chosen |
 | A stop shown as the game's own | Done | A window with what went wrong and what was playing, its details to copy into an issue |
 | A free camera and a frame-rate meter | Done | `P` holds a fight and flies a camera through it; `F` shows the frame rate |
 | Discs of other regions (PAL, Japanese) | Not yet | The USA disc (SLUS-00402) alone is read |

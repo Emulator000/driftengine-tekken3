@@ -25,6 +25,7 @@ import { libraryRoot, tableRoot } from '../../sim/math/roots.ts';
 import { FIRST_ACCESSORY } from '../../sim/fight/accessories.ts';
 import { fighterLockedOn } from '../../sim/fight/camera.ts';
 import type { FightData, FightState } from '../../sim/fight/state.ts';
+import { WALL_REACH } from '../../sim/fight/walls.ts';
 import { GroundLight, groundLighting, litShade } from './ground-light.ts';
 import type { GroundState } from './stage/ground.ts';
 
@@ -93,7 +94,7 @@ export const newHeldScenery = (radius: number, slack: number): HeldScenery => ({
 
 /** How far under the fight's floor an arcade stage's own floors lie (mm), which are drawn over it as the board paints its stage over its floor. */
 const ARCADE_DEPTH = 20;
-/** Rings of tiles past an arcade stage's patch: as far as the board's floor reaches, ten of its 2.5 m tiles across. */
+/** Rings of tiles past an arcade stage's patch: as far as the board's floor reaches, ten of its 2.5 m tiles across; one more under a stage fixed in place, drawn larger. */
 const ARCADE_RINGS = 2;
 
 /** How far the game's place moves in a frame, or its turn, past which it has jumped rather than moved (mm, 4096ths). */
@@ -140,9 +141,41 @@ export const newGround = (): GroundLayout => ({
   shade: new Uint8Array(MAX_QUADS * 4),
 });
 
-/** The view's width over the game's 4:3, at least 1. */
+/**
+ * The view's width over the game's 4:3, at least 1; and, where the remake's walls stand, the stage
+ * fixed in place at the middle, drawn `scale` times its size, seen from `eye` (the camera as drawn,
+ * the game's millimetres; the game's own where it is not given).
+ */
 export interface View {
   readonly widening: number;
+  readonly fixed?: { readonly scale: number; readonly eye?: readonly [number, number, number] };
+}
+
+/** Whether a point (the game's x and z) stands inside the remake's eight-sided walls, each side `reach` from the middle. */
+export const insideWalls = (x: number, z: number, reach: number): boolean => Math.abs(x) <= reach && Math.abs(z) <= reach && Math.abs(x) + Math.abs(z) <= reach * Math.SQRT2;
+
+/** Steps halving the way along the camera's line, finding where it comes inside the walls. */
+const CAMERA_STEPS = 24;
+
+/**
+ * The camera kept inside the remake's walls: one past them moved along its line to `target` (the
+ * fighters, the game's x and z) until it stands inside them, each side `limit` from the middle, but
+ * never nearer the fighters than `nearest` across (where that leaves it past them); its height kept,
+ * one inside left where it is. The game's millimetres.
+ */
+export function cameraInWalls(eye: readonly [number, number, number], target: readonly [number, number], limit: number, nearest = 0): [number, number, number] {
+  const at = (t: number): [number, number, number] => [eye[0] + (target[0] - eye[0]) * t, eye[1], eye[2] + (target[1] - eye[2]) * t];
+  if (insideWalls(eye[0], eye[2], limit)) return [eye[0], eye[1], eye[2]];
+  let [outside, inside] = [0, 1];
+  for (let k = 0; k < CAMERA_STEPS; k += 1) {
+    const t = (outside + inside) / 2;
+    const [x, , z] = at(t);
+    if (insideWalls(x, z, limit)) inside = t;
+    else outside = t;
+  }
+  const across = Math.hypot(target[0] - eye[0], target[1] - eye[2]);
+  const most = across > nearest ? 1 - nearest / across : 0;
+  return at(Math.min(inside, most));
 }
 
 class Trig {
@@ -173,9 +206,11 @@ function cullingAngle(state: FightState, view: View): number {
  * each row filled between its outermost cells, then the camera's cell and every cell no farther
  * from it than the nearest of the four around the fighters left out. An arcade grid starts from
  * every cell, which the GPU clips: its cells' polygons reach past their squares, so a cell beside
- * the rays can still be in the picture.
+ * the rays can still be in the picture. Where the scenery is fixed in place, the fighters stand at
+ * `fixed.fighters` (in its frame, as the camera is), and only the cells between the camera and
+ * them are left out (`hideBetween`).
  */
-function cullScenery(trig: Trig, arena: ArenaTables, fov: number, yaw: number, cx: number, cz: number, { cellSize: size, grid: n }: SceneryGrid, out: Int8Array): void {
+function cullScenery(trig: Trig, arena: ArenaTables, fov: number, yaw: number, cx: number, cz: number, { cellSize: size, grid: n }: SceneryGrid, out: Int8Array, fixed?: FixedView): void {
   const half = n >> 1;
   const last = n - 1;
   /* The disc's grid is the game's, ten units a model unit; an arcade grid's cells are the drawn ones, eight. */
@@ -183,6 +218,13 @@ function cullScenery(trig: Trig, arena: ArenaTables, fov: number, yaw: number, c
   const gridX = -cell * half;
   const gridZ = -cell * half;
   const rayStep = Math.trunc((size * 0x8c) / 0x14);
+  /* Fixed in place, every cell starts drawn (the camera then going where the disc's rays were never cast from), and the cells crossed are found in the drawn cells' own size (the disc's culling counts ten units a cell, its drawn cells eight). */
+  if (fixed !== undefined) {
+    const drawn = size * 8;
+    out.fill(1);
+    hideBetween(out, n, drawn, -drawn * half, -drawn * half, cx, cz, fixed, n !== DISC_GRID);
+    return;
+  }
   out.fill(0);
   if (cx < cell * -(half - 1)) cx = cell * -half;
   if (cell * (half - 1) <= cx) cx = cell * half - 1;
@@ -209,9 +251,11 @@ function cullScenery(trig: Trig, arena: ArenaTables, fov: number, yaw: number, c
     }
     return last;
   };
+  const hide = (): void => hideNear(out, n, half, cell, gridX, gridZ, cx, cz);
+  /* An arcade grid starts from every cell. */
   if (n !== DISC_GRID) {
     out.fill(1);
-    hideNear(out, n, half, cell, gridX, gridZ, cx, cz);
+    hide();
     return;
   }
   let [row, column] = ray(-yaw - (fov >> 1));
@@ -243,7 +287,49 @@ function cullScenery(trig: Trig, arena: ArenaTables, fov: number, yaw: number, c
       for (let far = last; c < far; far -= 1) if (out[r * n + far] !== 0) for (let k = c; k < far; k += 1) out[r * n + k] = 1;
     }
   }
-  hideNear(out, n, half, cell, gridX, gridZ, cx, cz);
+  hide();
+}
+
+/** The fighters' places in a fixed scenery's frame, how near them a line from the camera stops (what stands by them is never between), and whether the camera is inside the walls. */
+interface FixedView {
+  readonly fighters: readonly (readonly [number, number])[];
+  readonly short: number;
+  readonly inside: boolean;
+}
+
+/** How far short of the fighters the lines from the camera stop (mm). */
+const BY_FIGHTERS = 1500;
+
+/** Points taken along each line from the camera to a fighter, finding the cells it crosses. */
+const LINE_SAMPLES = 32;
+
+/**
+ * A fixed scenery's cells left out. With the camera inside the walls none: only the stage's own
+ * props could stand between it and the fighters, and a cell is too coarse to tell a wall beside the
+ * camera's line from one across it. With the camera past them, those the lines from the camera to
+ * each fighter cross: on an arcade grid stopping `short` of either fighter and keeping the
+ * fighters' own cells (`keepOwn`), whose floors they stand on, so the wall between goes and those
+ * beside and behind the fighters stay; on the disc's every cell crossed, its walls the panels of its
+ * border cells, just behind a fighter at the walls, and its floor its own ground.
+ */
+function hideBetween(out: Int8Array, n: number, cell: number, gridX: number, gridZ: number, cx: number, cz: number, { fighters, short, inside }: FixedView, keepOwn: boolean): void {
+  if (inside) return;
+  const cellAt = (x: number, z: number): number => {
+    const column = Math.floor((x - gridX) / cell);
+    const row = Math.floor((z - gridZ) / cell);
+    return column >>> 0 < n && row >>> 0 < n ? row * n + column : -1;
+  };
+  const own = new Set(keepOwn ? fighters.map(([x, z]) => cellAt(x, z)) : []);
+  const nearOne = (x: number, z: number): boolean => keepOwn && fighters.some(([fx, fz]) => Math.hypot(x - fx, z - fz) < short);
+  for (const [fx, fz] of fighters) {
+    for (let k = 0; k <= LINE_SAMPLES; k += 1) {
+      const [x, z] = [cx + ((fx - cx) * k) / LINE_SAMPLES, cz + ((fz - cz) * k) / LINE_SAMPLES];
+      if (nearOne(x, z)) continue;
+      const at = cellAt(x, z);
+      if (at < 0 || own.has(at)) continue;
+      out[at] = 0;
+    }
+  }
 }
 
 /** The camera's cell left out, and every cell no farther from it than the nearest of the four around the fighters. */
@@ -267,7 +353,8 @@ export function layScenery(state: FightState, data: FightData, arena: ArenaTable
   const roots = state.scenery.roots;
   const average = (side: number, axis: 'x' | 'z'): number => (roots[side]![0]![axis] + roots[side]![1]![axis] + roots[side]![2]![axis] + roots[side]![3]![axis]) >> 2;
   const lock = fighterLockedOn(state, data);
-  if (state.sceneryAtOrigin !== 0) {
+  const fixed = view.fixed;
+  if (state.sceneryAtOrigin !== 0 || fixed !== undefined) {
     out.x = 0;
     out.z = 0;
   } else if (lock === 0) {
@@ -283,19 +370,23 @@ export function layScenery(state: FightState, data: FightData, arena: ArenaTable
   /* The disc's scenery stands at the stage's height under the floor; an arcade stage's on the floor, its own floors a little under the fight's. */
   out.y = scenery.grid !== DISC_GRID ? ARCADE_DEPTH : (arena.stageHeights[state.stage] ?? 0);
   out.yaw = state.scenery.yaw;
-  const eye = state.camera.drawn.eye;
+  const eye = view.fixed?.eye ?? state.camera.drawn.eye;
   const [camX, camY, camZ] = [eye[0]!, eye[1]!, eye[2]!];
   /* Before a round starts (the fighters set at their places) and as it starts, the scenery stands where the game puts it. */
-  if (held !== undefined) {
+  if (held !== undefined && fixed === undefined) {
     hold(out, held, state.round.flow === 0 || held.flow === 0);
     held.flow = state.round.flow;
   }
-  /* The camera from the scenery's middle: the fighters' midpoint, or where a held scenery stands. */
-  const offX = held !== undefined ? camX - out.x : s16(camX - (s16(rootA[0]!) + s16((rootB[0]! - rootA[0]!) >> 1)));
-  const offZ = held !== undefined ? camZ - out.z : s16(camZ - (s16(rootA[2]!) + s16((rootB[2]! - rootA[2]!) >> 1)));
+  /* The camera from the scenery's middle: the fighters' midpoint, or where a held or fixed scenery stands. */
+  const placed = held !== undefined || fixed !== undefined;
+  const offX = placed ? camX - out.x : s16(camX - (s16(rootA[0]!) + s16((rootB[0]! - rootA[0]!) >> 1)));
+  const offZ = placed ? camZ - out.z : s16(camZ - (s16(rootA[2]!) + s16((rootB[2]! - rootA[2]!) >> 1)));
   const turn = out.yaw & 0xfff;
-  const rx = (trig.cos(turn) * offX + trig.sin(turn) * offZ) >> 12;
-  const rz = (-trig.sin(turn) * offX + trig.cos(turn) * offZ) >> 12;
+  /* In the scenery's own frame: turned with it, and in its own units where it is drawn larger. */
+  const scale = fixed?.scale ?? 1;
+  const inFrame = (x: number, z: number): [number, number] => [Math.round(((trig.cos(turn) * x + trig.sin(turn) * z) >> 12) / scale), Math.round(((-trig.sin(turn) * x + trig.cos(turn) * z) >> 12) / scale)];
+  const [rx, rz] = inFrame(offX, offZ);
+  const fixedView: FixedView | undefined = fixed === undefined ? undefined : { fighters: [inFrame(rootA[0]! - out.x, rootA[2]! - out.z), inFrame(rootB[0]! - out.x, rootB[2]! - out.z)], short: BY_FIGHTERS / scale, inside: insideWalls(camX, camZ, WALL_REACH) };
   const yaw = state.camera.drawn.yaw - out.yaw;
   const cells = out.cells;
   const disc = scenery.grid === DISC_GRID;
@@ -307,12 +398,31 @@ export function layScenery(state: FightState, data: FightData, arena: ArenaTable
     const centre = -0x7d1 < camY ? 1 : 0;
     for (const k of [14, 15, 20, 21]) cells[k] = centre;
   } else {
-    cullScenery(trig, arena, cullingAngle(state, view), yaw, rx, rz, scenery, cells);
+    cullScenery(trig, arena, cullingAngle(state, view), yaw, rx, rz, scenery, cells, fixedView);
     if (!disc) return;
     const far = 9999 < tableRoot((Math.imul(camX, camX) + Math.imul(camZ, camZ)) | 0, data.math);
     const centre = -0x1389 < camY && (-0xaf1 < camY || far) ? 1 : 0;
-    for (const k of [14, 15, 20, 21]) cells[k] = centre;
+    if (fixedView === undefined) for (const k of [14, 15, 20, 21]) cells[k] = centre;
+    else if (centre === 0) for (const k of cellsAbout(fixedView.fighters, scenery.cellSize, arena)) cells[k] = 0;
   }
+}
+
+/**
+ * On the disc's grid fixed in place, the four cells about the fighters' midpoint (in the scenery's
+ * frame): those the game draws only while the camera is low, as it does the middle four of a grid
+ * that stands about the fighters, so a camera high over them looks through the sky's cover.
+ */
+function cellsAbout(fighters: FixedView['fighters'], size: number, arena: ArenaTables): number[] {
+  const drawn = size * 8;
+  const corner = (v: number): number => Math.min(DISC_GRID - 1, Math.max(1, Math.round(v / drawn + DISC_GRID / 2)));
+  const column = corner((fighters[0]![0] + fighters[1]![0]) / 2);
+  const row = corner((fighters[0]![1] + fighters[1]![1]) / 2);
+  return [
+    [row - 1, column - 1],
+    [row - 1, column],
+    [row, column - 1],
+    [row, column],
+  ].map(([r, c]) => arena.gridCells[r! * DISC_GRID + c!]!);
 }
 
 /** How many fields a cell takes to fade in or out. */
@@ -539,7 +649,7 @@ export function layGround(state: FightState, data: FightData, arena: ArenaTables
    * Tekken Force's patch already reaches past the widest view, at a fixed depth. An arcade stage's
    * reaches as far as the board's: past it lie the stage's own floors, and what lies below them.
    */
-  const rings = force ? 0 : arcade ? ARCADE_RINGS : view.widening <= 1 ? 0 : Math.min(MAX_RINGS, Math.ceil(5 * (view.widening - 1)) + 1);
+  const rings = force ? 0 : arcade ? ARCADE_RINGS + (view.fixed === undefined ? 0 : 1) : view.widening <= 1 ? 0 : Math.min(MAX_RINGS, Math.ceil(5 * (view.widening - 1)) + 1);
   const wrap = (v: number, n: number): number => ((v % n) + n) % n;
   let quad = out.count;
   for (let r = -rings; r < MAP + rings; r += 1) {

@@ -5,8 +5,8 @@
  * both).
  */
 import { loadFightTables, loadMoveset } from '../assets/load.ts';
-import { Fight } from '../sim/fight/fight.ts';
-import { fightDataFor, matchMovesets, type MatchSetup } from '../sim/fight/match.ts';
+import { Fight, type QuickMatch } from '../sim/fight/fight.ts';
+import { fightDataFor, matchMovesets } from '../sim/fight/match.ts';
 import { FightView, type ArcadeStageFiles, type DrawingFiles, type FloorFiles, type MaterialMaps, type SkyFiles } from '../present/3d/fight-view.ts';
 import { parseManifest, type ArcadeObject, type ArcadePanorama } from '../assets/manifest.ts';
 import { parseArcadeFighters, withOwnAccessories } from '../assets/models.ts';
@@ -190,7 +190,9 @@ export async function playQuickMatch(): Promise<void> {
   };
   const cpu = params.get('cpu') ?? '2';
   const stage = Math.max(0, Math.min(arena.stages.length - 1, Number(params.get('stage') ?? 0) || 0));
-  const setup: MatchSetup = {
+  const setup: QuickMatch = {
+    /* `?walls=on`: the remake's walls. */
+    walls: params.get('walls') === 'on' ? 1 : 0,
     stage,
     entrants: [
       { roster: pick('p1', manifest.kazuya === true ? KAZUYA : PAUL), costume: 0, computer: cpu.includes('1') },

@@ -197,10 +197,23 @@ const SWITCHES: Readonly<Record<number, readonly number[]>> = {
   [MenuMode.TEKKEN_FORCE]: [1, 0, 0, 0, 0, 0, 0, 0, 0],
 };
 
+/** REACHABLE WALLS: online only, on, off. */
+const WALLS = { ONLINE_ONLY: 0, ON: 1, OFF: 2 } as const;
+
+/**
+ * Whether a mode's matches have the remake's walls, by REACHABLE WALLS: none in Tekken Ball, Tekken
+ * Force or the attract demo; online (and in its waiting room) unless the setting is off, offline
+ * only where it is on.
+ */
+export function wallsFor(mode: number, setting: number, online: boolean): number {
+  if (mode === MenuMode.TEKKEN_BALL || mode === MenuMode.TEKKEN_FORCE || mode === MenuMode.DEMO) return 0;
+  return (online ? setting !== WALLS.OFF : setting === WALLS.ON) ? 1 : 0;
+}
+
 /**
  * A mode started from the menu (or the title's attract demo): the match's settings from the
- * options, the fighters' records reset, the side whose pad chose made the human, the mode's
- * switches, and on to its overlay (scene 7).
+ * options (and the remake's walls from its own), the fighters' records reset, the side whose pad
+ * chose made the human, the mode's switches, and on to its overlay (scene 7).
  */
 export function startMode(game: GameState, mode: number, choosers: number, chooseDemo?: (game: GameState) => void): void {
   const world = game.world;
@@ -234,6 +247,7 @@ export function startMode(game: GameState, mode: number, choosers: number, choos
   world.alwaysChip = options.alwaysChip;
   world.computer.arcadeStage = 0;
   world.mode = mode;
+  world.options.walls = wallsFor(mode, game.remake.settings.walls, false);
   for (let side = 0; side < 2; side += 1) {
     game.motors[side] = options.vibration[side]!;
     const held = world.input.rawPads[side]!;

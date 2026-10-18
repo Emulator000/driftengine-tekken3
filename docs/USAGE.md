@@ -49,6 +49,7 @@ address's.
 | `p1`, `p2` | The quick match's fighters, by roster id (below) |
 | `stage` | The quick match's stage, from 0 |
 | `cpu` | Which sides the computer plays: `2` (the default), `1`, `12` to watch it play itself, `0` for two players |
+| `walls=on` | The quick match with reachable walls (see REACHABLE WALLS below) |
 | `arcade=ROSTER`, `arcade=ROSTER,COSTUME` or `arcade=ROSTER,COSTUME,STAGE` | Starts Arcade at once with that character on the first pad, at that stage (1 to 10; by default the tenth, against Ogre, who becomes True Ogre once a round is won against him) |
 | `versus` | Starts Versus at once, both pads in, on its character select |
 | `ball` | Starts Tekken Ball at once, the first pad in, on its character select (where the first to choose a character chooses the ball) |
@@ -61,7 +62,7 @@ address's.
 | `textures=psx` | Draws the fighters' and stages' textures as the console did, each texel sharp, instead of enlarged and smoothed |
 | `stages=psx` | Draws the disc's stages where the arcade board's data has the arcade's (by default the arcade's, once `npm run arcade` has read it) |
 | `fighters=psx` | Draws the disc's fighters where the arcade board's data has the arcade's models (by default the arcade's, once `npm run arcade` has read it) |
-| `cloth=original` | Draws the arcade board's fighters' cloth as the board does, a leg passing through a coat's panel or a tail where it swings into it (by default each is kept clear of the legs) |
+| `cloth=original` | Draws the fighters' cloth as the board and the console do, a leg passing through a coat's panel or a tail where it swings into it (by default each is kept clear of the legs, the disc's models' tails too, in the attract intros as well) |
 | `models=psx`, `models=rounded` | Draws the fighters with the console's meshes, or the rounded ones (by default the rounded ones, but at `quality=verylow`) |
 | `quality=high` | The whole picture: ambient occlusion and bloom over the multisampled HDR scene; the default but on a phone |
 | `quality=low` | Leaves out the ambient occlusion and the bloom; a phone's default |
@@ -149,7 +150,7 @@ or the app) for every start after.
 | MODELS | AUTO (rounded, but on an entry-level phone), ROUNDED, ORIGINAL (the console's meshes) |
 | STAGES | ARCADE (the arcade board's, where `npm run arcade` has read them), CONSOLE |
 | FIGHTERS | ARCADE (the arcade board's models, where it has read them), CONSOLE |
-| CLOTH | CLEAR OF LEGS (a board's fighter's coat panels and the tails it hangs from the hips kept clear of the legs: a panel carried over a raised thigh, a tail put out where a leg swings into it), ORIGINAL (as the board draws them, as `cloth=original`) |
+| CLOTH | CLEAR OF LEGS (a board's fighter's coat panels and the tails a fighter hangs from the hips, a board's model's or the disc's, kept clear of the legs: a panel carried over a raised thigh, a tail put out where a leg swings into it), ORIGINAL (as the board and the console draw them, as `cloth=original`) |
 | PICTURE | AUTO (by the device), HIGH, LOW, VERY LOW (as `quality=`) |
 | FRAME RATE | OFF, ON (as `F`) |
 | TOUCH PAD | AUTO (on a touch screen or a phone, hidden while a gamepad is connected), ON (always), OFF (hidden; a phone still shows it while no gamepad is connected, so it can always be played) |
@@ -157,9 +158,10 @@ or the app) for every start after.
 | LOOK | LIGHT, NORMAL, STRONG (listed while REMASTER is on: how strongly the remastered picture is graded, its shadows toward teal and its lights toward magenta, its corners darkened and its edges fringed; changed at once) |
 | BRIGHTNESS | LOW, NORMAL, HIGH (listed while REMASTER is on: how brightly the remastered picture is exposed, LOW as it was first drawn; changed at once) |
 | FLOOR FADE | ON, OFF (listed while REMASTER is on: the floors darkened by depth, or away from the stage's lights, as the game darkens its own, an arcade stage's own floors with them; or lit evenly; changed at once) |
+| REACHABLE WALLS | ONLINE ONLY (the default: walls in online matches and the waiting room, none offline), ON (in every ordinary mode offline too: Arcade, Versus, Team Battle, Time Attack, Survival, Practice), OFF (none offline; online, a match you host has none). With walls, the stage stands still, unturned, its walls 9.6 m from its middle, the stage drawn up to half as large again so its own nearest walls meet them; where a stage is open or its walls stand farther, the walls there are unseen. Nobody walks or is knocked through a wall: backed against one, a fighter is pinned there, and a push into it moves the one pushing. A hit that would knock a fighter a long way back, caught by the wall, splats it: on its feet it crumples against the wall, then slides to the ground; in the air it drops straight down the wall. Once a combo; the third clean hit after a splat makes the fighter fall. The camera, where the game would put it past a wall, comes in along its line to the fighters; where that would bring it too near them (the fighters along the wall), or where it looks down from high over them, the stage between is left out. Never in Tekken Ball, Tekken Force or the attract demo; taken at the next match |
 | CRT FILTER | OFF (the default), ON: the picture as a tape played on a television showed it. It is softened, a little across, and its colour much more, smeared to the right of the edges it belongs to. Over it lie soft scanlines (240 down the picture), a faint aperture grille of red, green and blue columns and darkened corners, the picture under them a little brighter. A fine grain crawls over it, a faint band rolls slowly down and the picture flickers a little; all three hold still where the system asks for less motion. Laid over the picture, so the same with any renderer and quality; changed at once |
 
-The frame rate and the CRT filter show or hide at once. The others change what the game loads: while one differs
+The frame rate and the CRT filter show or hide at once, and REACHABLE WALLS is taken at the next match. The others change what the game loads: while one differs
 from the start's, the page says LEAVING RESTARTS THE GAME, and leaving it starts the game again
 (with auto save on, the progress is saved first).
 
@@ -207,8 +209,8 @@ not answered in time puts both back to look again; at a room, the guest is sent 
 and the room waits on.
 
 **The match.** Versus, your fighters as chosen, on a stage drawn at random, no handicap, three
-rounds to win, from the state the game powers on with: the host's options and earned characters,
-each player's own buttons. Your progress and records are left as they were. Where the server seats
+rounds to win, with reachable walls unless the host's REACHABLE WALLS is OFF, from the state the
+game powers on with: the host's options and earned characters, each player's own buttons. Your progress and records are left as they were. Where the server seats
 you on the other side than SIDE asks, the fight is drawn mirrored: your fighter and its plate on
 your side, the stick's left and right with the picture. Each player's name shows under their
 fighter's, on a dark tag of its own, with their streak of wins (WINS 3) where the server counts

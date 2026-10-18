@@ -17,7 +17,7 @@ import { voiceLine } from '../fight/voices.ts';
 import type { OptionsItem, OptionsPage, OptionsTables, OptionValue, SceneTables } from '../data/scenes.ts';
 import { softReset } from './fight-scene.ts';
 import { goToLogo } from './logo.ts';
-import { BACK_FROM_ONLINE, mapPads, MenuMode, startMode } from './menu.ts';
+import { BACK_FROM_ONLINE, mapPads, MenuMode, startMode, wallsFor } from './menu.ts';
 import { ONLINE_PAGE, onlineFrame } from './online-page.ts';
 import { print } from './printer.ts';
 import { playCount, sortPairs } from './records.ts';
@@ -706,7 +706,11 @@ function pageFrame(game: GameState, data: OptionsData, scenes: SceneTables): voi
     /* A quick match or a room waited for in Practice, the waiting room's. */
     const asked = onlineFrame(game, data);
     if (asked === 'leave') game.step = 2;
-    else if (asked === 'warm') startMode(game, MenuMode.PRACTICE, 1);
+    else if (asked === 'warm') {
+      startMode(game, MenuMode.PRACTICE, 1);
+      /* The waiting room's walls an online match's. */
+      game.world.options.walls = wallsFor(MenuMode.PRACTICE, game.remake.settings.walls, true);
+    }
     return;
   }
   if (screen.page === REMAKE_PAGE) {

@@ -74,10 +74,11 @@ test('a picture on vertices another triangle shares, or of another length than t
 
 /**
  * A renderer that poses a point skin as the engine does on the device (each weighted point moved by
- * its joint, a weight of 0 skipped) and keeps the positions of the last pose, and how many skins it made.
+ * its joint, a weight of 0 skipped) and keeps the positions of the last pose, how many skins it made,
+ * and the vertices each rewrite of part of one took (its first and how many).
  */
 function recorder() {
-  const seen = { positions: null, skins: 0 };
+  const seen = { positions: null, skins: 0, rewrites: [] };
   return {
     seen,
     renderer: {
@@ -100,6 +101,14 @@ function recorder() {
           }
           seen.positions.push(...p);
         }
+      },
+      updatePointSkin: (skin, first, data) => {
+        const count = data.weights.length / 4;
+        assert.ok(data.joints.length === count * 4 && data.points.length === count * 12 && data.normals.length === count * 3, 'a range whole');
+        skin.joints.set(data.joints, first * 4);
+        skin.weights.set(data.weights, first * 4);
+        skin.points.set(data.points, first * 12);
+        seen.rewrites.push([first, count]);
       },
       disposePointSkin() {},
       disposeMesh() {},
@@ -144,6 +153,10 @@ test('the player draws a hand in the shape its step gives, and only the picture 
   fighter.pose([]);
   fighter.pose([]);
   assert.equal(seen.skins, skins, 'a hand and a face drawn as they are make no skin again');
+  assert.equal(seen.skins, 1, 'one skin made, a hand or a face rewriting its own vertices in it');
+  const mesh = readFighterMesh(bufferOf(writeFtr5(sample())));
+  assert.ok(seen.rewrites.length > 0 && seen.rewrites.every(([first, count]) => first >= 0 && count > 0 && first + count <= mesh.vertexCount), 'each rewrite inside the mesh');
+  assert.ok(seen.rewrites.some(([, count]) => count < mesh.vertexCount), 'a rewrite takes only what changed');
 });
 
 /* An icosahedron of radius 100 on one joint, its normals pointing out. */

@@ -32,7 +32,7 @@ import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const packagerHome = path.join(root, '.cache', 'packager');
@@ -137,17 +137,6 @@ const bin = path.join(packager, 'bin', 'drift-package.mjs');
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 run(process.execPath, [bin, 'bootstrap', `--target=${target}`], { env });
-/*
- * The packager writes the Android SDK's folder into the Gradle project's local.properties as it is,
- * and that file reads a backslash as an escape: on Windows `C:\Users\...` came out as another
- * folder and Gradle stopped. The build is handed the same SDK, the one the packager itself finds,
- * in ANDROID_HOME with forward slashes, which Windows takes as well and the file reads as written.
- */
-if (target === 'android' && process.platform === 'win32') {
-  const { findAndroidSdk } = await import(pathToFileURL(path.join(packager, 'dist', 'toolchain.js')).href);
-  const sdk = await findAndroidSdk();
-  if (sdk !== null) env.ANDROID_HOME = sdk.replaceAll('\\', '/');
-}
 run(process.execPath, [bin, 'build', `--target=${target}`, ...flags], { env });
 
 /*

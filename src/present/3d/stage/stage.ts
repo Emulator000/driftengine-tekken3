@@ -52,6 +52,8 @@ export interface Stage {
   readonly lit: boolean;
   /** The height (metres over its floors) its ceiling's pieces lie wholly above (`StagePiece.overhead`), on a stage with a ceiling over the fight; null on one without. */
   readonly ceiling: number | null;
+  /** How far its own walls stand from its middle (`wallReach`, metres), or null where none stands near. */
+  readonly reach: number | null;
   /**
    * Its floors (level polygons within `FLOOR_REACH` of the floor's height), on a stage made with
    * them kept, darkened at each vertex by the shade the fight's floor takes there (`shadeOf`, by
@@ -264,6 +266,48 @@ function raised(own: readonly number[], positions: Float32Array, normals: Float3
   return { positions: new Float32Array(P), normals: new Float32Array(N), colors: new Float32Array(C), uvs: new Float32Array(U), indices: new Uint32Array(I) };
 }
 
+/** What counts as a wall: geometry standing from this height over the floor to this one, within this far either side of an axis, past this far from the middle, and no farther than this (metres). */
+const WALL = { from: 0.3, to: 2, across: 0.75, past: 0.5, most: 40 } as const;
+/** Points taken across each triangle, each way, to find where along it a wall stands. */
+const WALL_SAMPLES = 4;
+
+/** The eight ways a stage's walls are looked for, as the remake's walls have eight sides: its axes and its diagonals. */
+const WAYS = [
+  [1, 0],
+  [0, 1],
+  [Math.SQRT1_2, Math.SQRT1_2],
+  [Math.SQRT1_2, -Math.SQRT1_2],
+] as const;
+
+/**
+ * How far a stage's own walls stand from its middle (metres): the nearest geometry standing
+ * between `WALL.from` and `WALL.to` over its floor along any of its axes or diagonals; null where
+ * none stands within `WALL.most`. `positions` are metres with y up, three a vertex; `indices` three
+ * a triangle.
+ */
+export function wallReach(positions: Float32Array, indices: Uint32Array): number | null {
+  let nearest = Infinity;
+  const p = (v: number, k: number): number => positions[indices[v]! * 3 + k]!;
+  for (let t = 0; t + 2 < indices.length; t += 3) {
+    const ys = [p(t, 1), p(t + 1, 1), p(t + 2, 1)];
+    if (Math.max(...ys) < WALL.from || WALL.to < Math.min(...ys)) continue;
+    for (let i = 0; i <= WALL_SAMPLES; i += 1) {
+      for (let j = 0; j <= WALL_SAMPLES - i; j += 1) {
+        const [u, v] = [i / WALL_SAMPLES, j / WALL_SAMPLES];
+        const w = 1 - u - v;
+        const x = p(t, 0) * u + p(t + 1, 0) * v + p(t + 2, 0) * w;
+        const z = p(t, 2) * u + p(t + 1, 2) * v + p(t + 2, 2) * w;
+        for (const [wx, wz] of WAYS) {
+          const along = Math.abs(x * wx + z * wz);
+          const across = -x * wz + z * wx;
+          if (WALL.past < along && Math.abs(across) < WALL.across) nearest = Math.min(nearest, along);
+        }
+      }
+    }
+  }
+  return nearest <= WALL.most ? nearest : null;
+}
+
 /**
  * Each vertex's normal, its own faces' and those of the faces meeting it at its place
  * turned less than 60 degrees from them, so curved rock is smooth and a corner stays sharp.
@@ -429,6 +473,7 @@ export function createStage(renderer: RendererApi, buffer: ArrayBuffer, texture:
     oneSidedMaterial: { albedo: texture, cutout: 0.5, doubleSided: false, ...maps },
     lit: look !== null,
     ceiling,
+    reach: wallReach(positions, indices),
     darkenFloors(model, shadeOf) {
       for (const floor of floors) {
         let changed = false;

@@ -13,10 +13,10 @@ import { Camera, computeLightMatrix, createEnvironment, type RendererApi, type S
 import type { ArenaTables } from '../../assets/arena.ts';
 import { handPart, wingsPart } from '../../sim/fight/hands.ts';
 import type { FightData, FightState, Fighter as FighterState } from '../../sim/fight/state.ts';
+import { WALL_REACH, wallsOn } from '../../sim/fight/walls.ts';
 import { Fighter, readFighterMesh, type JointTransform } from './fighter/fighter.ts';
-import { HIPS } from './fighter/garment.ts';
 import { HEAD as HEAD_JOINT, HeadEase } from './fighter/head-ease.ts';
-import { FIRST_ACCESSORY } from '../../sim/fight/accessories.ts';
+import { hungFromHips } from '../../sim/fight/match.ts';
 import { Ground } from './stage/ground.ts';
 import { floorLookOf, floorTint, type RedrawnFloor } from './stage/floor-look.ts';
 import { Grass, type Caster } from './stage/grass.ts';
@@ -24,7 +24,7 @@ import { Puddles } from './stage/puddles.ts';
 import { lookOfStage, pixelsOf } from './stage/looks.ts';
 import { Backdrop, type Ridge } from './stage/backdrop.ts';
 import { createStage, stageAtlasSize, type Stage } from './stage/stage.ts';
-import { ACCESSORIES, fadeScenery, FEET, GROUND_TILE, layGround, layScenery, liftOnto, newGround, newHeldScenery, newScenery, newSceneryFade } from './layout.ts';
+import { ACCESSORIES, cameraInWalls, fadeScenery, FEET, GROUND_TILE, layGround, layScenery, liftOnto, newGround, newHeldScenery, newScenery, newSceneryFade } from './layout.ts';
 import { Effects } from './effects/effects.ts';
 import { BallView } from './ball.ts';
 import { Beach, BEACH_STAGE, beachClear } from './stage/beach.ts';
@@ -127,6 +127,13 @@ const ARCADE_GRID = 16;
 /** Every scenery cell drawn whole, as the reflection probe sees the stage. */
 const ALL_SHOWN = new Float32Array(256).fill(1);
 const HELD = { arcade: { radius: 3000, slack: 0x155 }, disc: { radius: 1500, slack: 0xaa } } as const;
+/** How much larger a stage is drawn where the remake's walls stand: as puts its own nearest walls (`reach`, metres) on them, from 1 to `WALL_SCALE` times; as it is where none stands near. */
+const WALL_SCALE = 1.5;
+/** How far inside the walls the camera is kept, and the nearest it comes to the fighters doing so, across (mm). */
+const CAMERA_INSIDE = 300;
+const CAMERA_NEAREST = 2500;
+export const wallScale = (reach: number | null): number => (reach === null ? 1 : Math.min(WALL_SCALE, Math.max(1, WALL_REACH / 1000 / reach)));
+
 /** The arcade stages whose floor ends at their own edge (the helipad's, a square this far from its middle, model units), where the fight's floor is cut off. */
 const EDGED = new Map([[11, 1068]]);
 /**
@@ -245,6 +252,8 @@ export class FightView {
   private readonly heldArcade = newHeldScenery(HELD.arcade.radius, HELD.arcade.slack);
   private readonly heldDisc = newHeldScenery(HELD.disc.radius, HELD.disc.slack);
   private readonly sceneryModel = new Float32Array(16);
+  /** How much larger the scenery is drawn: 1, but where the remake's walls stand (`wallScale`). */
+  private sceneryScale = 1;
   private readonly fighterModel = new Float32Array(16);
   private readonly casting: Fighter[] = [];
   /** Per side, its head's easing (`head-ease.ts`). */
@@ -306,8 +315,8 @@ export class FightView {
     void this.files.fighter(pack).then(({ mesh, texture, maps }) => {
       const handle = this.renderer.createSurfaceTexture(texture, this.textureOptions(false));
       const look = this.files.remaster === true ? this.mapTextures(maps ?? null) : null;
-      /* A board's model's accessories hung from the hips are kept clear of the legs, as its garment is. */
-      const tails = this.files.cloth ? (this.data.models[pack]?.accessories ?? []).flatMap((a, k) => (a !== null && a.parent === HIPS ? [FIRST_ACCESSORY + k] : [])) : null;
+      /* The accessories a model hangs from the hips are kept clear of the legs, as a board's model's garment is: a board's model's own, and the console's (the attract intros' among them). */
+      const tails = this.files.cloth ? hungFromHips(this.data, pack) : null;
       const fighter = new Fighter(this.renderer, readFighterMesh(mesh), handle, this.white, tails, look);
       if (models.get(pack) === next) next.fighter = fighter;
       else fighter.dispose();
@@ -500,7 +509,7 @@ export class FightView {
     const model = this.sceneryMatrix();
     /* A ceiling drawn whole over the cells left out round the camera while the camera is under it (the eye's height over the scenery's floors). */
     const ceiling = drawn.stage.ceiling;
-    const overhead = ceiling !== null && (this.scenery.y - state.camera.drawn.eye[1]!) / 1000 < ceiling;
+    const overhead = ceiling !== null && (this.scenery.y - state.camera.drawn.eye[1]!) / 1000 < ceiling * this.sceneryScale;
     for (const oneSided of [false, true]) {
       renderer.setMaterial(oneSided ? drawn.stage.oneSidedMaterial : drawn.stage.material);
       drawn.stage.cells.forEach((cell, i) => {
@@ -543,6 +552,26 @@ export class FightView {
     this.camera.updateMatrices(0.6 * aspect);
     this.camera.adoptView(this.view, this.camera.projection);
     eyeOf(this.view, this.camera.position);
+  }
+
+  /**
+   * Where the remake's walls stand, the camera drawn kept inside them (`cameraInWalls`): one the
+   * game puts past a wall, as it does with the fighters along it, moved along its line to them, its
+   * view's turn kept, but never nearer them than `CAMERA_NEAREST` (past the wall then, the scenery
+   * hides what stands between); where it stands, the game's millimetres.
+   */
+  private keepCameraInWalls(state: FightState): [number, number, number] {
+    const p = this.camera.position;
+    const eye: [number, number, number] = [p[0]! * 1000, -p[1]! * 1000, -p[2]! * 1000];
+    const [a, b] = state.fighters;
+    const roots = [a.skeleton.base.translation, b.skeleton.base.translation];
+    const kept = cameraInWalls(eye, [(roots[0]![0]! + roots[1]![0]!) / 2, (roots[0]![2]! + roots[1]![2]!) / 2], WALL_REACH - CAMERA_INSIDE, CAMERA_NEAREST);
+    if (kept[0] === eye[0] && kept[2] === eye[2]) return eye;
+    const e = [kept[0] / 1000, -kept[1] / 1000, -kept[2] / 1000];
+    for (let i = 0; i < 3; i += 1) this.view[12 + i] = -(this.view[i]! * e[0]! + this.view[4 + i]! * e[1]! + this.view[8 + i]! * e[2]!);
+    this.camera.adoptView(this.view, this.camera.projection);
+    eyeOf(this.view, this.camera.position);
+    return kept;
   }
 
   /** The flash's glow on a fighter: its colour at the strength left, by how much of the blow's side the camera sees. */
@@ -664,9 +693,10 @@ export class FightView {
   /** Where the scenery stands, in the engine's axes: at its place and the stage's height, turned by minus its yaw. */
   private sceneryMatrix(): Float32Array {
     const angle = (-this.scenery.yaw * 2 * Math.PI) / 4096;
-    const c = Math.cos(angle);
-    const s = Math.sin(angle);
-    this.sceneryModel.set([c, 0, s, 0, 0, 1, 0, 0, -s, 0, c, 0, this.scenery.x / 1000, -this.scenery.y / 1000, -this.scenery.z / 1000, 1]);
+    const k = this.sceneryScale;
+    const c = Math.cos(angle) * k;
+    const s = Math.sin(angle) * k;
+    this.sceneryModel.set([c, 0, s, 0, 0, k, 0, 0, -s, 0, c, 0, this.scenery.x / 1000, -this.scenery.y / 1000, -this.scenery.z / 1000, 1]);
     return this.sceneryModel;
   }
 
@@ -681,6 +711,7 @@ export class FightView {
     const widening = Math.max(1, aspect / (4 / 3));
     this.adoptCamera(state, aspect);
     if (freeView.active) freeView.apply(this.camera, 0.6 * aspect);
+    const eyeInWalls = !freeView.active && wallsOn(state) ? this.keepCameraInWalls(state) : null;
     if (this.files.remaster === true) this.cutIfJumped();
     this.casting.length = 0;
     const posed: FighterState[] = [];
@@ -736,7 +767,11 @@ export class FightView {
     const drawn = this.stageFor(state.stage);
     const layout = this.arena.stages[state.stage];
     const scenery = drawn !== null && layout != null && only.scenery && state.match.trueOgres === 0 && layout.cellSize !== 0;
-    if (scenery) layScenery(state, this.data, this.arena, drawn.stage, { widening }, this.scenery, drawn.stage.grid === ARCADE_GRID ? this.heldArcade : this.heldDisc);
+    /* Where the remake's walls stand, the stage fixed in place, drawn as large as puts its own walls on them. */
+    const fixed = drawn !== null && wallsOn(state) ? { scale: wallScale(drawn.stage.reach), ...(eyeInWalls === null ? {} : { eye: eyeInWalls }) } : undefined;
+    const view = fixed === undefined ? { widening } : { widening, fixed };
+    this.sceneryScale = fixed?.scale ?? 1;
+    if (scenery) layScenery(state, this.data, this.arena, drawn.stage, view, this.scenery, fixed !== undefined ? undefined : drawn.stage.grid === ARCADE_GRID ? this.heldArcade : this.heldDisc);
     /* The free camera sees every cell: the game's culling is its own camera's. */
     if (scenery && freeView.active) this.scenery.cells.fill(1);
     if (scenery) fadeScenery(state, this.scenery, this.sceneryFade);
@@ -752,10 +787,10 @@ export class FightView {
     }
     if (drawn !== null && layout != null) {
       const arcade = drawn.stage.grid === ARCADE_GRID;
-      layGround(state, this.data, this.arena, layout, { widening }, this.ground, arcade, arcade && scenery ? this.scenery : null);
+      layGround(state, this.data, this.arena, layout, view, this.ground, arcade, arcade && scenery ? this.scenery : null);
       const fade = this.files.floorFade !== false;
       const edge = arcade ? EDGED.get(state.stage) : undefined;
-      drawn.ground.update(this.ground, edge === undefined ? null : { x: this.scenery.x, z: this.scenery.z, yaw: this.scenery.yaw, half: edge * 8 }, fade);
+      drawn.ground.update(this.ground, edge === undefined ? null : { x: this.scenery.x, z: this.scenery.z, yaw: this.scenery.yaw, half: edge * 8 * this.sceneryScale }, fade);
       const puddles = (): void => {
         if (drawn.puddles === null) return;
         renderer.setMaterial(drawn.puddles.material);

@@ -16,7 +16,7 @@ import { mirroredStick } from '../net/wire.ts';
 import type { FightData } from '../sim/fight/state.ts';
 import { stopMusic } from '../sim/fight/voices.ts';
 import { Game } from '../sim/game/game.ts';
-import { MenuMode, mapPads, startMode } from '../sim/game/menu.ts';
+import { MenuMode, mapPads, startMode, wallsFor } from '../sim/game/menu.ts';
 import { FightStep } from '../sim/game/fight-scene.ts';
 import { lookOf } from '../sim/game/select.ts';
 import { CODE_LENGTH, CODE_LETTERS, caretAt, DEFAULT_DELAY, Editing, MOST_DELAY, ONLINE_PAGE, OnlineScreen, OnlineStatus, TYPED_ENTER, TYPED_ESCAPE, typing } from '../sim/game/online-page.ts';
@@ -257,12 +257,13 @@ export class OnlinePlay {
     return [...this.game.state.options.keys[0]!];
   }
 
-  /** The host's options for the match, and its stage: the home stage of a fighter both have, at random. */
+  /** The host's options for the match, its stage (the home stage of a fighter both have, at random), and its walls (REACHABLE WALLS's for an online match). */
   private decided(): Record<string, unknown> {
     const { options, records } = this.game.state;
     const homes = this.hooks.roster.filter((fighter) => fighter <= LAST_STAGE_ROSTER);
     const stage = (homes[crypto.getRandomValues(new Uint32Array(1))[0]! % Math.max(1, homes.length)] ?? 0) * 4;
-    return { ...Object.fromEntries(DECIDED.map((key) => [key, options[key]])), earnedRoster: records.earnedRoster, extraCostumes: records.extraCostumes, stage };
+    const walls = wallsFor(MenuMode.VERSUS, this.game.state.remake.settings.walls, true);
+    return { ...Object.fromEntries(DECIDED.map((key) => [key, options[key]])), earnedRoster: records.earnedRoster, extraCostumes: records.extraCostumes, stage, walls };
   }
 
   /**
@@ -470,6 +471,8 @@ export class OnlinePlay {
     /* Three rounds to win (the option is the rounds less one), whatever the host's options; a round's end cut short by both players alone. */
     state.world.options.rounds = 2;
     state.world.match.online = 1;
+    /* The remake's walls as the host's REACHABLE WALLS has them for an online match. */
+    state.world.options.walls = start.options.walls === 1 ? 1 : 0;
     state.run.onlineStage = typeof start.options.stage === 'number' ? start.options.stage : -1;
     start.fighters.forEach((fighter, n) => {
       state.entrants.roster[n] = fighter.roster;

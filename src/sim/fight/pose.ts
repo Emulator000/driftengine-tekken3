@@ -32,6 +32,7 @@ import { motionOf, moveAt, moveById, sameMove } from './moves.ts';
 import { recordMove, replayAngles, replayMove, replayRoot } from './replay.ts';
 import { blendLocals, cosineOf, eulerRotation, localRotations, placeJoint, rootRotation, sineOf } from './skeleton.ts';
 import { Mode, type FightData, type FightState, type Fighter } from './state.ts';
+import { holdAtWalls } from './walls.ts';
 
 /** The joint the hips are; the screen's x of its origin is where the fighter stands on screen. */
 const HIPS = 11;
@@ -497,6 +498,7 @@ function poseMove(state: FightState, data: FightData, f: Fighter, startReplayCam
   state.skipBlend = 0;
   recordMove(state, f);
   placeRoot(state, data, f, startReplayCamera);
+  holdAtWalls(state, f);
   stepHands(state, data, f);
   if (state.attractIntro === 0) blink(state, data, f);
   buildSkeleton(state, data, f);

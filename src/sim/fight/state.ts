@@ -375,6 +375,16 @@ export interface Fighter {
   struckSlot: number;
   /** The eight push spheres: where each is and its radius. */
   readonly pushSpheres: readonly { readonly position: number[]; radius: number }[];
+  /**
+   * The remake's walls: how far the wall took the root back this frame (mm), the knockback it is
+   * being carried by (the most it has had still to go, mm; -1 a blocked hit's), whether it was
+   * splatted against one in the combo it is taking (1, 2 once counted out), and the clean hits it
+   * has taken since.
+   */
+  wallHit: number;
+  carried: number;
+  splatted: number;
+  splatHits: number;
   /** The push apart this frame, whether it was pushed and by whom, whether it is held from being pushed (in a throw) or immune. */
   readonly push: number[];
   pushed: number;
@@ -1161,9 +1171,10 @@ export interface FightState {
   readonly pushWeights: number[];
   /**
    * The match's options: the round's time (the timer starts at that plus two, in ten-second steps),
-   * the rounds a win takes less one, and in versus each side's health handicap (a row of full health).
+   * the rounds a win takes less one, in versus each side's health handicap (a row of full health),
+   * and whether the remake's reachable walls stand (`walls.ts`).
    */
-  readonly options: { roundTime: number; rounds: number; readonly handicaps: number[] };
+  readonly options: { roundTime: number; rounds: number; readonly handicaps: number[]; walls: number };
   /** The stage's song (its name record's, or the mode's), which each round starts. */
   stageSong: number;
   /** Per slot, a stepping move's travel left over, in 256ths (x and z). */

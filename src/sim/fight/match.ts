@@ -255,6 +255,27 @@ function hangOwn(f: Fighter, own: readonly (OwnAccessory | null)[]): void {
   });
 }
 
+/** The hips' joint and part. */
+const HIPS = 11;
+
+/**
+ * The joints of the accessories a model hangs from the hips: a model's own accessories whose parent
+ * is the hips, or the parts the tables hang on the hips' part by its records, where they are drawn.
+ */
+export function hungFromHips(data: Pick<FightTables, 'skeleton' | 'models'>, pack: number): number[] {
+  const model = data.models[pack];
+  if (model == null) return [];
+  const own = model.accessories;
+  if (own !== undefined) return own.flatMap((accessory, k) => (accessory !== null && accessory.parent === HIPS ? [FIRST_ACCESSORY + k] : []));
+  const skeleton = data.skeleton;
+  const tails: number[] = [];
+  for (let part = FIRST_ACCESSORY; part < skeleton.partJoints.length; part += 1) {
+    const parent = model.records[skeleton.partRecords[part]!]?.parent ?? -1;
+    if (parent >= 0 && skeleton.partJoints[parent] === HIPS && skeleton.accessoriesDrawn[pack]?.[part - FIRST_ACCESSORY] !== 0) tails.push(skeleton.partJoints[part]!);
+  }
+  return tails;
+}
+
 /** A fighter's full health for the mode. */
 export function setMaxHealth(state: FightState, data: FightTables, f: Fighter): void {
   const health = data.roster.health;

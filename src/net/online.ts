@@ -111,7 +111,7 @@ export interface OnlineOptions<S> {
  * players and those of every release back to that one play each other; one that changes any of
  * them sets it to its own version.
  */
-export const PLAYS_AS = '0.6.5';
+export const PLAYS_AS = '0.7.0';
 
 /** Frames between round trips measured: twice a second. */
 const PING_EVERY = 30;

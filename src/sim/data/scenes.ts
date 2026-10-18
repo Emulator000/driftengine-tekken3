@@ -447,6 +447,7 @@ export type OptionValue =
   | 'look'
   | 'brightness'
   | 'floorFade'
+  | 'walls'
   | 'crt';
 
 /**

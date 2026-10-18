@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { hingesOf, keepClothOff, newLimb, placeLimb, profileOf } from '../src/present/3d/fighter/garment.ts';
+import { hungFromHips } from '../src/sim/fight/match.ts';
 
 const I = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 const frame = (t, r = I) => ({ r, t });
@@ -123,4 +124,20 @@ test('a tail\'s point is not turned: where a leg swings into where its spring ho
   assert.ok(Math.abs(fromLine(at, thigh.at, thigh.along) - 108) < 0.5, `kept at ${fromLine(at, thigh.at, thigh.along).toFixed(1)} mm`);
   const along = (p) => p.map((v, i) => v - thigh.at[i]).reduce((s, v, i) => s + v * thigh.along[i], 0);
   assert.ok(Math.abs(along(at) - along(tail)) < 1e-3, 'level with where it was');
+});
+
+test("the tails kept clear of the legs: a board's model's own accessories hung from the hips, or the parts a console's model's records hang on the hips' part, where drawn", () => {
+  const partJoints = [0, 1, 11, 12, 13, 14, 15, 16, 17, 3, 4, 5, 6, 7, 8, 9, 10, 2, 18, 19, 20, 21];
+  const partRecords = [0, 1, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24];
+  const records = Array.from({ length: 25 }, () => ({ offset: [0, 0, 0], parent: 0, rest: [0, 0, 0] }));
+  /* Part 18 on the hips' part (2), 19 on another, 20 on the hips but not drawn, 21 hung on nothing. */
+  records[21].parent = 2;
+  records[22].parent = 1;
+  records[23].parent = 2;
+  records[24].parent = -1;
+  const own = [{ parent: 11 }, null, { parent: 5 }, { parent: 11 }];
+  const data = { skeleton: { partJoints, partRecords, accessoriesDrawn: [[1, 1, 0, 1], [1, 1, 1, 1]] }, models: [{ records }, { records, accessories: own }] };
+  assert.deepEqual(hungFromHips(data, 0), [18], "the console's model: the drawn parts its records hang on the hips");
+  assert.deepEqual(hungFromHips(data, 1), [18, 21], "the board's model: its own accessories whose parent is the hips");
+  assert.deepEqual(hungFromHips({ ...data, models: [null] }, 0), [], 'no model, no tails');
 });

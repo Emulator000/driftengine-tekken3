@@ -306,10 +306,10 @@ export class Fighter {
   private picture = 0;
   /** The vertices of the face's pictures. */
   private readonly onPictures: Uint32Array;
-  /** The skin as the device was last given it, and whether a hand or the face changed it since. */
+  /** The skin as the device was last given it, and the vertices a hand or the face changed since: a first and one past the last, each. */
   private readonly data: PointSkinData;
-  private skin: PointSkinHandle;
-  private stale = false;
+  private readonly skin: PointSkinHandle;
+  private readonly changed: number[] = [];
   /** Each joint a vertex names, as its transform into the player's axes: sixteen floats, column-major; then the kept points'. */
   private readonly matrices: Float32Array;
   /** How many joints the vertices name. */
@@ -406,7 +406,7 @@ export class Fighter {
         for (let c = 0; c < 3; c += 1) m.normal[v * 3 + c] = normals[k * 3 + c]!;
         this.skinVertex(v);
       }
-      this.stale = true;
+      this.change(group.vertices);
     }
   }
 
@@ -416,12 +416,23 @@ export class Fighter {
     if (shown === this.picture) return;
     this.picture = shown;
     for (const v of this.onPictures) this.skinVertex(v);
-    this.stale = true;
+    this.change(this.onPictures);
+  }
+
+  /** The span of `vertices` kept for the next pose to give the device. */
+  private change(vertices: ArrayLike<number>): void {
+    let first = this.mesh.vertexCount;
+    let end = 0;
+    for (let k = 0; k < vertices.length; k += 1) {
+      first = Math.min(first, vertices[k]!);
+      end = Math.max(end, vertices[k]! + 1);
+    }
+    if (end > first) this.changed.push(first, end);
   }
 
   /**
    * Poses every vertex for the joints' world transforms, on the device; a joint the skeleton lacks
-   * leaves its points as they are. A hand or a face changed since the last pose makes the skin again.
+   * leaves its points as they are. What a hand or a face changed since the last pose is rewritten in the skin first.
    */
   pose(skeleton: readonly (JointTransform | undefined)[]): void {
     const m = this.mesh;
@@ -448,11 +459,18 @@ export class Fighter {
       f[o + 15] = 1;
     }
     if (this.worn !== null) this.wear(this.worn, joints);
-    if (this.stale) {
-      this.stale = false;
-      this.renderer.disposePointSkin(this.skin);
-      this.skin = this.renderer.createPointSkin(this.handle, this.data);
+    const d = this.data;
+    for (let k = 0; k < this.changed.length; k += 2) {
+      const first = this.changed[k]!;
+      const end = this.changed[k + 1]!;
+      this.renderer.updatePointSkin(this.skin, first, {
+        joints: d.joints.subarray(first * INFLUENCES, end * INFLUENCES),
+        weights: d.weights.subarray(first * INFLUENCES, end * INFLUENCES),
+        points: d.points.subarray(first * INFLUENCES * 3, end * INFLUENCES * 3),
+        normals: d.normals.subarray(first * 3, end * 3),
+      });
     }
+    this.changed.length = 0;
     this.renderer.posePointSkin(this.skin, f);
   }
 

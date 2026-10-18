@@ -316,3 +316,30 @@ test('two Versus games over a bad link pick their characters, fight, and stay th
   assert.ok(ticks.length > 30, `fields compared: ${ticks.length}`);
   assert.deepEqual(differ, [], 'the same game, field by field');
 });
+
+test('two Versus games with the walls over a bad link reach the wall and stay the same game', { skip, timeout: 300_000 }, async () => {
+  const games = await versusGames();
+  const { MenuMode, startMode } = await import('../src/sim/game/menu.ts');
+  const { WALL_REACH, BODY } = await import('../src/sim/fight/walls.ts');
+  for (const g of games) {
+    g.state.remake.settings.walls = 1;
+    startMode(g.state, MenuMode.VERSUS, 1);
+  }
+  assert.ok(games.every((g) => g.state.world.options.walls === 1), 'the walls on both');
+  const match = pair(games, { latencyMs: 45, jitterMs: 20, loss: 0.05, reorder: 0.05, reorderMs: 20 });
+  /* Past the select, both walk the same way, the second backing off, a punch now and then. */
+  const toTheWall = (seat, field) => (field < 900 ? (field % 23 === seat * 5 ? 0x40 : 0) : field % 40 < 34 ? 0x2000 : [0x80, 0x10][seat]);
+  let most = 0;
+  for (let k = 0; k < 3000; k += 100) {
+    run(match, 100, toTheWall);
+    for (const f of games[0].state.world.fighters.slice(0, 2)) most = Math.max(most, Math.abs(f.skeleton.base.translation[0]), Math.abs(f.skeleton.base.translation[2]));
+  }
+  const [a, b] = match.sides;
+  assert.equal(a.session.desync, null, a.session.reason);
+  assert.equal(b.session.desync, null, b.session.reason);
+  assert.ok(most >= WALL_REACH - BODY - 100, `a fighter reached the wall (${most})`);
+  assert.ok(most <= WALL_REACH - BODY, 'and no further');
+  const safe = Math.min(a.session.tick, b.session.tick) - 2 * ROLLBACK_DEPTH;
+  const { differ } = agreed(match.sides, safe);
+  assert.deepEqual(differ, [], 'the same game, field by field');
+});

@@ -462,7 +462,7 @@ export function chooseReactions(state: FightState, data: FightData): void {
  * each in two forms chosen by the stance's bit 0x2; a launch when the fighter is already airborne or
  * its move says so.
  */
-function hitReaction(data: FightData, f: Fighter, opponent: Fighter): void {
+export function hitReaction(data: FightData, f: Fighter, opponent: Fighter): void {
   const alternate = (f.stance & 2) !== 0;
   const pick = (type: number, field: number): void => {
     f.next.type = transitionType(data, f, type);

@@ -14,6 +14,7 @@ import { layArena, stepScenery } from './arena.ts';
 import { ballFrame, ballShoves, stepBackdrop } from './ball.ts';
 import { blankFightState } from './blank.ts';
 import { easePulls, followThrower, keepInBounds, markTargets, measureHandTravel, measurePairs, measureTravel, pushApart, rememberRoot, setPushRadii, targetOf, updateThrowCarry } from './body.ts';
+import { passWallPush, wallSplats } from './walls.ts';
 import { startReplayCamera, stepCamera, stepReplayCamera, stepShake } from './camera.ts';
 import { chooseMoves, chooseReactions } from './cancel.ts';
 import { computerInput } from './computer.ts';
@@ -35,10 +36,11 @@ import { Mode, type FightData, type FightState, type Fighter } from './state.ts'
 import { rotateLong } from '../math/matrix.ts';
 import { hitVibration } from './vibration.ts';
 
-/** A quick match: the stage and entrants, and the computer's difficulty and the arcade stage it is tuned by. */
+/** A quick match: the stage and entrants, the computer's difficulty and the arcade stage it is tuned by, and whether the remake's walls stand (none by default). */
 export interface QuickMatch extends MatchSetup {
   readonly difficulty?: number;
   readonly arcadeStage?: number;
+  readonly walls?: number;
 }
 
 /** The game's steps around the fight: the picture held, shown again, a round starting, fighting. */
@@ -128,6 +130,7 @@ export class Fight {
     state.options.rounds = QUICK.rounds;
     state.options.roundTime = QUICK.roundTime;
     state.options.handicaps.fill(QUICK.handicap);
+    state.options.walls = setup.walls ?? 0;
     state.match.canPause = 1;
     state.computer.difficulty = setup.difficulty ?? 0;
     state.computer.arcadeStage = setup.arcadeStage ?? 0;
@@ -404,7 +407,10 @@ function live(state: FightState, data: FightData): void {
   setPushRadii(data, a);
   setPushRadii(data, b);
   markTargets(state, ball ? 3 : 2);
-  if (state.status < 3) pushApart(state, data, a, b);
+  if (state.status < 3) {
+    pushApart(state, data, a, b);
+    passWallPush(state, a, b);
+  }
   clearHits(a);
   clearHits(b);
   detectHit(state, data, first, second);
@@ -431,5 +437,6 @@ function live(state: FightState, data: FightData): void {
   punchPairs(state, b);
   rememberFrames(state);
   chooseMoves(state, data);
+  wallSplats(state, data);
   rememberRoundFrames(state);
 }
