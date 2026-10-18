@@ -33,7 +33,7 @@ import { ArcadeBackground } from './stage/arcade-background.ts';
 import { placeParts } from './stage/pieces.ts';
 import { freeView } from './free-view.ts';
 import { mirror } from '../2d/mirror.ts';
-import { otherSideCamera, otherSideView, type DrawnCamera } from './other-side.ts';
+import { focusOf, otherSideCamera, otherSideView, type DrawnCamera } from './other-side.ts';
 import type { ArcadePanorama, PieceMotion } from '../../assets/manifest.ts';
 import { ForceItems } from './effects/force-items.ts';
 import { stageCodes } from '../../sim/fight/force-stage.ts';
@@ -560,14 +560,15 @@ export class FightView {
 
   /**
    * An online fight seen from this player's side where the game puts it on the other: the camera
-   * across the fighters' line (`other-side.ts`), the game's camera as the layout reads it with it.
+   * turned half round the point it looks at (`other-side.ts`), the game's camera as the layout reads
+   * it turned with it.
    */
   private lookFromOtherSide(state: FightState): DrawnCamera {
-    const [a, b] = [state.fighters[0]!.skeleton.base.translation, state.fighters[1]!.skeleton.base.translation];
-    otherSideView(this.view, a, b);
+    const focus = focusOf(state.camera.drawn, state.camera.tracked);
+    otherSideView(this.view, focus);
     this.camera.adoptView(this.view, this.camera.projection);
     eyeOf(this.view, this.camera.position);
-    return otherSideCamera(state.camera.drawn, a, b);
+    return otherSideCamera(state.camera.drawn, focus);
   }
 
   /**

@@ -218,9 +218,12 @@ and the room waits on.
 rounds to win, with reachable walls unless the host's REACHABLE WALLS is OFF, from the state the
 game powers on with: the host's options and earned characters, each player's own buttons. Your progress and records are left as they were. Where the server seats
 you on the other side than SIDE asks (both of you asking for the same one), you see the fight from
-the other side of the stage, the camera across the fighters' line as Tekken's own online play does
+the other side of the stage, the game's camera turned half round the fighters as Tekken's own online play does
 it: your fighter and its plate on your side, the stage's far side behind them, nothing drawn
-mirrored, the stick's left and right with the picture. Each player's name shows under their
+mirrored, the stick's left and right with the picture. A level round (a double knockout, or the time
+up with your health alike) gives each of you a round; where that brings both of you to the rounds
+that win the match, the match is a draw (DRAW GAME), between two games of 0.7.4 or later (with an
+older one, the game's own tie-break gives it to the host). Each player's name shows under their
 fighter's, on a dark tag of its own, and their streak of wins, where the server counts one, at the
 foot of the screen under their side as Versus shows a streak (WIN:1, WINS:3). The versus screen counts the matches on your pairing: FIGHT 1, then FIGHT 2 at the first rematch
 and so on (a 0.6.5 game shows FIGHT 1 at each). Both of you stay on the versus screen until both

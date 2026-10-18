@@ -512,8 +512,8 @@ export async function playGame(): Promise<void> {
         const change = state.scene === Scene.FIGHT && state.ogreChange.shows !== OgreChangeShows.NONE && data !== null;
         const shows = online?.ending === true || online?.holding === true ? null : change ? 'change' : state.scene === Scene.FIGHT ? (state.drewFight !== 0 && data !== null ? 'fight' : null) : records ? 'records' : intro ? 'intro' : state.held === 0 ? `scene ${state.scene}` : null;
         /*
-         * An online match's fight seen from this player's side: the camera across the fighters' line
-         * (`mirror.ts`), a frame that draws the fight alone; a picture held stays as it was drawn.
+         * An online match's fight seen from this player's side: the camera turned half round the point
+         * it looks at (`mirror.ts`), a frame that draws the fight alone; a picture held stays as it was drawn.
          */
         if (shows !== null) mirror.on = online?.mirroredSide === true && shows === 'fight';
         placeDisplay();

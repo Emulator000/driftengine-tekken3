@@ -39,6 +39,13 @@ export interface Hello {
    * older version's hello, which neither says nor waits for it.
    */
   readonly together?: boolean;
+  /**
+   * Whether this side plays a match whose level round (a double knockout, or time up with health
+   * alike) brings both to the rounds that win it as a draw, rather than as the game's own tie-break
+   * has it (the side on a streak, online the host's always). Absent from an older version's hello:
+   * the match is then played by the old rule.
+   */
+  readonly draws?: boolean;
 }
 
 /** A fighter chosen: its roster id and its costume. */
@@ -56,6 +63,8 @@ export interface Start {
   readonly fighters: readonly [Fighter, Fighter];
   /** The match's number on this pairing: one, then one more for each rematch (`MatchSession`'s `match`). */
   readonly match: number;
+  /** 1 where both sides said they play a level match point as a draw (`Hello`'s `draws`): the match is played so. */
+  readonly draws?: number;
 }
 
 /** The game an online match plays, as the page gives it. */
@@ -667,7 +676,7 @@ export class Online<S> {
     const transport = new WebSocketTransport({ socket: this.wire.socket, self: seat });
     this.transport = (this.options.lagMs ?? 0) > 0 ? new LateTransport(transport, this.options.lagMs!, () => this.now) : transport;
     const { name, delay, keys, fighter } = this.options.player();
-    const hello: Hello = { k: 'hello', version: this.playsAs, roster: rosterWord(this.options.game.roster), name, delay, keys, fighter, together: true };
+    const hello: Hello = { k: 'hello', version: this.playsAs, roster: rosterWord(this.options.game.roster), name, delay, keys, fighter, together: true, draws: true };
     this.relay!.toPeer(hello);
   }
 
@@ -747,7 +756,7 @@ export class Online<S> {
     const { keyChoices, defaultKeys } = this.options.game;
     const keys = (k: readonly number[]): readonly number[] => (Array.isArray(k) && k.length === 8 && k.every((n) => Number.isInteger(n) && 0 <= n && n < keyChoices) ? [...k] : [...defaultKeys]);
     const fighter = (f: Fighter | undefined): Fighter => ({ roster: Number.isInteger(f?.roster) ? f!.roster : 0, costume: Number.isInteger(f?.costume) ? f!.costume & 3 : 0 });
-    const start: Start = { k: 'start', options: this.options.game.options(this.playsAs), delay, keys: [keys(ours.keys), keys(theirs.keys)], fighters: [fighter(ours.fighter), fighter(theirs.fighter)], match: 1 };
+    const start: Start = { k: 'start', options: this.options.game.options(this.playsAs), delay, keys: [keys(ours.keys), keys(theirs.keys)], fighters: [fighter(ours.fighter), fighter(theirs.fighter)], match: 1, ...(theirs.draws === true ? { draws: 1 } : {}) };
     this.starting = { start, at: this.now + GREETING_HOLD_MS };
   }
 

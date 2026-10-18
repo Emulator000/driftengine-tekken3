@@ -509,6 +509,8 @@ export class OnlinePlay {
     /* Three rounds to win (the option is the rounds less one), whatever the host's options; a round's end cut short by both players alone. */
     state.world.options.rounds = 2;
     state.world.match.online = 1;
+    /* A level round that brings both to the rounds that win the match a draw, where both games agreed it, rather than the host's by the game's tie-break. */
+    if (start.draws === 1) state.world.match.drawRule = 1;
     /* The remake's walls as the host's REACHABLE WALLS has them for an online match; none in one played as an older version. */
     state.world.options.walls = as === PLAYS_AS && start.options.walls === 1 ? 1 : 0;
     state.run.onlineStage = typeof start.options.stage === 'number' ? start.options.stage : -1;

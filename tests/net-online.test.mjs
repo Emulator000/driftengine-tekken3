@@ -259,6 +259,40 @@ test("a match whose other side stops playing ends as a disconnection after five 
   }
 });
 
+test("two games that play a level match point as a draw agree on it in the match's start; with an older one, which says nothing of it, the match is played by the old rule", async () => {
+  const { relay, url } = await server();
+  const sides = [];
+  try {
+    const [a, b] = await playing(url);
+    sides.push(a, b);
+    assert.equal(a.log.began.start.draws, 1, "the host's start says it");
+    assert.equal(b.log.began.start.draws, 1, 'the guest begun by it');
+    a.online.disconnect();
+    b.online.disconnect();
+    /* A guest whose hello says nothing of it, as 0.7.3's. */
+    const c = side(url, { name: 'Host' });
+    const d = side(url, { name: 'Older' });
+    sides.push(c, d);
+    c.online.connect();
+    d.online.connect();
+    await frames([c, d], () => c.online.state === 'lobby' && d.online.state === 'lobby');
+    const send = d.online.relay.toPeer.bind(d.online.relay);
+    d.online.relay.toPeer = (message) => send(message.k === 'hello' ? { ...message, draws: undefined } : message);
+    /* The newer one queued first, so it hosts. */
+    c.online.quickMatch();
+    await frames([c, d], () => false, 30);
+    d.online.quickMatch();
+    await frames([c, d], () => c.online.state === 'offered' && d.online.state === 'offered');
+    c.online.answer(true);
+    d.online.answer(true);
+    await frames([c, d], () => c.online.state === 'playing' && d.online.state === 'playing');
+    assert.equal(c.log.began.start.draws, undefined, `no word of it in the start (the host's seat ${c.log.began.seat}, the older's ${d.log.began.seat})`);
+  } finally {
+    for (const one of sides) one.online.disconnect();
+    await relay.close();
+  }
+});
+
 test('a side does not hold for an older one, which says nothing of being ready', async () => {
   const { relay, url } = await server();
   const [a, b] = await playing(url);
