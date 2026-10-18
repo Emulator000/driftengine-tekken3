@@ -52,6 +52,11 @@ issue and pull request, is public.
   fetched at the engine's version when `npm run desktop`, `npm run android` or `npm run ios` runs:
   Electron on a computer, a WebView on a phone. The touch pad (`src/app/touch.ts`) is the first player's pad on
   a touch screen.
+- Online, two games are paired by `PLAYS_AS` (`src/net/online.ts`), not by the package's version:
+  the oldest release whose matches this one plays exactly as. A release that changes the
+  simulation, the match's setup or the words between the games sets it to its own version; one
+  that only draws or sounds otherwise keeps it, so its players still meet those of earlier
+  releases (`tests/net-online.test.mjs` compares the simulation with that release's tag).
 - The engine comes from npm. A checkout at `../drftrun/driftengine` replaces it in development
   (`DRIFT_ENGINE_LOCAL=0` forces the npm packages).
 

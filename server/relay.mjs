@@ -16,7 +16,9 @@
  * (`peer`) and binary ones (the pads' words) are passed on as they are, until one leaves (a quick
  * match's two, leaving it without a rematch, kept apart a while too). The players try to reach
  * each other directly (WebRTC) and use this only for what they cannot; the servers they ask for
- * that (STUN, TURN) are told them in the welcome.
+ * that (STUN, TURN) are told them in the welcome. Each player's streak of matches won is kept here,
+ * in memory, by the id their game sends at its hello: the games say who won each match, and leaving
+ * one under way loses it.
  *
  *   node server/relay.mjs [--config file.json] [--host 0.0.0.0] [--port 8790] [--path /] ...
  *
@@ -42,6 +44,12 @@ const GAME = 'tekken3';
 
 /** Seconds two players who said no to each other are kept apart. */
 const APART_SECONDS = 120;
+/** Seconds a match's result waits for the second player's word on it, once the first has said it. */
+const RESULT_SECONDS = 15;
+/** Hours a player's streak of wins is kept after they were last on the server. */
+const STREAK_HOURS = 24;
+/** A player's own id, as their game makes it: hex digits, kept by the game between visits. */
+const OWN_ID = /^[0-9a-f]{16,64}$/;
 
 /** Room codes: letters and digits that read and sound unlike each other. */
 export const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -208,6 +216,12 @@ export class Relay {
     this.offers = new Set();
     this.apart = new Map();
     this.ids = 0;
+    /**
+     * Each player's streak of matches won without a loss, by the id their game keeps (a game that
+     * sends none has none), and when they were last on the server: kept here alone, and lost as the
+     * server stops.
+     */
+    this.streaks = new Map();
   }
 
   /** Its own server, on the configured address: plain, or TLS with a certificate. */
@@ -321,7 +335,7 @@ export class Relay {
   }
 
   connected(socket, request) {
-    const client = { id: (this.ids += 1), address: addressOf(request), offer: null, socket, hello: false, name: 'PLAYER', build: '', roster: 0n, fighter: -1, room: null, seat: -1, queued: false, heard: this.now(), window: this.now(), count: 0, alive: true };
+    const client = { id: (this.ids += 1), address: addressOf(request), offer: null, socket, hello: false, name: 'PLAYER', build: '', own: '', roster: 0n, fighter: -1, room: null, seat: -1, queued: false, heard: this.now(), window: this.now(), count: 0, alive: true };
     this.clients.add(client);
     socket.on('pong', () => (client.alive = true));
     socket.on('message', (data, binary) => this.message(client, data, binary));
@@ -375,9 +389,15 @@ export class Relay {
         return this.list(client);
       case 'peer': {
         const other = this.partner(client);
-        if (other !== null) this.tell(other, { ev: 'peer', body: command.body ?? null });
+        if (other === null) return;
+        /* The host's start: a match under way on the pairing, by its number. */
+        const body = command.body;
+        if (client.seat === 0 && body !== null && typeof body === 'object' && body.k === 'start' && Number.isInteger(body.match)) this.underway(client.room, body.match);
+        this.tell(other, { ev: 'peer', body: body ?? null });
         return;
       }
+      case 'result':
+        return this.result(client, command);
       case 'ping':
         return this.tell(client, { ev: 'pong', t: command.t ?? 0, ...this.counts() });
       default:
@@ -385,7 +405,7 @@ export class Relay {
     }
   }
 
-  hello(client, { game, protocol, name, build, roster }) {
+  hello(client, { game, protocol, name, build, roster, id }) {
     if (game !== GAME || protocol !== PROTOCOL) {
       this.tell(client, { ev: 'refused', why: protocol !== PROTOCOL ? 'protocol' : 'game' });
       client.socket.close(1008, 'refused');
@@ -394,9 +414,69 @@ export class Relay {
     client.hello = true;
     client.name = cleanName(name);
     client.build = String(build ?? '').slice(0, 64);
+    client.own = typeof id === 'string' && OWN_ID.test(id) ? id : '';
     client.roster = rosterOf(roster);
     this.log(`[relay] ${who(client)} connected (${this.clients.size} on the server)`);
-    this.tell(client, { ev: 'welcome', name: this.config.name, motd: this.config.motd, ice: this.config.ice, protocol: PROTOCOL, rooms: this.rooms.size, ...this.counts() });
+    /* Its streak to a game that keeps an id, which so learns the server counts them. */
+    this.tell(client, { ev: 'welcome', name: this.config.name, motd: this.config.motd, ice: this.config.ice, protocol: PROTOCOL, rooms: this.rooms.size, ...this.counts(), ...(client.own === '' ? {} : { wins: this.winsOf(client) }) });
+  }
+
+  /** A player's streak of wins (0 for one whose game keeps no id). */
+  winsOf(client) {
+    return client.own === '' ? 0 : (this.streaks.get(client.own)?.wins ?? 0);
+  }
+
+  /** A player's streak set (where their game keeps an id), the time they were last seen with it. */
+  setWins(client, wins) {
+    if (client.own !== '') this.streaks.set(client.own, { wins, seen: this.now() });
+  }
+
+  /** Each player of a pairing told their streak and the other's (a game that keeps no id told nothing, and its player's streak not given). */
+  tellWins(room) {
+    room.seats.forEach((one, seat) => {
+      const other = room.seats[1 - seat];
+      if (one !== null && one.own !== '') this.tell(one, { ev: 'wins', wins: this.winsOf(one), ...(other?.own ? { peer: this.winsOf(other) } : {}) });
+    });
+  }
+
+  /** A match begun on a pairing (its number): under way until its result is said. */
+  underway(room, match) {
+    if (room === null) return;
+    room.match = { number: match, said: [null, null], until: 0 };
+  }
+
+  /**
+   * A player's word on the match's result: the seat that won it (-1 a draw). Settled once both have
+   * said it, or once one has where the other's game says no results (it keeps no id) or the other
+   * says nothing in time.
+   */
+  result(client, { match, winner }) {
+    const room = client.room;
+    const under = room?.match;
+    if (under == null || under.number !== match || client.own === '' || ![-1, 0, 1].includes(winner)) return;
+    under.said[client.seat] = winner;
+    const other = this.partner(client);
+    if (under.said.every((one) => one !== null) || other === null || other.own === '') this.settleMatch(room);
+    else if (under.until === 0) under.until = this.now() + RESULT_SECONDS * 1000;
+  }
+
+  /**
+   * A match's result as its players said it: the winner's streak one longer and the loser's ended (a
+   * draw neither), unless the two said otherwise of it, which counts for nothing. Both told.
+   */
+  settleMatch(room) {
+    const under = room.match;
+    if (under == null) return;
+    room.match = null;
+    const said = under.said.filter((one) => one !== null);
+    if (said.length === 0 || said.some((one) => one !== said[0])) return;
+    const winner = said[0];
+    if (winner === -1) return;
+    const [won, lost] = [room.seats[winner], room.seats[1 - winner]];
+    if (won !== null) this.setWins(won, this.winsOf(won) + 1);
+    if (lost !== null) this.setWins(lost, 0);
+    this.log(`[relay] ${room.quick ? 'quick match' : `room ${room.code}`} match ${under.number}: ${won === null ? '?' : who(won)} won`);
+    this.tellWins(room);
   }
 
   /** The players on the server (those who said hello) and those waiting in its quick match, told with each pong so a page can say how many are about. */
@@ -413,7 +493,7 @@ export class Relay {
     let code;
     do code = Array.from({ length: CODE_LENGTH }, () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]).join('');
     while (this.rooms.has(code));
-    const room = { code, listed: listed === true, title: cleanTitle(title) || `${client.name}'S ROOM`, pass: typeof pass === 'string' ? pass.slice(0, 32) : '', seats: [client, null], quick: false, offering: null };
+    const room = { code, listed: listed === true, title: cleanTitle(title) || `${client.name}'S ROOM`, pass: typeof pass === 'string' ? pass.slice(0, 32) : '', seats: [client, null], quick: false, offering: null, match: null };
     this.rooms.set(code, room);
     client.room = room;
     client.seat = 0;
@@ -491,7 +571,7 @@ export class Relay {
       let code;
       do code = Array.from({ length: CODE_LENGTH }, () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]).join('');
       while (this.rooms.has(code));
-      const room = { code, listed: false, title: '', pass: '', seats: [first, null], quick: true, offering: null };
+      const room = { code, listed: false, title: '', pass: '', seats: [first, null], quick: true, offering: null, match: null };
       this.rooms.set(code, room);
       first.room = room;
       first.seat = 0;
@@ -506,6 +586,7 @@ export class Relay {
   expireOffers() {
     const now = this.now();
     for (const offer of [...this.offers]) if (offer.until <= now) this.settle(offer, 'expired');
+    for (const room of this.rooms.values()) if (room.match != null && room.match.until !== 0 && room.match.until <= now) this.settleMatch(room);
     for (const [key, until] of this.apart) if (until <= now) this.apart.delete(key);
   }
 
@@ -515,8 +596,9 @@ export class Relay {
     client.room = room;
     client.seat = 1;
     const [first, second] = room.seats;
-    this.tell(first, { ev: 'paired', seat: 0, code: room.code, peer: { name: second.name } });
-    this.tell(second, { ev: 'paired', seat: 1, code: room.code, peer: { name: first.name } });
+    const peer = (one) => ({ name: one.name, ...(one.own === '' ? {} : { wins: this.winsOf(one) }) });
+    this.tell(first, { ev: 'paired', seat: 0, code: room.code, peer: peer(second) });
+    this.tell(second, { ev: 'paired', seat: 1, code: room.code, peer: peer(first) });
     this.log(`[relay] ${room.quick ? 'quick match' : `room ${room.code}`}: ${who(first)} and ${who(second)}`);
   }
 
@@ -540,6 +622,14 @@ export class Relay {
     if (client.offer !== null) this.settle(client.offer, 'gone', client);
     const room = client.room;
     if (room === null) return;
+    /* Left with a match under way that neither has said is over: lost, for the one who left; said over by one, settled as said. */
+    if (room.match != null) {
+      if (room.match.said.every((one) => one === null)) {
+        this.setWins(client, 0);
+        room.match = null;
+        if (client.own !== '') this.tell(client, { ev: 'wins', wins: 0 });
+      } else this.settleMatch(room);
+    }
     this.rooms.delete(room.code);
     if (apart && room.quick && room.seats[0] !== null && room.seats[1] !== null) this.apart.set(pairKey(room.seats[0], room.seats[1]), this.now() + APART_SECONDS * 1000);
     for (const one of room.seats) {
@@ -577,6 +667,8 @@ export class Relay {
       client.alive = false;
       client.socket.ping();
     }
+    const on = new Set([...this.clients].map((client) => client.own));
+    for (const [own, streak] of this.streaks) if (!on.has(own) && now - streak.seen > STREAK_HOURS * 3600 * 1000) this.streaks.delete(own);
   }
 }
 

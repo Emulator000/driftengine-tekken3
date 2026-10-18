@@ -126,3 +126,19 @@ test('Arcade chosen with start and both shoulders held chooses on the versus sel
   assert.equal(state.entrants.roster[0] * 4, scenes.vsSelect.sides[0].firstCode, 'the character chosen');
   assert.equal(state.entrants.computer[1], 1, 'the computer on the other side');
 });
+
+test("online, the versus screen's FIGHT counts the pairing's matches, the game's own state left as it is", async () => {
+  const { versusRuns } = await import('../src/present/scenes/versus.ts');
+  const state = blankGameState();
+  const run = (text, x, y) => ({ font: 1, colour: 6, x, y, layer: 7, text });
+  state.versus.records.push({ kind: 'text', text: 'VS', colour: 6, font: 3, x: 0, y: 0 }, { kind: 'text', text: 'FIGHT 1', colour: 6, font: 1, x: 0x1c, y: 0x2a });
+  state.printed.push(run('VS', 0, 0), run('FIGHT 1', 0x1c, 0x2a), run('JIN', 0, 0x80));
+  assert.equal(versusRuns(state), state.printed, 'offline, the game\'s own');
+  state.run.online = 1;
+  state.online.fight = 1;
+  assert.equal(versusRuns(state), state.printed, 'the first match, the game\'s own');
+  state.online.fight = 3;
+  assert.deepEqual(versusRuns(state).map((r) => r.text), ['VS', 'FIGHT 3', 'JIN'], 'the third match on the pairing');
+  assert.deepEqual(versusRuns(state)[1], { ...run('FIGHT 3', 0x1c, 0x2a) }, 'where the game prints it');
+  assert.equal(state.printed[1].text, 'FIGHT 1', "the game's printed runs, which the two games compare, untouched");
+});

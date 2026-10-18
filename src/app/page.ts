@@ -11,12 +11,12 @@ import { FpsMeter } from './fps-meter.ts';
 import { FrameStats } from './frame-stats.ts';
 import { FreeCamera } from './free-camera.ts';
 import { freeView } from '../present/3d/free-view.ts';
-import { PadInput } from './input.ts';
+import { gamepadConnected, PadInput } from './input.ts';
 import { CONSOLE_PADS, type Controllers } from '../present/2d/controls.ts';
 import { evenFrames } from './pacing.ts';
 import { tellWith } from './remote-log.ts';
 import { asked, settings } from './settings.ts';
-import { onPhone, TouchPad, wantsTouch } from './touch.ts';
+import { onPhone, TouchPad, touchChoice, touchDevice, touchShown } from './touch.ts';
 
 const ASSETS = `${import.meta.env.BASE_URL}assets/`;
 const DATA = `${import.meta.env.BASE_URL}data/`;
@@ -91,7 +91,7 @@ async function pickQuality(): Promise<{ quality: Quality; why: string }> {
  */
 export async function pageRenderer(): Promise<{ renderer: RendererApi; backend: string }> {
   const frame = document.createElement('div');
-  frame.style.cssText = 'position:fixed;inset:0';
+  frame.style.cssText = 'position:fixed;inset:0;overflow:hidden';
   canvas.replaceWith(frame);
   frame.append(canvas);
   const picked = await pickQuality();
@@ -105,7 +105,10 @@ export async function pageRenderer(): Promise<{ renderer: RendererApi; backend: 
    * surface's roughness, resolved with the edges over frames (one sample a pixel, which the
    * reflections march through); and a look of its own: its colour graded (`grade.ts`), the lens's
    * corners a little darker, a faint colour fringe toward the picture's edges, and its lights
-   * blooming a little more.
+   * blooming a little more. On WebGPU the frames are put together by the engine's reconstruction at
+   * its finest, which follows each fighter's own motion, so a fighter that moves stays clean where
+   * the temporal resolve, which knows only the camera's, left its pixels noisy; on WebGL2, which
+   * has no reconstruction, the temporal resolve.
    */
   const chosen = fightQuality(quality);
   const remaster: RenderQualityOptions = {
@@ -117,6 +120,7 @@ export async function pageRenderer(): Promise<{ renderer: RendererApi; backend: 
     screenSpaceReflections: { reachM: 20, maxRoughness: 0.6, blur: 0.05 },
     sceneSamples: 1,
     temporalAa: true,
+    reconstruction: RECONSTRUCTION,
   };
   const { renderer, backend, reason } = await createRenderer(canvas, remastered() ? remaster : chosen);
   if (remastered()) {
@@ -129,6 +133,9 @@ export async function pageRenderer(): Promise<{ renderer: RendererApi; backend: 
   addEventListener('resize', () => renderer.resize());
   return { renderer, backend };
 }
+
+/** The reconstruction's ratio, render to picture: its finest, the least it upscales. */
+const RECONSTRUCTION = 1.3;
 
 /** The remaster's looks, light to strong: how much of its grade (`grade.ts`), how dark the lens's corners and how wide its colour fringe. */
 const LOOKS = [
@@ -227,7 +234,13 @@ export function controllers(): Controllers {
 export function play(player: Player, renderer: RendererApi, backend: string): void {
   const input = new PadInput(window);
   pads = input;
-  const touch = wantsTouch(params) ? new TouchPad() : null;
+  /*
+   * The touch pad where it may ever show, shown and hidden each field as a gamepad is connected or
+   * goes (`touchShown`); the first player's as it comes back.
+   */
+  const choice = touchChoice(params);
+  const device = touchDevice();
+  const touch = touchShown(choice, device, false) ? new TouchPad() : null;
   if (touch !== null) input.uses(0, 'touch');
   const veryLow = quality === 'verylow';
   const budget = Number(params.get('budget') ?? (veryLow ? 2 * BUDGET_MS : BUDGET_MS));
@@ -256,6 +269,7 @@ export function play(player: Player, renderer: RendererApi, backend: string): vo
         if (failure !== null || stopAt <= fields || freeView.active) return;
         try {
           const start = performance.now();
+          if (touch?.show(touchShown(choice, device, gamepadConnected())) === true) input.uses(0, 'touch');
           const touched = touch?.word() ?? 0;
           if (touched !== 0) input.uses(0, 'touch');
           if (player.field([input.word(0) | touched, input.word(1)]) !== false) {

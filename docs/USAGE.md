@@ -67,7 +67,7 @@ address's.
 | `quality=low` | Leaves out the ambient occlusion and the bloom; a phone's default |
 | `quality=verylow` | The picture for an entry-level phone: the scene drawn straight to the screen with no pass after it, one pixel to the CSS pixel and no more pixels than a 640 by 480 picture, thirty pictures a second (the game still runs sixty fields), and the fighters with the console's meshes. It is the default on a phone whose GPU the browser names as an entry-level part (a Mali-G31, G51, G52 or G57, an Adreno 5xx or 600s to 610s, or a PowerVR) |
 | `budget=N` | The frame time, in milliseconds, the picture's density is held to (20 by default): while most of a fight's frames take longer, the picture steps down toward half its pixels each way, and back up as the frames allow; `0` holds it still |
-| `touch=1`, `touch=0` | The touch pad over the picture anywhere, or nowhere (by default on a touch screen or a phone) |
+| `touch=1`, `touch=0` | The touch pad over the picture anywhere and always, or hidden (as TOUCH PAD in REMAKE OPTION; by default on a touch screen or a phone while no gamepad is connected). A phone shows it while no gamepad is connected even with `touch=0` |
 | `remaster=on`, `remaster=off` | The fight remastered or not (as REMASTER in REMAKE OPTION), once `npm run remaster` has made its assets |
 | `look=light`, `look=normal`, `look=strong` | The remaster's look (as LOOK in REMAKE OPTION) |
 | `brightness=low`, `brightness=normal`, `brightness=high` | The remaster's brightness (as BRIGHTNESS in REMAKE OPTION) |
@@ -152,12 +152,12 @@ or the app) for every start after.
 | CLOTH | CLEAR OF LEGS (a board's fighter's coat panels and the tails it hangs from the hips kept clear of the legs: a panel carried over a raised thigh, a tail put out where a leg swings into it), ORIGINAL (as the board draws them, as `cloth=original`) |
 | PICTURE | AUTO (by the device), HIGH, LOW, VERY LOW (as `quality=`) |
 | FRAME RATE | OFF, ON (as `F`) |
-| TOUCH PAD | AUTO (on a touch screen or a phone), ON, OFF |
+| TOUCH PAD | AUTO (on a touch screen or a phone, hidden while a gamepad is connected), ON (always), OFF (hidden; a phone still shows it while no gamepad is connected, so it can always be played) |
 | REMASTER | OFF, ON (the fight drawn with the engine's lighting, the stage's own sky, light and 3D floor, and the assets `npm run remaster` made; until it has, the page says RUN NPM RUN REMASTER FIRST; off at the lowest picture quality) |
 | LOOK | LIGHT, NORMAL, STRONG (listed while REMASTER is on: how strongly the remastered picture is graded, its shadows toward teal and its lights toward magenta, its corners darkened and its edges fringed; changed at once) |
 | BRIGHTNESS | LOW, NORMAL, HIGH (listed while REMASTER is on: how brightly the remastered picture is exposed, LOW as it was first drawn; changed at once) |
 | FLOOR FADE | ON, OFF (listed while REMASTER is on: the floors darkened by depth, or away from the stage's lights, as the game darkens its own, an arcade stage's own floors with them; or lit evenly; changed at once) |
-| CRT FILTER | OFF (the default), ON: the picture as a television showed it, soft scanlines (240 down the picture), a faint aperture grille of red, green and blue columns and the corners darkened, the picture under them a little brighter; laid over the picture, so the same with any renderer and quality; changed at once |
+| CRT FILTER | OFF (the default), ON: the picture as a tape played on a television showed it. It is softened, a little across, and its colour much more, smeared to the right of the edges it belongs to. Over it lie soft scanlines (240 down the picture), a faint aperture grille of red, green and blue columns and darkened corners, the picture under them a little brighter. A fine grain crawls over it, a faint band rolls slowly down and the picture flickers a little; all three hold still where the system asks for less motion. Laid over the picture, so the same with any renderer and quality; changed at once |
 
 The frame rate and the CRT filter show or hide at once. The others change what the game loads: while one differs
 from the start's, the page says LEAVING RESTARTS THE GAME, and leaving it starts the game again
@@ -211,7 +211,9 @@ rounds to win, from the state the game powers on with: the host's options and ea
 each player's own buttons. Your progress and records are left as they were. Where the server seats
 you on the other side than SIDE asks, the fight is drawn mirrored: your fighter and its plate on
 your side, the stick's left and right with the picture. Each player's name shows under their
-fighter's, on a dark tag of its own. A round's end (its replay, the win poses) is cut short only
+fighter's, on a dark tag of its own, with their streak of wins (WINS 3) where the server counts
+one. The versus screen counts the matches on your pairing: FIGHT 1, then FIGHT 2 at the first rematch
+and so on (a 0.6.5 game shows FIGHT 1 at each). A round's end (its replay, the win poses) is cut short only
 once both of you have pressed to skip it; until then it plays on, for both.
 
 What the other player presses is guessed until it arrives, and a guess put right rolls the game
@@ -228,6 +230,14 @@ you asking, the same two fighters fight again on a stage drawn anew; a no from e
 in time, puts both back in the waiting room, waiting again (a quick match's two kept apart from
 each other a while; a room joined goes back to ONLINE MODE's page). A reset by either player ends
 the match too, the one who reset going back to the page.
+
+**Your streak of wins.** The server counts the matches each player wins without a loss: one more for
+each match won, back to none at a match lost or left while it was under way (the player left behind
+gains nothing), a draw changing nothing. The waiting room shows yours in its corner as WINS and the
+number, over the server's counts, and a match each player's by their name. The server keeps it in
+its memory by an id your game makes once and keeps (it shows it to no one), so it holds while you
+come and go, until the server stops or a day passes without you. A 0.6.5 game, which keeps no id,
+has no streak counted, and the player it plays is counted on their own game's word.
 
 Each side plays its own pad at once and the other's as it arrives, guessing it held until then; a
 press that comes late rolls the game back to its field and plays on again within the frame (eight
@@ -256,6 +266,15 @@ by default, on the router and the firewall; everyone sets SERVER to its public a
 (`203.0.113.7:8790`), the host `localhost:8790`. The players open nothing: where their games cannot
 reach each other directly, the presses go through the server. [server/README.md](../server/README.md#opening-it-to-the-internet)
 says more.
+
+## The version
+
+The mode menu shows the game's version at the screen's top right. To tell whether a newer one is
+out, the page asks GitHub's public API for this repository's tags. It does so at most once every six
+hours, keeps the newest on the device, and sends GitHub nothing but the request itself. Where a tag
+`vX.Y.Z` is higher than the game's version, (NEW VERSION AVAILABLE!) follows it. Without the
+network, or where GitHub does not answer, the version shows with what the device last kept, or alone.
+A checkout ahead of the newest tag shows no notice.
 
 ## When the game stops
 
@@ -385,6 +404,11 @@ buttons on the right in a diamond as on the pad (2 above, 1 and 4 either side, 3
 between two holds both), Select and Start between the thumbs. Start pauses the fight, as on the
 pad. The first touch takes the page to full screen in landscape where the browser lets it; the
 Android app is full screen already.
+
+A gamepad connected hides the touch pad (TOUCH PAD set to AUTO or OFF), and it comes back the moment
+the gamepad goes, mid-fight too: a phone with no gamepad always shows it, whatever TOUCH PAD says.
+A browser shows the page a gamepad once one of its buttons is pressed, so the touch pad stays until
+the gamepad's first press.
 
 A phone's page is `quality=low`, or `quality=verylow` on an entry-level phone, and its picture's
 density is held to its frames (`budget`).

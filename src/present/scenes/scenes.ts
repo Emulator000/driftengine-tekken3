@@ -15,7 +15,7 @@ import { TitleShows } from '../../sim/game/title.ts';
 import { drawOptions } from './options.ts';
 import { drawScene, type DrawnPictures } from './drawn.ts';
 import { CONSOLE_PADS, controlWords, type Controllers } from '../2d/controls.ts';
-import { drawMenu } from './menu.ts';
+import { drawMenu, NO_CORNER, type MenuCorner } from './menu.ts';
 import { drawSelect, paintSelectAhead, type SelectPictures } from './select.ts';
 import { drawVersus, paintVersusAhead } from './versus.ts';
 import { drawVsSelect } from './vs-select.ts';
@@ -99,6 +99,8 @@ export class ScenePresenter {
   private readonly data: SceneDrawingData;
   /** The players' controllers, whose buttons the scenes show. */
   controllers: Controllers = CONSOLE_PADS;
+  /** The mode menu's corner: the game's version, and whether a newer one is out. */
+  menuCorner: MenuCorner = NO_CORNER;
   /** The scenes' large pictures under their text, each layer with its own atlas. */
   private readonly art: ScreenLayer;
   private readonly layer: ScreenLayer;
@@ -290,7 +292,7 @@ export class ScenePresenter {
         drawTitle(game, game.attractScreen.draw, this.art, layer, this.pictures);
         break;
       case Scene.MENU:
-        drawMenu(game, this.art, layer, this.over, this.pictures.title);
+        drawMenu(game, this.art, layer, this.over, this.pictures.title, this.menuCorner);
         break;
       case Scene.OPTIONS:
         drawOptions(game, this.art, layer, this.pictures.optionsBackdrop, this.drawnContext());

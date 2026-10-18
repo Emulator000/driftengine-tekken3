@@ -108,6 +108,8 @@ export class Ground {
   /** Over a sunk floor, a black veil as opaque at each corner as the game's shade darkens it there; its plain material. */
   private veil: MeshHandle | null = null;
   private readonly veilMaterial: SurfaceMaterial<SurfaceTextureHandle> | null;
+  /** The patch's tiles a little under it, writing depth alone (`drawCover`), and how far under; made again when the patch moves. */
+  private cover: { mesh: MeshHandle; sink: number } | null = null;
   /** The tiles `prepare` compiles the patch's pipelines with. */
   private warm: MeshHandle[] | null = null;
   /** For each of the flat tiles' vertices, its tile and where it lies across it (0 to 1 each way), which its shade is mixed by. */
@@ -192,11 +194,13 @@ export class Ground {
       this.drop();
       this.dropRelief();
       this.dropVeil();
+      this.dropCover();
       return;
     }
     if (clip !== null) {
       this.cutTo(state, clip);
       this.dropVeil();
+      this.dropCover();
       return;
     }
     const n = state.count;
@@ -224,6 +228,7 @@ export class Ground {
     };
     this.layNear(state, n);
     this.layVeil(n);
+    this.dropCover();
   }
 
   /** The veil over a sunk floor's first `n` tiles, a quad over each; none where nothing darkens it. */
@@ -251,30 +256,67 @@ export class Ground {
 
   /**
    * The floor under the scenery, as the board draws its floor before its stage: its colours writing
-   * no depth, its veil over them, so the scenery is drawn over it wherever both are.
+   * no depth, its veil over them, so the scenery is drawn over it wherever both are. Its blended
+   * draws, here and after, go into a reconstructed frame with the scenery, in the order they are made.
    */
   drawUnder(): void {
     this.renderer.setMaterial(this.material);
-    this.reliefTiles?.draw(1, { depthWrite: false });
-    if (this.mesh !== null) this.renderer.drawTranslucentMesh(this.mesh, IDENTITY, 1, { depthWrite: false });
+    this.reliefTiles?.draw(1, { depthWrite: false, reconstructed: true });
+    if (this.mesh !== null) this.renderer.drawTranslucentMesh(this.mesh, IDENTITY, 1, { depthWrite: false, reconstructed: true });
     this.renderer.setMaterial(null);
     this.drawVeil();
   }
 
   /** The floor's depth alone, once the scenery is drawn over it: what is drawn after meets it, and the picture's passes see it. */
   drawDepth(): void {
-    const options: TranslucentMeshOptions = { depthWrite: true, lit: false, fog: false, tint: [0, 0, 0] };
+    const options: TranslucentMeshOptions = { depthWrite: true, lit: false, fog: false, tint: [0, 0, 0], reconstructed: true };
     this.renderer.setMaterial(this.material);
     this.reliefTiles?.draw(DEPTH_ONLY, options);
     if (this.mesh !== null) this.renderer.drawTranslucentMesh(this.mesh, IDENTITY, DEPTH_ONLY, options);
     this.renderer.setMaterial(null);
   }
 
+  /**
+   * The floor's depth alone, `sink` metres under it, before the scenery is drawn over the floor:
+   * what of the scenery lies deeper is hidden where the floor is, as under a solid floor, while the
+   * stage's own floors, a little under the fight's, and everything standing on them still show.
+   */
+  drawCover(sink: number): void {
+    const { count: n, x, z, cell } = this.last;
+    if (n === 0) return;
+    if (this.cover?.sink !== sink) {
+      this.dropCover();
+      const positions = new Float32Array(n * 12);
+      const uvs = new Float32Array(n * 8);
+      const normals = new Float32Array(n * 12);
+      const indices = new Uint32Array(n * 6);
+      for (let q = 0; q < n; q += 1) {
+        indices.set([q * 4, q * 4 + 1, q * 4 + 2, q * 4 + 1, q * 4 + 3, q * 4 + 2], q * 6);
+        for (let k = 0; k < 4; k += 1) {
+          const v = q * 4 + k;
+          positions.set([x[v]! / 1000, -sink, -z[v]! / 1000], v * 3);
+          /* Its tile's texels, so it has the floor's holes where the floor has any. */
+          uvs.set([this.uvs[(cell[q]! * 4 + k) * 2]!, this.uvs[(cell[q]! * 4 + k) * 2 + 1]!], v * 2);
+          normals[v * 3 + 1] = 1;
+        }
+      }
+      this.cover = { mesh: this.renderer.createMesh({ positions, normals, colors: new Float32Array(n * 12), emissive: new Float32Array(n * 4), uvs, indices }), sink };
+    }
+    this.renderer.setMaterial(this.material);
+    this.renderer.drawTranslucentMesh(this.cover!.mesh, IDENTITY, DEPTH_ONLY, { depthWrite: true, lit: false, fog: false, tint: [0, 0, 0], reconstructed: true });
+    this.renderer.setMaterial(null);
+  }
+
+  private dropCover(): void {
+    if (this.cover !== null) this.renderer.disposeMesh(this.cover.mesh);
+    this.cover = null;
+  }
+
   /** The veil over a sunk floor, over the floor and what lies on it, writing no depth. */
   drawVeil(): void {
     if (this.veil === null || this.veilMaterial === null) return;
     this.renderer.setMaterial(this.veilMaterial);
-    this.renderer.drawTranslucentMesh(this.veil, IDENTITY, 1, { lit: false, fog: false, depthWrite: false });
+    this.renderer.drawTranslucentMesh(this.veil, IDENTITY, 1, { lit: false, fog: false, depthWrite: false, reconstructed: true });
     this.renderer.setMaterial(null);
   }
 

@@ -33,17 +33,20 @@ export interface ListedRoom {
 
 /** What the server says. */
 export type ServerEvent =
-  | { readonly ev: 'welcome'; readonly name: string; readonly motd: string; readonly ice: readonly unknown[]; readonly players: number; readonly queued?: number; readonly rooms: number }
+  /** `wins`, this player's streak of wins, from a server that counts them (to a game that sent its id). */
+  | { readonly ev: 'welcome'; readonly name: string; readonly motd: string; readonly ice: readonly unknown[]; readonly players: number; readonly queued?: number; readonly rooms: number; readonly wins?: number }
   | { readonly ev: 'hosting'; readonly code: string; readonly listed: boolean }
   | { readonly ev: 'queued'; readonly waiting: number }
   | { readonly ev: 'offer'; readonly peer: { readonly name: string }; readonly seconds: number }
   | { readonly ev: 'idle'; readonly why: string }
-  | { readonly ev: 'paired'; readonly seat: 0 | 1; readonly code: string; readonly peer: { readonly name: string } }
+  | { readonly ev: 'paired'; readonly seat: 0 | 1; readonly code: string; readonly peer: { readonly name: string; readonly wins?: number } }
   | { readonly ev: 'rooms'; readonly rooms: readonly ListedRoom[] }
   | { readonly ev: 'peer'; readonly body: unknown }
   | { readonly ev: 'left'; readonly why: string }
   | { readonly ev: 'refused'; readonly why: string; readonly theirs?: unknown }
   | { readonly ev: 'pong'; readonly t: number; readonly players?: number; readonly queued?: number }
+  /** This player's streak of wins and the other's (where their game keeps an id), as a match's result changes them. */
+  | { readonly ev: 'wins'; readonly wins: number; readonly peer?: number }
   | { readonly ev: 'error'; readonly why: string };
 
 const OPEN = 1;

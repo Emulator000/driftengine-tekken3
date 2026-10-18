@@ -129,6 +129,21 @@ const ALL_SHOWN = new Float32Array(256).fill(1);
 const HELD = { arcade: { radius: 3000, slack: 0x155 }, disc: { radius: 1500, slack: 0xaa } } as const;
 /** The arcade stages whose floor ends at their own edge (the helipad's, a square this far from its middle, model units), where the fight's floor is cut off. */
 const EDGED = new Map([[11, 1068]]);
+/**
+ * The arcade stages whose floor covers what of their scenery lies below it, as a solid floor does:
+ * stage 4's, under which lie the lower terrace past its balcony and the stairs down to it, which
+ * otherwise show over the courtyard's floor as the camera turns toward them.
+ */
+const COVERED = new Set([4]);
+/** How much deeper than the scenery's own floors, and than they sink where remastered, the cover lies (metres). */
+const COVER_MARGIN = 0.01;
+/**
+ * The arcade stages with a ceiling over the fight (the dojo's, 4.4 m up, its beams from 3.2 m), and
+ * the height (metres over their floors) what lies wholly above is their ceiling from: kept over the
+ * camera where the cells nearest it are left out, while the camera is under it, so the ceiling runs
+ * on over a camera drawn back past the near wall rather than end before it.
+ */
+const CEILINGS = new Map([[8, 3]]);
 
 const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 /** How much nearer the fighters' depth lies than the fighters (a share of their distance from the eye): a few centimetres at the fight's distances. */
@@ -344,7 +359,7 @@ export class FightView {
         const sceneryMaps = (arcade === undefined ? ownMaps : arcade.maps) ?? null;
         const heights = remaster && stageLook.relief > 0 && sceneryMaps?.height != null ? pixelsOf(sceneryMaps.height) : null;
         const look = remaster ? { light: { dir: stageLook.sun, sun: stageLook.sunColour, sky: stageLook.ambient, ground: stageLook.ambientGround, shade: SHADE, sunlit: SUNLIT }, ...this.mapTextures(sceneryMaps), height: heights, relief: stageLook.relief, ragged: stageLook.ragged === true } : null;
-        const stage = arcade === undefined ? createStage(this.renderer, mesh, handle, look) : createStage(this.renderer, arcade.mesh, this.renderer.createSurfaceTexture(arcade.texture, this.textureOptions(true, remaster && arcade.maps != null)), look, remaster);
+        const stage = arcade === undefined ? createStage(this.renderer, mesh, handle, look) : createStage(this.renderer, arcade.mesh, this.renderer.createSurfaceTexture(arcade.texture, this.textureOptions(true, remaster && arcade.maps != null)), look, remaster, CEILINGS.get(id) ?? null);
         const floorLook = remaster ? floorLookOf(this.renderer, texture, atlas, floor, stageLook, this.files.fineRelief !== false) : null;
         const tint = remaster ? floorTint(stageLook) : this.groundTint;
         const laid = new Ground(this.renderer, ground, atlas.width, atlas.height, handle, tint, floorLook);
@@ -461,13 +476,13 @@ export class FightView {
         for (const piece of cell) {
           if (piece.oneSided !== oneSided) continue;
           const lit = drawn.stage.lit && piece.far !== true;
-          for (const depthWrite of [true, false]) for (const opacity of [1, 0.5]) renderer.drawTranslucentMesh(piece.mesh, point, opacity, { lit, fog: false, depthLayer: piece.layer, depthWrite });
+          for (const depthWrite of [true, false]) for (const opacity of [1, 0.5]) renderer.drawTranslucentMesh(piece.mesh, point, opacity, { lit, fog: false, depthLayer: piece.layer, reconstructed: true, depthWrite });
         }
       }
     }
     for (const object of drawn.objects) {
       renderer.setMaterial(object.stage.material);
-      for (const cell of object.stage.cells) for (const piece of cell) renderer.drawTranslucentMesh(piece.mesh, point, 1, { lit: false, fog: false, depthLayer: piece.layer });
+      for (const cell of object.stage.cells) for (const piece of cell) renderer.drawTranslucentMesh(piece.mesh, point, 1, { lit: false, fog: false, depthLayer: piece.layer, reconstructed: true });
     }
     renderer.setMaterial(null);
   }
@@ -476,18 +491,27 @@ export class FightView {
    * The scenery's cells the game keeps (each as much as `shown` says) and its moving pieces (each
    * part where `placeParts` set it, or a flipbook's frame): the solid polygons, or those cut out of
    * their textures. The cells drawn whole, with the moving pieces; or, `fading`, those partly drawn,
-   * writing no depth, so what lies behind a cell fading out shows through it.
+   * writing no depth, so what lies behind a cell fading out shows through it. Where the frame is
+   * reconstructed, drawn into it, its edges resolved with the rest of the picture's (drawn after it,
+   * they would be stepped, and lit at the fighters' outlines).
    */
   private drawScenery(state: FightState, drawn: StageDrawing, cut: boolean, shown: Float32Array, fading = false): void {
     const renderer = this.renderer;
     const model = this.sceneryMatrix();
+    /* A ceiling drawn whole over the cells left out round the camera while the camera is under it (the eye's height over the scenery's floors). */
+    const ceiling = drawn.stage.ceiling;
+    const overhead = ceiling !== null && (this.scenery.y - state.camera.drawn.eye[1]!) / 1000 < ceiling;
     for (const oneSided of [false, true]) {
       renderer.setMaterial(oneSided ? drawn.stage.oneSidedMaterial : drawn.stage.material);
       drawn.stage.cells.forEach((cell, i) => {
         const opacity = shown[i]!;
-        if (fading ? !(0 < opacity && opacity < 1) : opacity !== 1) return;
         /* The sky over the stage a picture, unlit as the game draws it. */
-        for (const piece of cell) if (piece.oneSided === oneSided && piece.cut === cut) renderer.drawTranslucentMesh(piece.mesh, model, opacity, { lit: drawn.stage.lit && piece.far !== true, fog: false, depthLayer: piece.layer, depthWrite: !fading });
+        for (const piece of cell) {
+          if (piece.oneSided !== oneSided || piece.cut !== cut) continue;
+          const whole = opacity === 1 || (overhead && piece.overhead === true);
+          if (fading ? whole || !(0 < opacity && opacity < 1) : !whole) continue;
+          renderer.drawTranslucentMesh(piece.mesh, model, fading ? opacity : 1, { lit: drawn.stage.lit && piece.far !== true, fog: false, depthLayer: piece.layer, reconstructed: true, depthWrite: !fading });
+        }
       });
     }
     renderer.setMaterial(null);
@@ -498,7 +522,7 @@ export class FightView {
       /* Drawn from both sides: a piece is closed, and its own polygons face as the game's moving pieces do, not as its scenery's. */
       renderer.setMaterial(object.stage.material);
       for (const [cell, part] of cells) {
-        for (const piece of object.stage.cells[cell!] ?? []) if (piece.cut === cut) renderer.drawTranslucentMesh(piece.mesh, object.placed[part!]!, 1, { lit: false, fog: false, depthLayer: piece.layer });
+        for (const piece of object.stage.cells[cell!] ?? []) if (piece.cut === cut) renderer.drawTranslucentMesh(piece.mesh, object.placed[part!]!, 1, { lit: false, fog: false, depthLayer: piece.layer, reconstructed: true });
       }
     }
     renderer.setMaterial(null);
@@ -745,6 +769,8 @@ export class FightView {
       if (under) {
         drawn.ground.drawUnder();
         puddles();
+        /* Under the scenery's own floors, which stand a little under the fight's and, remastered, sink by up to half the stage's relief. */
+        if (scenery && COVERED.has(state.stage)) drawn.ground.drawCover(this.scenery.y / 1000 + (this.files.remaster === true ? lookOfStage(state.stage).relief / 2 : 0) + COVER_MARGIN);
       }
       if (scenery) {
         /* The stage's moving pieces: a model's parts each where the piece and the part stand this field. */

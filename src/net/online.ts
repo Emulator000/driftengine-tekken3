@@ -1,8 +1,8 @@
 /**
  * Playing online, from connecting to the server to the end of a match: the lobby (a quick match's
  * queue, a room hosted with its code, listed or not, a room joined by its code or from the list),
- * then, paired, the two players' hellos (their game's data and version must be the same, each
- * asks for an input delay and brings its own buttons), the host's start (the match's options, the
+ * then, paired, the two players' hellos (the versions their games play as must be the same,
+ * `PLAYS_AS`, each asks for an input delay and brings its own buttons), the host's start (the match's options, the
  * delay, both players' buttons) and the match itself (`MatchSession`), its words through the server
  * until the direct connection opens. The game it plays is the caller's (`OnlineGame`): this knows
  * the server, the other player and the session, and nothing of the game or the page.
@@ -79,6 +79,8 @@ export interface Player {
   readonly delay: number;
   readonly keys: readonly number[];
   readonly fighter: Fighter;
+  /** The id this player's game keeps (hex digits), by which a server counts their streak of wins; none, no streak counted. */
+  readonly id?: string;
 }
 
 export interface OnlineOptions<S> {
@@ -95,6 +97,15 @@ export interface OnlineOptions<S> {
   /** Milliseconds each of the other side's packets is held before it is read, to try a match over a slower link. */
   readonly lagMs?: number;
 }
+
+/**
+ * The version two games are paired by online: the oldest release whose matches this one plays
+ * exactly as, its simulation, its match's setup and the words between the two games alike. A
+ * release that changes none of them (one that only draws or sounds otherwise) keeps it, so its
+ * players and those of every release back to that one play each other; one that changes any of
+ * them sets it to its own version.
+ */
+export const PLAYS_AS = '0.6.5';
 
 /** Frames between round trips measured: twice a second. */
 const PING_EVERY = 30;
@@ -200,6 +211,9 @@ export class Online<S> {
   /** The players on the server and those in its quick match, as it last said (-1 not said). */
   players = -1;
   queued = -1;
+  /** This player's streak of matches won without a loss, and the other's while paired, as the server last said (-1 where it counts none). */
+  wins = -1;
+  opponentWins = -1;
   /** The queue's offer: when it runs out (the wall clock's milliseconds), and this player's answer (null none yet). */
   offerUntil = 0;
   offerSeconds = 0;
@@ -300,7 +314,8 @@ export class Online<S> {
         this.stop(welcomed ? 'closed' : 'unreachable');
         this.state = 'off';
       };
-      if (!carried.some((text) => text.includes('"do":"hello"'))) relay.say({ do: 'hello', game: GAME, protocol: PROTOCOL, name: this.options.player().name, build: this.options.game.version, roster: rosterWord(this.options.game.roster) });
+      const { name, id } = this.options.player();
+      if (!carried.some((text) => text.includes('"do":"hello"'))) relay.say({ do: 'hello', game: GAME, protocol: PROTOCOL, name, build: this.options.game.version, roster: rosterWord(this.options.game.roster), ...(id === undefined ? {} : { id }) });
       return true;
     }
     this.ended = whyLine(refused ? 'insecure' : 'unreachable');
@@ -333,11 +348,13 @@ export class Online<S> {
   }
 
   /**
-   * The match over by its fight's end: the game back to the waiting room's fight under the result,
-   * both asked for a rematch (`rematch`), the pairing kept meanwhile.
+   * The match over by its fight's end, `winner` the seat that won it (-1 a draw): the game back to
+   * the waiting room's fight under the result, both asked for a rematch (`rematch`), the pairing kept
+   * meanwhile; the result told to a server that counts streaks of wins.
    */
-  matchOver(): void {
+  matchOver(winner = -1): void {
     if (this.state !== 'playing') return;
+    if (0 <= this.wins && this.lastStart !== null) this.relay?.say({ do: 'result', match: this.lastStart.match, winner });
     this.tail = this.session;
     this.session = null;
     this.state = 'result';
@@ -488,6 +505,7 @@ export class Online<S> {
         this.server = event.name;
         this.motd = event.motd;
         this.countsFrom(event);
+        this.wins = Number.isInteger(event.wins) ? event.wins! : -1;
         this.ice = Array.isArray(event.ice) ? event.ice : [];
         if (this.state === 'connecting') this.state = 'lobby';
         return;
@@ -516,7 +534,13 @@ export class Online<S> {
         this.rooms = event.rooms;
         return;
       case 'paired':
+        this.opponentWins = Number.isInteger(event.peer.wins) ? event.peer.wins! : -1;
         this.paired(event.seat, event.code, event.peer.name);
+        return;
+      case 'wins':
+        if (!Number.isInteger(event.wins)) return;
+        this.wins = event.wins;
+        this.opponentWins = Number.isInteger(event.peer) ? event.peer! : -1;
         return;
       case 'peer':
         this.peer(event.body);

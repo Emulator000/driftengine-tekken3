@@ -97,6 +97,9 @@ export class PadInput {
   }
 }
 
+/** Whether a gamepad is connected: one the browser shows the page, which it does once one of its buttons is pressed. */
+export const gamepadConnected = (): boolean => (navigator.getGamepads?.() ?? []).some((gamepad) => gamepad?.connected === true);
+
 /** The page to full screen, or back from it. */
 function fullScreen(): void {
   if (document.fullscreenElement !== null) void document.exitFullscreen().catch(() => {});

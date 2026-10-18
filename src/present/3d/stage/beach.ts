@@ -131,7 +131,7 @@ export class Beach {
     this.court[14] = -((a.skeleton.base.translation[2]! + b.skeleton.base.translation[2]!) >> 1) / 1000;
     const renderer = this.renderer;
     renderer.setMaterial(this.courtMaterial);
-    for (const mesh of [this.strip, this.lines.mesh]) renderer.drawTranslucentMesh(mesh, this.court, 1, { additive: true, depthWrite: false, lit: false, fog: false });
+    for (const mesh of [this.strip, this.lines.mesh]) renderer.drawTranslucentMesh(mesh, this.court, 1, { additive: true, depthWrite: false, lit: false, fog: false, reconstructed: true });
     renderer.setMaterial(null);
   }
 

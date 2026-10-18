@@ -81,6 +81,8 @@ export interface OnlineState {
   lines: string[];
   /** How many players the server has and how many wait in its quick match, as the app words it (empty: not known). */
   players: string;
+  /** This player's streak of wins as the app words it (empty: none, or a server that counts none). */
+  wins: string;
   rooms: OnlineRoom[];
   /** Whether the Options open on this page (the menu's ONLINE MODE). */
   opens: number;
@@ -95,10 +97,12 @@ export interface OnlineState {
   answer: number;
   /** Fields the offer's card has shown: a press answers it only once it has settled. */
   card: number;
+  /** The match under way on this pairing, from 1 (a rematch counts on), which its versus screen's FIGHT shows; 0 none. */
+  fight: number;
 }
 
 export function blankOnline(): OnlineState {
-  return { screen: OnlineScreen.LIST, cursor: 0, roomCursor: 0, caret: 0, anchor: 0, scroll: 0, editing: Editing.NONE, code: '', text: '', delay: DEFAULT_DELAY, listed: 0, side: 0, name: 'PLAYER', server: '', ask: '', typed: '', status: OnlineStatus.OFF, lines: [], players: '', rooms: [], opens: 0, warming: 0, pending: '', offerLeft: 0, answer: 0, card: 0 };
+  return { screen: OnlineScreen.LIST, cursor: 0, roomCursor: 0, caret: 0, anchor: 0, scroll: 0, editing: Editing.NONE, code: '', text: '', delay: DEFAULT_DELAY, listed: 0, side: 0, name: 'PLAYER', server: '', ask: '', typed: '', status: OnlineStatus.OFF, lines: [], players: '', wins: '', rooms: [], opens: 0, warming: 0, pending: '', offerLeft: 0, answer: 0, card: 0, fight: 0 };
 }
 
 /** Whether a text is being entered: the keyboard types for the page then, not for the pads. */
@@ -520,11 +524,16 @@ export function warmUpFrame(game: GameState, data: Data, centre: number, place: 
   const [line = '', detail = ''] = online.lines;
   const hosting = online.status === OnlineStatus.HOSTING;
   const text = `${line}${'.'.repeat((game.world.vsyncSeen >> 4) & 3)}`.padEnd(line.length + 3, ' ');
-  const players = online.players;
-  const bottom = players === '' ? 434 : 416;
-  print(game, 0, Colour.PICKED, centre * 2 - 12 - text.length * ADVANCE, hosting ? bottom - 18 : bottom, text);
-  if (hosting) print(game, 0, Colour.VALUE, centre * 2 - 12 - detail.length * ADVANCE, bottom, detail);
-  if (players !== '') print(game, 0, Colour.DEFAULT, centre * 2 - 12 - players.length * ADVANCE, 434, players);
+  /* Up from the foot of the screen at its right: the server's counts, this player's streak of wins, what is waited for. */
+  let bottom = 434;
+  const right = (colour: number, line: string): void => {
+    print(game, 0, colour, centre * 2 - 12 - line.length * ADVANCE, bottom, line);
+    bottom -= 18;
+  };
+  if (online.players !== '') right(Colour.DEFAULT, online.players);
+  if (online.wins !== '') right(Colour.VALUE, online.wins);
+  if (hosting) right(Colour.VALUE, detail);
+  right(Colour.PICKED, text);
   return null;
 }
 

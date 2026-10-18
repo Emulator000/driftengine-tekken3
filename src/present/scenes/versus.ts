@@ -5,7 +5,7 @@
  * the window's edges; in Team Battle each team's row of icons sliding in over its box and a light
  * added behind the rows; the printer's lines (the names, VS, the stage) in type.
  */
-import type { GameState, VersusRecord } from '../../sim/game/state.ts';
+import type { GameState, PrintRun, VersusRecord } from '../../sim/game/state.ts';
 import type { LightLayer } from '../2d/light.ts';
 import { lightAcross } from '../2d/light.ts';
 import { ICON, iconColumn } from './icons.ts';
@@ -31,6 +31,18 @@ const TEAM_LIGHT_LEVEL = 0xa8 / 0xff;
 /** The band: its height, and the length its end fades over. */
 const BAND = { height: 0x24, fade: 0x6e } as const;
 type Portrait = Extract<VersusRecord, { kind: 'portrait' }>;
+
+/**
+ * The printer's runs as the versus screen shows them: online, the stage's line (Versus's FIGHT
+ * and its number) counts the matches on the pairing (`online.fight`), each of which the game
+ * begins as it powers on, where its own count is the first.
+ */
+export function versusRuns(game: GameState): readonly PrintRun[] {
+  if (game.run.online === 0 || game.online.fight <= 1) return game.printed;
+  const line = game.versus.records.find((r) => r.kind === 'text' && /\d$/.test(r.text));
+  if (line?.kind !== 'text') return game.printed;
+  return game.printed.map((run) => (run.text === line.text ? { ...run, text: run.text.replace(/\d+$/, String(game.online.fight)) } : run));
+}
 
 const css = (colour: number, alpha: number): string => `rgba(${colour & 0xff}, ${(colour >> 8) & 0xff}, ${(colour >> 16) & 0xff}, ${alpha})`;
 
@@ -157,5 +169,5 @@ export function drawVersus(game: GameState, art: ScreenLayer, light: LightLayer,
     art.put(icon, record.x + ((countdown * record.slideX) >> 3), record.y + ((countdown * record.slideY) >> 3), ICON.w, ICON.h);
     art.setShade(1);
   }
-  for (const run of game.printed) text.print(run);
+  for (const run of versusRuns(game)) text.print(run);
 }

@@ -5,9 +5,10 @@
  * Start between the thumbs. Several fingers hold at once; a finger sliding from one button to
  * another holds the one it is on, and a thumb between two neighbours holds both.
  *
- * Shown where the screen is touched with fingers or the page runs on a phone (`?touch=1` shows it
- * anywhere, `?touch=0` nowhere). The first touch takes the page to full screen, turned to
- * landscape, where the browser lets it.
+ * Shown where the screen is touched with fingers or the page runs on a phone, while no gamepad is
+ * connected (`touchShown`): `?touch=1` or TOUCH PAD ON shows it anywhere and always, `?touch=0`
+ * or OFF hides it, except on a phone with no gamepad. The first touch takes the page to full
+ * screen, turned to landscape, where the browser lets it.
  */
 import { DOWN, LEFT, RIGHT, UP } from './input.ts';
 import { asked, settings } from './settings.ts';
@@ -62,11 +63,26 @@ export function onPhone(): boolean {
   return /Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1;
 }
 
-/** Whether the page shows the touch pad: as the address (`?touch=0` or `1`) or REMAKE OPTION says, else on a touch screen or a phone. */
-export function wantsTouch(params: URLSearchParams): boolean {
-  const touch = asked(params, 'touch', settings.touchPad, [null, '1', '0']);
-  if (touch !== null) return touch !== '0';
-  return matchMedia('(pointer: coarse)').matches || onPhone();
+/** TOUCH PAD's choice, as the address (`?touch=1` or `0`) or REMAKE OPTION gives it: `'1'` on, `'0'` off, null for AUTO. */
+export const touchChoice = (params: URLSearchParams): string | null => asked(params, 'touch', settings.touchPad, [null, '1', '0']);
+
+/** The device the page runs on, as the touch pad's showing goes by it. */
+export interface TouchDevice {
+  readonly phone: boolean;
+  readonly touchScreen: boolean;
+}
+
+export const touchDevice = (): TouchDevice => ({ phone: onPhone(), touchScreen: matchMedia('(pointer: coarse)').matches });
+
+/**
+ * Whether the touch pad shows: always where TOUCH PAD is ON; on a phone while no gamepad is
+ * connected, whatever TOUCH PAD says, so a phone is never left with nothing to play on; and, in
+ * AUTO, on a touch screen while no gamepad is.
+ */
+export function touchShown(choice: string | null, device: TouchDevice, gamepad: boolean): boolean {
+  if (choice === '1') return true;
+  if (device.phone && !gamepad) return true;
+  return choice === null && (device.phone || device.touchScreen) && !gamepad;
 }
 
 interface Button {
@@ -111,6 +127,20 @@ export class TouchPad {
     this.root.addEventListener('pointermove', (e) => this.move(e));
     for (const end of ['pointerup', 'pointercancel'] as const) this.root.addEventListener(end, (e) => this.up(e));
     this.root.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+
+  /** The pad shown or hidden, letting go of what its fingers held as it hides; whether it has just come back. */
+  show(shown: boolean): boolean {
+    const was = this.root.style.display !== 'none';
+    if (shown === was) return false;
+    this.root.style.display = shown ? '' : 'none';
+    if (!shown) {
+      this.stick = null;
+      this.fingers.clear();
+      this.base.style.display = this.knob.style.display = 'none';
+      this.light();
+    }
+    return shown;
   }
 
   /** The pad word the fingers hold. */

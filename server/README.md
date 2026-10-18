@@ -6,6 +6,11 @@ the direct connection's signalling. It holds none of the game's data, and runs n
 plays from their own disc on their own machine, and once the two reach each other directly (WebRTC)
 the pads' words go straight between them.
 
+It also counts each player's streak of wins: the games say who won each match, and the server keeps
+each streak in its memory alone, by an id each game makes and keeps (shown to no one, and kept no
+longer than a day after its player was last on), so a restart clears them all. Leaving a match
+under way ends the leaver's streak. A game of 0.6.5, which keeps no id, plays on as before.
+
 ## On this machine
 
 `npm run dev` and `npm run dev:lan` already run it beside the page, at `/relay` on the dev server's

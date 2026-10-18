@@ -8,8 +8,7 @@
  * the keyboard and the mouse edit it as a text field (`text-field.ts`), the clipboard with them;
  * while a match is played, a line over the picture says how its connection goes.
  */
-import pkg from '../../package.json';
-import { Online, REMATCH_MS, type Start } from '../net/online.ts';
+import { Online, PLAYS_AS, REMATCH_MS, type Start } from '../net/online.ts';
 import { serverAddresses } from '../net/address.ts';
 import { StateSnapshotter } from '../net/snapshot.ts';
 import { ROLLBACK_DEPTH } from '../net/session.ts';
@@ -45,6 +44,9 @@ const PRESSES_KEPT = 600;
 /** The state's fields that are this machine's own, never the match's: left out of the fingerprint. */
 const OWN = ['remake', 'online'];
 
+/** A streak of wins as a player is shown it: none under one. */
+const winsLine = (wins: number): string => (wins > 0 ? `WINS ${wins}` : '');
+
 const STATUS: Readonly<Record<string, number>> = { off: OnlineStatus.OFF, connecting: OnlineStatus.CONNECTING, lobby: OnlineStatus.LOBBY, queued: OnlineStatus.QUEUED, offered: OnlineStatus.OFFERED, hosting: OnlineStatus.HOSTING, joining: OnlineStatus.JOINING, greeting: OnlineStatus.GREETING, playing: OnlineStatus.PLAYING, result: OnlineStatus.RESULT, ended: OnlineStatus.LOBBY };
 
 interface Kept {
@@ -53,10 +55,15 @@ interface Kept {
   side: number;
   name: string;
   server: string;
+  /** This player's id, by which a server counts their streak of wins: made once, at random. */
+  id: string;
 }
 
+/** A new player's id: 128 bits at random, as hex digits. */
+const newId = (): string => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+
 function readKept(): Kept {
-  const fallback: Kept = { delay: DEFAULT_DELAY, listed: 0, side: 0, name: 'PLAYER', server: '' };
+  const fallback: Kept = { delay: DEFAULT_DELAY, listed: 0, side: 0, name: 'PLAYER', server: '', id: newId() };
   try {
     const raw = JSON.parse(localStorage.getItem(KEPT) ?? 'null') as Partial<Kept> | null;
     if (raw === null || typeof raw !== 'object') return fallback;
@@ -66,6 +73,7 @@ function readKept(): Kept {
       side: raw.side === 1 ? 1 : 0,
       name: typeof raw.name === 'string' && raw.name.trim() !== '' ? raw.name.slice(0, 12) : fallback.name,
       server: typeof raw.server === 'string' ? raw.server.slice(0, 96) : '',
+      id: typeof raw.id === 'string' && /^[0-9a-f]{32}$/.test(raw.id) ? raw.id : fallback.id,
     };
   } catch {
     return fallback;
@@ -122,14 +130,16 @@ export class OnlinePlay {
     this.game = game;
     this.hooks = hooks;
     this.kept = readKept();
+    /* The player's id kept from the first visit on. */
+    writeKept(this.kept);
     const online = game.state.online;
     Object.assign(online, { delay: this.kept.delay, listed: this.kept.listed, side: this.kept.side, name: this.kept.name, server: params.get('server') ?? this.kept.server });
     this.online = new Online({
       url: () => serverUrls(this.game.state.online.server),
-      player: () => ({ name: this.kept.name, delay: this.kept.delay, keys: this.localKeys(), fighter: this.localFighter() }),
+      player: () => ({ name: this.kept.name, delay: this.kept.delay, keys: this.localKeys(), fighter: this.localFighter(), id: this.kept.id }),
       lagMs: Math.max(0, Number(params.get('netlag') ?? 0) || 0),
       game: {
-        version: pkg.version,
+        version: PLAYS_AS,
         roster: this.hooks.roster,
         keyChoices: this.hooks.data.scenes.keyBits.length,
         defaultKeys: this.hooks.data.scenes.powerOn.keys[0]!,
@@ -208,10 +218,11 @@ export class OnlinePlay {
     return { state: this.online.state, page: { status: page.status, warming: page.warming, card: page.card, answer: page.answer, fresh: this.game.state.world.input.fresh[0] }, ...(session === null ? {} : { field: session.tick, session: session.state, ahead: session.ahead, ...session.quality, theyWait: this.online.theyWait, direct: this.online.direct, presses, heard: [...this.heard.entries()] }) };
   }
 
-  /** While a match is played, each seat's player's name (the host's first), for the HUD to show under the fighters'. */
+  /** While a match is played, each seat's player's name (the host's first) and their streak of wins, for the HUD to show under the fighters'. */
   get players(): readonly [string, string] | null {
     if (this.local === null) return null;
-    const [own, other] = [this.kept.name, this.online.opponent];
+    const tagged = (name: string, wins: number): string => [name, winsLine(wins)].filter((part) => part !== '').join('  ');
+    const [own, other] = [tagged(this.kept.name, this.online.wins), tagged(this.online.opponent, this.online.opponentWins)];
     return this.online.seat === 0 ? [own, other] : [other, own];
   }
 
@@ -363,6 +374,7 @@ export class OnlinePlay {
     /* How many are about, while the server is heard from (its pongs carry it). */
     const heard = o.state !== 'off' && o.state !== 'connecting' && 0 <= o.players;
     online.players = heard ? `${o.players} ${o.players === 1 ? 'PLAYER' : 'PLAYERS'} ONLINE${0 <= o.queued ? `  ${o.queued} SEARCHING` : ''}` : '';
+    online.wins = heard ? winsLine(o.wins) : '';
   }
 
   /**
@@ -383,8 +395,9 @@ export class OnlinePlay {
         this.resume = null;
         this.online.leaveMatch();
       } else {
-        this.result = this.resultLines();
-        this.online.matchOver();
+        const winner = this.winner();
+        this.result = this.resultLines(winner);
+        this.online.matchOver(winner);
       }
     }
     this.showReadout();
@@ -399,14 +412,18 @@ export class OnlinePlay {
     return this.local !== null && (this.online.seat === 1) !== (this.kept.side === 1);
   }
 
+  /** The seat that won the match, from Versus's record (each match starts it afresh), or -1 for a draw. */
+  private winner(): number {
+    const { wins } = this.game.state.run.versusRecord;
+    return wins[0]! > 0 ? 0 : wins[1]! > 0 ? 1 : -1;
+  }
+
   /**
-   * The match's result, from Versus's record (each match starts it afresh): who won, by their
-   * fighter's name, and for this player whether they won, with the score since they were paired.
+   * The match's result, `side` the seat that won it (-1 a draw): who won, by their fighter's name,
+   * and for this player whether they won, with the score since they were paired.
    */
-  private resultLines(): readonly [string, string] {
+  private resultLines(side: number): readonly [string, string] {
     const state = this.game.state;
-    const { wins } = state.run.versusRecord;
-    const side = wins[0]! > 0 ? 0 : wins[1]! > 0 ? 1 : -1;
     if (side === this.online.seat) this.score[0]! += 1;
     else if (side !== -1) this.score[1]! += 1;
     const tally = `${this.score[0]} - ${this.score[1]}`;
@@ -466,7 +483,7 @@ export class OnlinePlay {
     Object.assign(state.remake.settings, own.settings);
     Object.assign(state.remake.started, own.started);
     state.remake.remasterMade = own.made;
-    Object.assign(state.online, page, { warming: 0, ask: '', typed: '', card: 0 });
+    Object.assign(state.online, page, { warming: 0, ask: '', typed: '', card: 0, fight: Number.isInteger(start.match) && start.match > 0 ? start.match : 1 });
     this.pastFields = 0;
     this.match = new StateSnapshotter(state, OWN);
     this.shareData(this.match);

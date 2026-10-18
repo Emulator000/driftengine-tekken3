@@ -16,6 +16,8 @@ const UNIT_M = 0.008;
 const ONE_SIDED = 2;
 const LAYER_SHIFT = 2;
 const CUT = 16;
+/** A triangle's kind, past its flags: it lies wholly above the stage's ceiling height. */
+const OVERHEAD = 256;
 
 /** Some of a cell's polygons, all in one layer and alike in whether their backs are drawn and whether they are cut out. */
 export interface StagePiece {
@@ -25,6 +27,8 @@ export interface StagePiece {
   readonly cut: boolean;
   /** Whether it is the sky over the stage: a picture, drawn unlit as the game draws it. */
   readonly far?: boolean;
+  /** Whether it lies wholly above the stage's ceiling height (`Stage.ceiling`). */
+  readonly overhead?: boolean;
 }
 
 /** How high up (metres) the sky over a stage lies, and how level (its normal's upward share) or how far facing down. */
@@ -46,6 +50,8 @@ export interface Stage {
   readonly oneSidedMaterial: SurfaceMaterial<SurfaceTextureHandle>;
   /** Drawn lit, by the normals its polygons' faces give it. */
   readonly lit: boolean;
+  /** The height (metres over its floors) its ceiling's pieces lie wholly above (`StagePiece.overhead`), on a stage with a ceiling over the fight; null on one without. */
+  readonly ceiling: number | null;
   /**
    * Its floors (level polygons within `FLOOR_REACH` of the floor's height), on a stage made with
    * them kept, darkened at each vertex by the shade the fight's floor takes there (`shadeOf`, by
@@ -299,7 +305,7 @@ function normalsOf(positions: Float32Array, indices: Uint32Array): Float32Array 
   return out;
 }
 
-export function createStage(renderer: RendererApi, buffer: ArrayBuffer, texture: SurfaceTextureHandle, look: StageLook | null = null, fadingFloors = false): Stage {
+export function createStage(renderer: RendererApi, buffer: ArrayBuffer, texture: SurfaceTextureHandle, look: StageLook | null = null, fadingFloors = false, ceiling: number | null = null): Stage {
   const view = new DataView(buffer);
   const { width, height } = stageAtlasSize(buffer);
   const n = view.getUint32(8, true);
@@ -368,7 +374,7 @@ export function createStage(renderer: RendererApi, buffer: ArrayBuffer, texture:
     floors.push({ mesh, at, x: Float32Array.from(at, (i) => data.positions[i * 3]!), z: Float32Array.from(at, (i) => data.positions[i * 3 + 2]!), base: data.colors.slice(), colors: data.colors.slice() });
     return mesh;
   };
-  const piece = (own: number[], kind: number): StagePiece => {
+  const piece = (own: number[], kind: number, overhead: boolean): StagePiece => {
     /* The sky: in the farthest layer, wholly high up, level or facing down to the arena. */
     let far = ((kind >> LAYER_SHIFT) & 3) === 0 && smooth !== null;
     for (const i of own) {
@@ -379,7 +385,7 @@ export function createStage(renderer: RendererApi, buffer: ArrayBuffer, texture:
     if (broad !== null && smooth !== null && (kind & CUT) === 0 && !far && (look?.relief ?? 0.3) > 0) {
       const raisedPiece = raised(own, positions, smooth, colors, uvs, shared, broad, look?.relief ?? 0.3, look?.ragged === true);
       const mesh = meshOf({ ...raisedPiece, emissive: new Float32Array(raisedPiece.positions.length / 3) });
-      return { mesh, layer: (kind >> LAYER_SHIFT) & 3, oneSided: (kind & ONE_SIDED) !== 0, cut: false, far };
+      return { mesh, layer: (kind >> LAYER_SHIFT) & 3, oneSided: (kind & ONE_SIDED) !== 0, cut: false, far, overhead };
     }
     let lo = Infinity;
     let hi = -Infinity;
@@ -398,17 +404,19 @@ export function createStage(renderer: RendererApi, buffer: ArrayBuffer, texture:
       uvs: uvs.slice(lo * 2, (hi + 1) * 2),
       indices: Uint32Array.from(own, (i) => i - lo),
     });
-    return { mesh, layer: (kind >> LAYER_SHIFT) & 3, oneSided: (kind & ONE_SIDED) !== 0, cut: (kind & CUT) !== 0, far };
+    return { mesh, layer: (kind >> LAYER_SHIFT) & 3, oneSided: (kind & ONE_SIDED) !== 0, cut: (kind & CUT) !== 0, far, overhead };
   };
+  /* Whether a triangle lies wholly above the ceiling's height: its piece apart from the cell's others. */
+  const above = (t: number): boolean => ceiling !== null && [0, 1, 2].every((k) => positions[indices[t + k]! * 3 + 1]! > ceiling);
   const cells = ranges.map(([start, count]) => {
     const kinds = new Map<number, number[]>();
     for (let t = start; t < start + count; t += 3) {
-      const kind = kindOf(indices[t]!);
+      const kind = kindOf(indices[t]!) | (above(t) ? OVERHEAD : 0);
       let list = kinds.get(kind);
       if (list === undefined) kinds.set(kind, (list = []));
       list.push(indices[t]!, indices[t + 1]!, indices[t + 2]!);
     }
-    return [...kinds.entries()].sort(([a], [b]) => a - b).map(([kind, own]) => piece(own, kind));
+    return [...kinds.entries()].sort(([a], [b]) => a - b).map(([kind, own]) => piece(own, kind & ~OVERHEAD, (kind & OVERHEAD) !== 0));
   });
   const maps = { ...(look?.normal == null ? {} : { normal: look.normal, normalStrength: 1 }), ...(look?.orm == null ? {} : { orm: look.orm }) };
   return {
@@ -420,6 +428,7 @@ export function createStage(renderer: RendererApi, buffer: ArrayBuffer, texture:
     material: { albedo: texture, cutout: 0.5, doubleSided: true, ...maps },
     oneSidedMaterial: { albedo: texture, cutout: 0.5, doubleSided: false, ...maps },
     lit: look !== null,
+    ceiling,
     darkenFloors(model, shadeOf) {
       for (const floor of floors) {
         let changed = false;

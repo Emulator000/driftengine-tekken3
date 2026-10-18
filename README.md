@@ -175,6 +175,8 @@ are for your own devices. Never share or upload an app built from your disc.
 ## Playing
 
 The game starts as the console does: the logo, the opening movie, the title (Enter), the mode menu.
+The mode menu shows the game's version at the screen's top right, followed by (NEW VERSION
+AVAILABLE!) once the repository has tagged a newer one ([docs/USAGE.md](docs/USAGE.md#the-version)).
 
 | | Move | Left punch | Right punch | Left kick | Right kick | L2, L1 | R1, R2 | Start | Select |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -182,8 +184,8 @@ The game starts as the console does: the logo, the opening movie, the title (Ent
 | Player 2 | arrows | numpad 4 | numpad 5 | numpad 1 | numpad 2 | numpad 7, 9 | numpad 6, 3 | numpad Enter | numpad . |
 
 A gamepad drives the player of its index, and on a touch screen the pad over the picture drives
-the first. Alt+Enter takes the game to full screen and back; `F` shows and hides the frame rate;
-`P` holds a fight and flies a free camera through it ([docs/USAGE.md](docs/USAGE.md#the-free-camera)). `?quick` in the address skips the menus for a match at
+the first, hidden while a gamepad is connected. Alt+Enter takes the game to full screen and back;
+`F` shows and hides the frame rate; `P` holds a fight and flies a free camera through it ([docs/USAGE.md](docs/USAGE.md#the-free-camera)). `?quick` in the address skips the menus for a match at
 once; [docs/USAGE.md](docs/USAGE.md) lists every option (fighters, stage, the computer's sides,
 the endings, the original textures, the viewer) and every command.
 
@@ -198,9 +200,11 @@ match then starts at once on a stage drawn at random, three rounds to win, and o
 you both choose a rematch or the waiting room. Only the pads' presses and the match's setup
 go between the two games; each runs the whole match itself, at once from your own pad, the other's
 put right as it arrives (rollback), straight between the two machines where they can reach each
-other and through the server where not. Both of you need the same version, and each the data of
-the fighter the other chose: a player with Kazuya is paired with one without him as long as
-neither of you plays him.
+other and through the server where not. Both of you need versions that play a match alike (a
+release that changes only how the game is drawn or sounds plays the one before it: 0.6.6 and 0.6.5
+play each other), and each the data of the fighter the other chose: a player with Kazuya is paired
+with one without him as long as neither of you plays him. The server counts each player's streak of
+wins (WINS, by your name and in the waiting room's corner), in its memory alone.
 
 `npm run dev` and `npm run dev:lan` run the server beside the page, so two players on your home
 network (`npm run dev:lan`) play with nothing else to run. Over the internet, one of you runs the

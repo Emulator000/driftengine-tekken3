@@ -7,6 +7,7 @@
  * match; a match over asks both for a rematch; the server's counts are told, and a way to it that fails gives way to the next; its page for a browser says how busy it is and how to play on it; the server's settings come from a file, the environment and the command line in turn.
  */
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -16,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 
 import { Relay, readConfig } from '../server/relay.mjs';
-import { Online } from '../src/net/online.ts';
+import { Online, PLAYS_AS } from '../src/net/online.ts';
 import { StateSnapshotter } from '../src/net/snapshot.ts';
 
 const quiet = { log: () => {} };
@@ -35,7 +36,7 @@ const EVERY = Array.from({ length: 23 }, (_, i) => i);
 const DEFAULT_KEYS = [12, 12, 12, 12, 1, 3, 2, 0];
 const OWN_KEYS = [12, 12, 12, 12, 0, 1, 2, 3];
 
-function side(url, { version = '0.6.1', roster = EVERY, fighter = 0, name = 'A', delay = 2, now, keys = DEFAULT_KEYS } = {}) {
+function side(url, { version = '0.6.1', roster = EVERY, fighter = 0, name = 'A', delay = 2, now, keys = DEFAULT_KEYS, id } = {}) {
   const chosen = { fighter };
   const log = { began: null, ended: null, begun: 0, waited: 0 };
   const state = { at: [0, 0], mix: 1, fields: 0 };
@@ -67,7 +68,7 @@ function side(url, { version = '0.6.1', roster = EVERY, fighter = 0, name = 'A',
       log.waited += 1;
     },
   };
-  const online = new Online({ url: () => url, game, player: () => ({ name, delay, keys, fighter: { roster: chosen.fighter, costume: 0 } }), open: (at) => new WebSocket(at), peerConnection: null, now });
+  const online = new Online({ url: () => url, game, player: () => ({ name, delay, keys, fighter: { roster: chosen.fighter, costume: 0 }, ...(id === undefined ? {} : { id }) }), open: (at) => new WebSocket(at), peerConnection: null, now });
   return { online, state, log, pick: (to) => (chosen.fighter = to) };
 }
 
@@ -339,6 +340,109 @@ test("the server's page, for a browser: how busy it is, its versions, and the ad
     assert.equal((await fetch(`http://127.0.0.1:${port}/nothing`)).status, 404);
   } finally {
     for (const one of [a, b, c]) one.online.disconnect();
+    await relay.close();
+  }
+});
+
+test("a release is paired as the oldest one it plays exactly as, its simulation and its match's words those of that release", (t) => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const game = JSON.parse(readFileSync(path.join(here, '../package.json'), 'utf8')).version;
+  const order = (v) => v.split('.').map(Number).reduce((sum, part) => sum * 1000 + part, 0);
+  assert.match(PLAYS_AS, /^\d+\.\d+\.\d+$/);
+  assert.ok(order('0.6.0') <= order(PLAYS_AS) && order(PLAYS_AS) <= order(game), `${PLAYS_AS} lies between the oldest version the server serves and the game's own, ${game}`);
+  if (PLAYS_AS === game) return;
+  const root = path.join(here, '..');
+  if (spawnSync('git', ['rev-parse', '--verify', '--quiet', `v${PLAYS_AS}^{commit}`], { cwd: root }).status !== 0) {
+    t.skip(`no git, or no tag v${PLAYS_AS}, to compare with`);
+    return;
+  }
+  /* ONLINE MODE's page and its waiting room are left out: no match runs them, and their state is each machine's own. */
+  const played = ['src/sim', ':(exclude)src/sim/game/online-page.ts', 'src/assets', 'src/net/session.ts', 'src/net/wire.ts', 'src/net/snapshot.ts'];
+  const changed = spawnSync('git', ['diff', '--name-only', `v${PLAYS_AS}`, '--', ...played], { cwd: root, encoding: 'utf8' }).stdout.trim();
+  assert.equal(changed, '', `changed since v${PLAYS_AS}, so this release plays otherwise and PLAYS_AS is to be its own version`);
+});
+
+/** Two players paired by the quick match and playing, and each match after on the pairing: played a while, then ended with each side's word on its winner. */
+async function pairedPlaying(a, b) {
+  a.online.quickMatch();
+  await frames([a, b], () => a.online.state === 'queued');
+  b.online.quickMatch();
+  await frames([a, b], () => a.online.state === 'offered' && b.online.state === 'offered');
+  a.online.answer(true);
+  b.online.answer(true);
+  await frames([a, b], () => a.online.state === 'playing' && b.online.state === 'playing');
+}
+async function playOut(a, b, [saysA, saysB]) {
+  await frames([a, b], () => a.online.session?.tick > 30 && b.online.session?.tick > 30, 800);
+  assert.ok(a.online.session !== null && b.online.session !== null, `the match played (${a.online.ended} ${b.online.ended})`);
+  /* A game that keeps no id ends its match as any does, and says nothing of it to the server. */
+  a.online.matchOver(saysA);
+  b.online.matchOver(saysB);
+  await frames([a, b], () => false, 15);
+}
+async function rematch(a, b) {
+  a.online.rematch(true);
+  b.online.rematch(true);
+  await frames([a, b], () => a.online.state === 'playing' && b.online.state === 'playing');
+}
+
+test("the server counts each player's streak of wins: the winner's one longer, the loser's ended, a draw or two words that differ neither; leaving a match under way ends the leaver's", async () => {
+  const { relay, url } = await server();
+  const a = side(url, { name: 'A', id: 'a'.repeat(32) });
+  const b = side(url, { name: 'B', id: 'b'.repeat(32) });
+  const streaks = () => [a.online.wins, b.online.wins, a.online.opponentWins, b.online.opponentWins];
+  try {
+    await pairedPlaying(a, b);
+    assert.deepEqual(streaks(), [0, 0, 0, 0], 'none yet, told at the welcome and the pairing');
+    await playOut(a, b, [0, 0]);
+    assert.deepEqual(streaks(), [1, 0, 0, 1], "the host won: its streak one, the guest's none, each told the other's");
+    await rematch(a, b);
+    await playOut(a, b, [0, 0]);
+    assert.deepEqual(streaks(), [2, 0, 0, 2]);
+    await rematch(a, b);
+    await playOut(a, b, [-1, -1]);
+    assert.deepEqual(streaks(), [2, 0, 0, 2], 'a draw changes neither');
+    await rematch(a, b);
+    await playOut(a, b, [0, 1]);
+    assert.deepEqual(streaks(), [2, 0, 0, 2], 'two words that differ count for nothing');
+    await rematch(a, b);
+    await playOut(a, b, [1, 1]);
+    assert.deepEqual(streaks(), [0, 1, 1, 0], "the guest won: the host's streak ended");
+    await rematch(a, b);
+    await frames([a, b], () => b.online.session?.tick > 30, 800);
+    b.online.cancel();
+    await frames([a, b], () => b.online.wins === 0 && a.online.state === 'lobby');
+    assert.equal(b.online.wins, 0, 'left with the match under way: lost');
+    assert.equal(a.online.wins, 0, 'the one left behind gains nothing');
+    a.online.disconnect();
+    const again = side(url, { name: 'A', id: 'b'.repeat(32) });
+    again.online.connect();
+    await frames([again], () => again.online.state === 'lobby');
+    assert.equal(again.online.wins, 0, "a player's streak by their id, told at the welcome");
+    again.online.disconnect();
+  } finally {
+    for (const one of [a, b]) one.online.disconnect();
+    await relay.close();
+  }
+});
+
+test("a game that keeps no id (as 0.6.5's) is counted nothing and told nothing, its opponent's word alone settling their match; no id is shown", async () => {
+  const { relay, url } = await server();
+  const a = side(url, { name: 'NEW', id: 'c'.repeat(32) });
+  const b = side(url, { name: 'OLD' });
+  try {
+    await pairedPlaying(a, b);
+    assert.deepEqual([a.online.wins, a.online.opponentWins, b.online.wins], [0, -1, -1], "no streak known for the old game's player, nor one told it");
+    await playOut(a, b, [0, undefined]);
+    assert.equal(a.online.wins, 1, "the new game's word alone");
+    assert.equal(b.online.wins, -1);
+    await rematch(a, b);
+    await playOut(a, b, [1, undefined]);
+    assert.equal(a.online.wins, 0);
+    const status = await (await fetch(url.replace('ws:', 'http:') + 'status.json')).text();
+    assert.ok(!status.includes('c'.repeat(32)), 'no id in what the server shows');
+  } finally {
+    for (const one of [a, b]) one.online.disconnect();
     await relay.close();
   }
 });

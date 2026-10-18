@@ -388,7 +388,8 @@ export class Backdrop {
     const k = sight === undefined ? 1 : sight / DOME;
     this.model.set([k, 0, 0, 0, 0, k, 0, 0, 0, 0, k, 0, x, y, z, 1]);
     r.setMaterial(this.domeMaterial);
-    r.drawTranslucentMesh(this.dome, this.model, 1, { lit: false, fog: false });
+    /* The sky, its clouds and sun go into a reconstructed frame, which moves them with the camera as they move, so the scenery's edges against them are resolved. */
+    r.drawTranslucentMesh(this.dome, this.model, 1, { lit: false, fog: false, reconstructed: true });
     if (this.cloudDome !== null && this.cloudMaterial !== null) {
       /* The clouds turn round the eye as the wind aloft carries them past, the way it blows. */
       const speed = Math.hypot(wind.x, wind.z) * ALOFT;
@@ -397,11 +398,11 @@ export class Backdrop {
       const s = Math.sin(angle) * k;
       this.turned.set([c, 0, -s, 0, 0, k, 0, 0, s, 0, c, 0, x, y, z, 1]);
       r.setMaterial(this.cloudMaterial);
-      r.drawTranslucentMesh(this.cloudDome, this.turned, 1, { lit: false, fog: false });
+      r.drawTranslucentMesh(this.cloudDome, this.turned, 1, { lit: false, fog: false, reconstructed: true });
     }
     /* The sun after the clouds, its light added to theirs: it shines through them, none of them cut away round it. */
     r.setMaterial(this.plain);
-    r.drawTranslucentMesh(this.sun, this.model, 1, { lit: false, fog: false, additive: true });
+    r.drawTranslucentMesh(this.sun, this.model, 1, { lit: false, fog: false, additive: true, reconstructed: true });
     const angle = (-sceneryYaw * 2 * Math.PI) / 4096;
     const c = Math.cos(angle) * k;
     const s = Math.sin(angle) * k;

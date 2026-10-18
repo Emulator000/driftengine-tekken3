@@ -41,6 +41,8 @@ import { Rumble } from './rumble.ts';
 import { MoviePicture } from '../present/scenes/movie.ts';
 import { OnlinePlay } from './online.ts';
 import { mirror } from '../present/2d/mirror.ts';
+import { menuCorner, newestVersion } from './version.ts';
+import pkg from '../../package.json';
 
 /** The frames each of the ten stages takes in the time record `?record=time` sets. */
 const RECORD_STAGE_FRAMES = 30 * 60;
@@ -308,6 +310,11 @@ export async function playGame(): Promise<void> {
     movie,
   );
   presenter.prepare(canvas.width, canvas.height);
+  /* The menu's corner: the version at once, a newer one's notice once GitHub's tags (or those kept on the device) tell of it. */
+  presenter.menuCorner = menuCorner(pkg.version, null);
+  void newestVersion({ now: Date.now, storage: { getItem: (key) => localStorage.getItem(key), setItem: (key, value) => localStorage.setItem(key, value) }, fetch: (url, init) => fetch(url, init) }).then((newest) => {
+    presenter.menuCorner = menuCorner(pkg.version, newest);
+  });
   /* The fight's drawing, made with the first match and given each new match's data. */
   let fight: { view: FightView; hud: Hud; pause: PauseScreen; data: FightData } | null = null;
   const fightFor = (data: FightData): NonNullable<typeof fight> => {
