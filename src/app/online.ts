@@ -235,11 +235,16 @@ export class OnlinePlay {
     return { state: this.online.state, page: { status: page.status, warming: page.warming, card: page.card, answer: page.answer, fresh: this.game.state.world.input.fresh[0], available: this.inWaitingFight(), practicePaused: this.game.state.practice.paused }, ...(session === null ? {} : { field: session.tick, session: session.state, ahead: session.ahead, ...session.quality, theyWait: this.online.theyWait, direct: this.online.direct, presses, heard: [...this.heard.entries()] }) };
   }
 
-  /** While a match is played, each seat's player's name (the host's first) and their streak of wins, for the HUD to show under the fighters'. */
+  /** While a match is played, each seat's player's name (the host's first), for the HUD to show under the fighters'. */
   get players(): readonly [string, string] | null {
     if (this.local === null) return null;
-    const tagged = (name: string, wins: number): string => [name, winsLine(wins)].filter((part) => part !== '').join('  ');
-    const [own, other] = [tagged(this.kept.name, this.online.wins), tagged(this.online.opponent, this.online.opponentWins)];
+    return this.online.seat === 0 ? [this.kept.name, this.online.opponent] : [this.online.opponent, this.kept.name];
+  }
+
+  /** While a match is played, each seat's player's streak of wins (0 none, or none counted), for the HUD to show at the foot. */
+  get streaks(): readonly [number, number] | null {
+    if (this.local === null) return null;
+    const [own, other] = [Math.max(0, this.online.wins), Math.max(0, this.online.opponentWins)];
     return this.online.seat === 0 ? [own, other] : [other, own];
   }
 

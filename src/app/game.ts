@@ -408,14 +408,13 @@ export async function playGame(): Promise<void> {
   const placeDisplay = (): void => {
     const { x, y } = game.state.options.display;
     const home = scenes.powerOn.options.display;
-    const flipped = mirror.on;
-    const key = `${x} ${y} ${canvas.clientHeight} ${flipped}`;
+    const key = `${x} ${y} ${canvas.clientHeight}`;
     if (key === placed) return;
     placed = key;
     const across = ((displayShift(x) - displayShift(home.x)) * canvas.clientHeight * 4) / 3 / SCREEN.width;
     const down = ((y - home.y) * 2 * canvas.clientHeight) / SCREEN.lines;
     const moved = across === 0 && down === 0 ? '' : `translate(${across}px, ${down}px)`;
-    canvas.style.transform = flipped ? `${moved} scaleX(-1)`.trim() : moved;
+    canvas.style.transform = moved;
   };
 
   /**
@@ -513,8 +512,8 @@ export async function playGame(): Promise<void> {
         const change = state.scene === Scene.FIGHT && state.ogreChange.shows !== OgreChangeShows.NONE && data !== null;
         const shows = online?.ending === true || online?.holding === true ? null : change ? 'change' : state.scene === Scene.FIGHT ? (state.drewFight !== 0 && data !== null ? 'fight' : null) : records ? 'records' : intro ? 'intro' : state.held === 0 ? `scene ${state.scene}` : null;
         /*
-         * An online match's fight seen from this player's side: the picture turned over (`mirror.ts`),
-         * a frame that draws the fight alone; a picture held stays as it was drawn.
+         * An online match's fight seen from this player's side: the camera across the fighters' line
+         * (`mirror.ts`), a frame that draws the fight alone; a picture held stays as it was drawn.
          */
         if (shows !== null) mirror.on = online?.mirroredSide === true && shows === 'fight';
         placeDisplay();
@@ -551,6 +550,7 @@ export async function playGame(): Promise<void> {
           hud.newMatch(data!, world);
         }
         hud.players = online?.players ?? null;
+        hud.streaks = online?.streaks ?? null;
         hud.prepare(world, width, height);
         pause.prepare(world, width, height);
         view.render(

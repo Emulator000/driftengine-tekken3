@@ -1,7 +1,7 @@
 {
   "name": "tekken3-relay",
   "private": true,
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "The server Tekken 3 on DriftEngine's online matches meet through: it pairs two players and passes their messages, and holds none of the game's data.",
   "type": "module",
   "license": "UNLICENSED",

@@ -32,6 +32,8 @@ import { FORCE_STAGES, ForceBackdrop } from './stage/force-backdrop.ts';
 import { ArcadeBackground } from './stage/arcade-background.ts';
 import { placeParts } from './stage/pieces.ts';
 import { freeView } from './free-view.ts';
+import { mirror } from '../2d/mirror.ts';
+import { otherSideCamera, otherSideView, type DrawnCamera } from './other-side.ts';
 import type { ArcadePanorama, PieceMotion } from '../../assets/manifest.ts';
 import { ForceItems } from './effects/force-items.ts';
 import { stageCodes } from '../../sim/fight/force-stage.ts';
@@ -254,6 +256,8 @@ export class FightView {
   private readonly sceneryModel = new Float32Array(16);
   /** How much larger the scenery is drawn: 1, but where the remake's walls stand (`wallScale`). */
   private sceneryScale = 1;
+  /** The camera as drawn this frame, where it is not the game's: an online fight seen from the other side. */
+  private drawnCamera: DrawnCamera | null = null;
   private readonly fighterModel = new Float32Array(16);
   private readonly casting: Fighter[] = [];
   /** Per side, its head's easing (`head-ease.ts`). */
@@ -509,7 +513,7 @@ export class FightView {
     const model = this.sceneryMatrix();
     /* A ceiling drawn whole over the cells left out round the camera while the camera is under it (the eye's height over the scenery's floors). */
     const ceiling = drawn.stage.ceiling;
-    const overhead = ceiling !== null && (this.scenery.y - state.camera.drawn.eye[1]!) / 1000 < ceiling * this.sceneryScale;
+    const overhead = ceiling !== null && (this.scenery.y - (this.drawnCamera ?? state.camera.drawn).eye[1]!) / 1000 < ceiling * this.sceneryScale;
     for (const oneSided of [false, true]) {
       renderer.setMaterial(oneSided ? drawn.stage.oneSidedMaterial : drawn.stage.material);
       drawn.stage.cells.forEach((cell, i) => {
@@ -555,6 +559,18 @@ export class FightView {
   }
 
   /**
+   * An online fight seen from this player's side where the game puts it on the other: the camera
+   * across the fighters' line (`other-side.ts`), the game's camera as the layout reads it with it.
+   */
+  private lookFromOtherSide(state: FightState): DrawnCamera {
+    const [a, b] = [state.fighters[0]!.skeleton.base.translation, state.fighters[1]!.skeleton.base.translation];
+    otherSideView(this.view, a, b);
+    this.camera.adoptView(this.view, this.camera.projection);
+    eyeOf(this.view, this.camera.position);
+    return otherSideCamera(state.camera.drawn, a, b);
+  }
+
+  /**
    * Where the remake's walls stand, the camera drawn kept inside them (`cameraInWalls`): one the
    * game puts past a wall, as it does with the fighters along it, moved along its line to them, its
    * view's turn kept, but never nearer them than `CAMERA_NEAREST` (past the wall then, the scenery
@@ -589,7 +605,7 @@ export class FightView {
       return;
     }
     const root = f.skeleton.base.translation;
-    const eye = state.camera.drawn.eye;
+    const eye = (this.drawnCamera ?? state.camera.drawn).eye;
     const [bx, by, bz] = [0, 1, 2].map((i) => flash.at[i]! - root[i]!);
     const [cx, cy, cz] = [0, 1, 2].map((i) => eye[i]! - root[i]!);
     const cos = (bx! * cx! + by! * cy! + bz! * cz!) / (Math.hypot(bx!, by!, bz!) * Math.hypot(cx!, cy!, cz!) || 1);
@@ -683,7 +699,7 @@ export class FightView {
    * sight over it, while the floor and the shadows cast on it stay where they are.
    */
   private fighterMatrix(state: FightState, lift: number): Float32Array {
-    const eye = state.camera.drawn.eye;
+    const eye = (this.drawnCamera ?? state.camera.drawn).eye;
     const k = 1 - FIGHTER_DEPTH;
     const [ex, ey, ez] = freeView.active ? freeView.eye : [eye[0]! / 1000, -eye[1]! / 1000, -eye[2]! / 1000];
     this.fighterModel.set([k, 0, 0, 0, 0, k, 0, 0, 0, 0, k, 0, (1 - k) * ex, k * lift + (1 - k) * ey, (1 - k) * ez, 1]);
@@ -710,6 +726,7 @@ export class FightView {
     const renderer = this.renderer;
     const widening = Math.max(1, aspect / (4 / 3));
     this.adoptCamera(state, aspect);
+    this.drawnCamera = !freeView.active && mirror.on ? this.lookFromOtherSide(state) : null;
     if (freeView.active) freeView.apply(this.camera, 0.6 * aspect);
     const eyeInWalls = !freeView.active && wallsOn(state) ? this.keepCameraInWalls(state) : null;
     if (this.files.remaster === true) this.cutIfJumped();
@@ -769,12 +786,13 @@ export class FightView {
     const scenery = drawn !== null && layout != null && only.scenery && state.match.trueOgres === 0 && layout.cellSize !== 0;
     /* Where the remake's walls stand, the stage fixed in place, drawn as large as puts its own walls on them. */
     const fixed = drawn !== null && wallsOn(state) ? { scale: wallScale(drawn.stage.reach), ...(eyeInWalls === null ? {} : { eye: eyeInWalls }) } : undefined;
-    const view = fixed === undefined ? { widening } : { widening, fixed };
+    const camera = this.drawnCamera === null ? {} : { camera: this.drawnCamera };
+    const view = fixed === undefined ? { widening, ...camera } : { widening, fixed, ...camera };
     this.sceneryScale = fixed?.scale ?? 1;
     if (scenery) layScenery(state, this.data, this.arena, drawn.stage, view, this.scenery, fixed !== undefined ? undefined : drawn.stage.grid === ARCADE_GRID ? this.heldArcade : this.heldDisc);
     /* The free camera sees every cell: the game's culling is its own camera's. */
     if (scenery && freeView.active) this.scenery.cells.fill(1);
-    if (scenery) fadeScenery(state, this.scenery, this.sceneryFade);
+    if (scenery) fadeScenery(state, this.scenery, this.sceneryFade, this.drawnCamera ?? state.camera.drawn);
     /* An arcade stage's background, behind everything drawn after it. */
     if (drawn?.sky != null && only.scenery && state.match.trueOgres === 0) drawn.sky.draw(this.camera, state.frameCount / 60, lookOfStage(state.stage).wind, this.scenery.yaw);
     else if (drawn?.background != null && only.scenery && state.match.trueOgres === 0) drawn.background.draw(lookOf(this.camera), aspect, this.scenery.yaw, sky);

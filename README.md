@@ -213,11 +213,12 @@ go between the two games; each runs the whole match itself, at once from your ow
 put right as it arrives (rollback), straight between the two machines where they can reach each
 other and through the server where not. Both of you need versions that play a match alike (a
 release that changes only how the game is drawn or sounds plays the one before it: 0.6.5, 0.6.6 and
-0.6.7 play each other; 0.7.0, whose walls change how a match plays, plays 0.7.0 to 0.7.2; 0.7.1
+0.6.7 play each other; 0.7.0, whose walls change how a match plays, plays 0.7.0 to 0.7.3; 0.7.1
 and later play 0.6.5 to 0.6.7 too, without the walls, on a server of 0.7.1 or later), and each the
 data of the fighter the other chose: a player with Kazuya is paired with one without him as long
-as neither of you plays him. The server counts each player's streak of wins (WINS, by your name
-and in the waiting room's corner), in its memory alone.
+as neither of you plays him. The server counts each player's streak of wins (WINS:3 at the foot of
+the screen under your side in a match, as Versus shows a streak, and in the waiting room's corner),
+in its memory alone.
 
 `npm run dev` and `npm run dev:lan` run the server beside the page, so two players on your home
 network (`npm run dev:lan`) play with nothing else to run. Over the internet, one of you runs the
@@ -347,7 +348,7 @@ field. What is done and what is not yet:
 | A quick match without the menus (`?quick`) | Done | |
 | **The modes** | | |
 | Versus (two players) | Done | |
-| Versus online | Done | ONLINE MODE: a quick match, rooms by code or from the list; a waiting room to practise in, the opponent found accepted or turned down, the match on a stage drawn at random, three rounds to win, a rematch asked for, each player's side kept (the fight drawn mirrored); rollback, the input delay asked for, the connection shown over the picture, the two games' states compared as they play; straight between the machines (WebRTC) or through the server (`npm run relay`, configurable) |
+| Versus online | Done | ONLINE MODE: a quick match, rooms by code or from the list; a waiting room to practise in, the opponent found accepted or turned down, the match on a stage drawn at random, three rounds to win, a rematch asked for, each player's side kept (the fight seen from the other side of the stage, nothing mirrored); rollback, the input delay asked for, the connection shown over the picture, the two games' states compared as they play; straight between the machines (WebRTC) or through the server (`npm run relay`, configurable) |
 | Team Battle | Done | Its results too |
 | Time Attack | Done | Its results too |
 | Survival | Done | Its results too |

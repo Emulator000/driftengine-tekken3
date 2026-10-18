@@ -131,9 +131,26 @@ const HUD_MIDDLE = 192;
 /** The infinity sign the timer shows when it is stopped. */
 export const INFINITY = '∞';
 
-/** The calls, each in its printer block, the last printed first; with `cells`, a run of digits a glyph a cell; `swapped`, each block at its mirrored place (`HUD_MIDDLE` its middle). */
-function calls(state: FightState, cells = false, swapped = false): PlacedPiece[] {
-  return state.hud.prints
+/**
+ * An online match's streaks of wins, each side's printed as the game prints a Versus streak ("WIN:1",
+ * "WINS:12", its small font at the foot under its side): where each starts by its digits (one win, up
+ * to 9, 99, 999) and side.
+ */
+const STREAK = { font: 1, colour: 8, y: 0x1b0, x: [[12, 291], [12, 278], [12, 265], [12, 252]] } as const;
+
+/** Each side's streak of wins (none under one) as a print of the game's own. */
+function streakPrints(streaks: readonly [number, number] | null): FightState['hud']['prints'] {
+  if (streaks === null) return [];
+  return streaks.flatMap((wins, side) => {
+    if (!(wins > 0)) return [];
+    const digits = wins < 2 ? 0 : wins < 10 ? 1 : wins < 100 ? 2 : 3;
+    return [{ font: STREAK.font, colour: STREAK.colour, x: STREAK.x[digits]![side]!, y: STREAK.y, text: `${wins < 2 ? 'WIN' : 'WINS'}:${wins}` }];
+  });
+}
+
+/** The calls, each in its printer block, the last printed first; with `cells`, a run of digits a glyph a cell; `swapped`, each block at its mirrored place (`HUD_MIDDLE` its middle); `added`, prints the fight's own do not have. */
+function calls(state: FightState, cells = false, swapped = false, added: FightState['hud']['prints'] = []): PlacedPiece[] {
+  return [...state.hud.prints, ...added]
     .filter((print) => FONTS[print.font] !== undefined && print.text.length > 0)
     .flatMap((print): PlacedPiece[] => {
       const font = FONTS[print.font]!;
@@ -221,7 +238,8 @@ function gauges(state: FightState): PlacedPiece[] {
 
 /**
  * The back's pieces, in the order they are added (drawn last to first); `swapped`, each side's place
- * showing the other side's; `players`, in an online match, each side's player's name under its fighter's.
+ * showing the other side's; `players`, in an online match, each side's player's name under its fighter's
+ * (its streak of wins at the foot, `streakPrints`).
  */
 function back(state: FightState, names: readonly string[], swapped = false, players: readonly string[] | null = null): PlacedPiece[] {
   const hud = state.hud;
@@ -267,9 +285,9 @@ function back(state: FightState, names: readonly string[], swapped = false, play
  * plate showing the other side's fighter, so the fighter on the left has the left plate, and each
  * call at its mirrored place.
  */
-export function layOutHud(state: FightState, names: readonly string[], data?: Pick<FightData, 'roster' | 'force'>, swapped = false, players: readonly string[] | null = null): { back: PlacedPiece[]; front: PlacedPiece[] } {
+export function layOutHud(state: FightState, names: readonly string[], data?: Pick<FightData, 'roster' | 'force'>, swapped = false, players: readonly string[] | null = null, streaks: readonly [number, number] | null = null): { back: PlacedPiece[]; front: PlacedPiece[] } {
   if (state.mode === TEKKEN_FORCE && data !== undefined) return { back: state.hud.back === 0 ? [] : forceBack(state, data), front: [...keys(state), ...calls(state, true)] };
-  return { back: state.hud.back === 0 ? [] : back(state, names, swapped, players), front: [...gauges(state), ...calls(state, false, swapped)] };
+  return { back: state.hud.back === 0 ? [] : back(state, names, swapped, players), front: [...gauges(state), ...calls(state, false, swapped, streakPrints(state.hud.shown !== 0 ? streaks : null))] };
 }
 
 /** Tekken Force's progress bar this field, in drawing order (its marker, the final box, the segments from the last, the lines, the cursor). */

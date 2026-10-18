@@ -217,10 +217,12 @@ and the room waits on.
 **The match.** Versus, your fighters as chosen, on a stage drawn at random, no handicap, three
 rounds to win, with reachable walls unless the host's REACHABLE WALLS is OFF, from the state the
 game powers on with: the host's options and earned characters, each player's own buttons. Your progress and records are left as they were. Where the server seats
-you on the other side than SIDE asks, the fight is drawn mirrored: your fighter and its plate on
-your side, the stick's left and right with the picture. Each player's name shows under their
-fighter's, on a dark tag of its own, with their streak of wins (WINS 3) where the server counts
-one. The versus screen counts the matches on your pairing: FIGHT 1, then FIGHT 2 at the first rematch
+you on the other side than SIDE asks (both of you asking for the same one), you see the fight from
+the other side of the stage, the camera across the fighters' line as Tekken's own online play does
+it: your fighter and its plate on your side, the stage's far side behind them, nothing drawn
+mirrored, the stick's left and right with the picture. Each player's name shows under their
+fighter's, on a dark tag of its own, and their streak of wins, where the server counts one, at the
+foot of the screen under their side as Versus shows a streak (WIN:1, WINS:3). The versus screen counts the matches on your pairing: FIGHT 1, then FIGHT 2 at the first rematch
 and so on (a 0.6.5 game shows FIGHT 1 at each). Both of you stay on the versus screen until both
 games have the fight loaded and ready, and go into it together; the one ready first shows WAITING FOR
 the other, or that it IS LOADING (with a 0.6.5 or 0.6.6 game, which does not say when it is ready,
@@ -246,7 +248,7 @@ the match too, the one who reset going back to the page.
 **Your streak of wins.** The server counts the matches each player wins without a loss: one more for
 each match won, back to none at a match lost or left while it was under way (the player left behind
 gains nothing), a draw changing nothing. The waiting room shows yours in its corner as WINS and the
-number, over the server's counts, and a match each player's by their name. The server keeps it in
+number, over the server's counts, and a match each player's at the foot under their side. The server keeps it in
 its memory by an id your game makes once and keeps (it shows it to no one), so it holds while you
 come and go, until the server stops or a day passes without you. A 0.6.5 game, which keeps no id,
 has no streak counted, and the player it plays is counted on their own game's word.

@@ -27,6 +27,7 @@ import { fighterLockedOn } from '../../sim/fight/camera.ts';
 import type { FightData, FightState } from '../../sim/fight/state.ts';
 import { WALL_REACH } from '../../sim/fight/walls.ts';
 import { GroundLight, groundLighting, litShade } from './ground-light.ts';
+import type { DrawnCamera } from './other-side.ts';
 import type { GroundState } from './stage/ground.ts';
 
 const TILE = 1800;
@@ -149,7 +150,12 @@ export const newGround = (): GroundLayout => ({
 export interface View {
   readonly widening: number;
   readonly fixed?: { readonly scale: number; readonly eye?: readonly [number, number, number] };
+  /** The camera as drawn, where it is not the game's (an online fight seen from the other side, `other-side.ts`). */
+  readonly camera?: DrawnCamera;
 }
+
+/** The camera the scenery and the floor are laid for: the one drawn, the game's but where the view says otherwise. */
+const cameraOf = (state: FightState, view?: View): DrawnCamera => view?.camera ?? state.camera.drawn;
 
 /** Whether a point (the game's x and z) stands inside the remake's eight-sided walls, each side `reach` from the middle. */
 export const insideWalls = (x: number, z: number, reach: number): boolean => Math.abs(x) <= reach && Math.abs(z) <= reach && Math.abs(x) + Math.abs(z) <= reach * Math.SQRT2;
@@ -370,7 +376,8 @@ export function layScenery(state: FightState, data: FightData, arena: ArenaTable
   /* The disc's scenery stands at the stage's height under the floor; an arcade stage's on the floor, its own floors a little under the fight's. */
   out.y = scenery.grid !== DISC_GRID ? ARCADE_DEPTH : (arena.stageHeights[state.stage] ?? 0);
   out.yaw = state.scenery.yaw;
-  const eye = view.fixed?.eye ?? state.camera.drawn.eye;
+  const camera = cameraOf(state, view);
+  const eye = view.fixed?.eye ?? camera.eye;
   const [camX, camY, camZ] = [eye[0]!, eye[1]!, eye[2]!];
   /* Before a round starts (the fighters set at their places) and as it starts, the scenery stands where the game puts it. */
   if (held !== undefined && fixed === undefined) {
@@ -387,7 +394,7 @@ export function layScenery(state: FightState, data: FightData, arena: ArenaTable
   const inFrame = (x: number, z: number): [number, number] => [Math.round(((trig.cos(turn) * x + trig.sin(turn) * z) >> 12) / scale), Math.round(((-trig.sin(turn) * x + trig.cos(turn) * z) >> 12) / scale)];
   const [rx, rz] = inFrame(offX, offZ);
   const fixedView: FixedView | undefined = fixed === undefined ? undefined : { fighters: [inFrame(rootA[0]! - out.x, rootA[2]! - out.z), inFrame(rootB[0]! - out.x, rootB[2]! - out.z)], short: BY_FIGHTERS / scale, inside: insideWalls(camX, camZ, WALL_REACH) };
-  const yaw = state.camera.drawn.yaw - out.yaw;
+  const yaw = camera.yaw - out.yaw;
   const cells = out.cells;
   const disc = scenery.grid === DISC_GRID;
   if (state.attractIntro !== 0) {
@@ -440,9 +447,9 @@ export const newSceneryFade = (): SceneryFade => ({ shown: new Float32Array(MAX_
  * Each cell eased toward what the culling chose for it this field, by a `FADE_FIELDS`th; set at
  * once on a new stage and on a cut, where the camera or the scenery jumps rather than moves.
  */
-export function fadeScenery(state: FightState, scenery: SceneryLayout, fade: SceneryFade): void {
-  const eye = state.camera.drawn.eye;
-  const now = { stage: state.stage, x: eye[0]!, y: eye[1]!, z: eye[2]!, yaw: state.camera.drawn.yaw, sceneryX: scenery.x, sceneryZ: scenery.z, sceneryYaw: scenery.yaw };
+export function fadeScenery(state: FightState, scenery: SceneryLayout, fade: SceneryFade, camera: DrawnCamera = state.camera.drawn): void {
+  const eye = camera.eye;
+  const now = { stage: state.stage, x: eye[0]!, y: eye[1]!, z: eye[2]!, yaw: camera.yaw, sceneryX: scenery.x, sceneryZ: scenery.z, sceneryYaw: scenery.yaw };
   const last = fade.last;
   const cut =
     last === null ||
@@ -475,8 +482,7 @@ const patchOf = (state: FightState, arena: ArenaTables): Patch =>
   state.mode === TEKKEN_FORCE ? { tile: FORCE.tile, columns: MAP, rows: FORCE.rows, template: arena.forceGround, z: FORCE.z } : { tile: TILE, columns: MAP, rows: MAP, template: arena.ground, z: null };
 
 /** Under a high camera, the patch goes where the view's lower edge meets the floor. */
-function highCentre(trig: Trig, state: FightState, data: FightData, tile: number): [number, number] {
-  const drawn = state.camera.drawn;
+function highCentre(trig: Trig, data: FightData, tile: number, drawn: DrawnCamera): [number, number] {
   const [camX, camY, camZ] = [drawn.eye[0]!, drawn.eye[1]!, drawn.eye[2]!];
   const u = (drawn.pitch + 0xef) & 0xfff;
   const reach = Math.trunc((Math.abs(camY) * trig.cos(u)) / trig.sin(u));
@@ -507,13 +513,12 @@ function highCentre(trig: Trig, state: FightState, data: FightData, tile: number
  * floor; else the fighters' midpoint, a tile back when the view tilts up. Tekken Force's always at
  * its own depth.
  */
-function groundCentre(trig: Trig, state: FightState, data: FightData, patch: Patch): [number, number] | null {
+function groundCentre(trig: Trig, state: FightState, data: FightData, patch: Patch, drawn: DrawnCamera): [number, number] | null {
   if (state.groundShown === 0) return null;
-  const drawn = state.camera.drawn;
   const pitch = drawn.pitch;
   const { tile } = patch;
   let centre: [number, number];
-  if ((pitch & 0xfff) !== 0 && (pitch & 0x800) === 0 && drawn.eye[1]! < -0x6b8) centre = highCentre(trig, state, data, tile);
+  if ((pitch & 0xfff) !== 0 && (pitch & 0x800) === 0 && drawn.eye[1]! < -0x6b8) centre = highCentre(trig, data, tile, drawn);
   else {
     const [a, b] = state.fighters;
     centre = [((a.skeleton.base.translation[0]! + b.skeleton.base.translation[0]!) / 2) | 0, ((a.skeleton.base.translation[2]! + b.skeleton.base.translation[2]!) / 2) | 0];
@@ -575,7 +580,8 @@ export function layGround(state: FightState, data: FightData, arena: ArenaTables
   /* The attract intro lays its floor its own way, shaded by depth. */
   const lighting = state.attractIntro !== 0 ? { kind: GroundLight.DEPTH, brightest: 0 } : groundLighting(stage, state.stage, state.match.trueOgres, force && state.force.finalStage !== 0);
   const lit = lighting.kind !== GroundLight.DEPTH;
-  const placed = lit ? litCentre(trig, state, patch) : groundCentre(trig, state, data, patch);
+  const camera = cameraOf(state, view);
+  const placed = lit ? litCentre(trig, state, patch) : groundCentre(trig, state, data, patch, camera);
   const centre = placed !== null && around !== null ? ([around.x, around.z] as [number, number]) : placed;
   out.drawn = centre !== null;
   out.shadeOf = null;
@@ -590,7 +596,7 @@ export function layGround(state: FightState, data: FightData, arena: ArenaTables
   if (row < 0) row += rows;
   row = rows - (row + 1);
   const [a, b] = state.fighters;
-  const eye = state.camera.drawn.eye;
+  const eye = camera.eye;
   const dx = eye[0]! - (((a.skeleton.base.translation[0]! + b.skeleton.base.translation[0]!) / 2) | 0);
   const dz = eye[2]! - (((a.skeleton.base.translation[2]! + b.skeleton.base.translation[2]!) / 2) | 0);
   const reference = force ? Math.abs(eye[2]!) : libraryRoot((Math.imul(dx, dx) + Math.imul(dz, dz)) | 0, data.math);
