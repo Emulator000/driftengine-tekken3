@@ -23,7 +23,7 @@ export type OnlineState = 'off' | 'connecting' | 'lobby' | 'queued' | 'offered' 
 /** What a side says of itself once paired. */
 export interface Hello {
   readonly k: 'hello';
-  /** The game's version, which must be the other's, and the fighters whose data this side has (`rosterWord`). */
+  /** The version the match is played as, which must be the other's, and the fighters whose data this side has (`rosterWord`). */
   readonly version: string;
   readonly roster: string;
   readonly name: string;
@@ -60,8 +60,10 @@ export interface Start {
 
 /** The game an online match plays, as the page gives it. */
 export interface OnlineGame<S> {
-  /** The game's version, which both sides must share. */
+  /** The game's version, which both sides must share, but where both play one of `plays`. */
   readonly version: string;
+  /** The older versions it also plays a match as, newest first: the server pairs it with their players too, the match played as the newest the two share. */
+  readonly plays?: readonly string[];
   /** The fighters whose data this side has, by roster id: the other's chosen fighter must be one of them. */
   readonly roster: readonly number[];
   /** A fighter's name, for saying which one a side lacks. */
@@ -69,10 +71,10 @@ export interface OnlineGame<S> {
   /** A player's buttons as the game takes them: each of the pad's eight an entry of its table of `keyChoices`; its own setup as it powers on, for a player who sent none the game can take. */
   readonly keyChoices: number;
   readonly defaultKeys: readonly number[];
-  /** The match's options, as the host decides them. */
-  options(): Readonly<Record<string, unknown>>;
-  /** The match begun from its start, this side in `seat`: the game reset to it, and how a field of it is stepped and saved. */
-  begin(start: Start, seat: 0 | 1): { readonly step: (words: readonly [number, number], field: number) => void; readonly snapshotter: Snapshotter<unknown> };
+  /** The match's options, as the host decides them for a match played as version `as`. */
+  options(as: string): Readonly<Record<string, unknown>>;
+  /** The match begun from its start, this side in `seat`, played as version `as`: the game reset to it, and how a field of it is stepped and saved. */
+  begin(start: Start, seat: 0 | 1, as: string): { readonly step: (words: readonly [number, number], field: number) => void; readonly snapshotter: Snapshotter<unknown> };
   /** The match is over, for `why` (the game goes back to where it was; 'over' its fight ended, its result asked about). */
   end(why: string): void;
   /** A match's result left without a rematch: back to waiting. */
@@ -113,6 +115,13 @@ export interface OnlineOptions<S> {
  */
 export const PLAYS_AS = '0.7.0';
 
+/**
+ * The older versions this release also plays a match as, each with the fields of the state its own
+ * matches have and that version's has not: a match as one is played without the remake's walls, and
+ * those fields (all at rest) left out of its fingerprint.
+ */
+export const ALSO_PLAYS: Readonly<Record<string, readonly string[]>> = { '0.6.5': ['wallHit', 'carried', 'splatted', 'splatHits', 'walls'] };
+
 /** Frames between round trips measured: twice a second. */
 const PING_EVERY = 30;
 /** Round trips the shown one is the mean of. */
@@ -121,6 +130,8 @@ const PING_WINDOW = 8;
 const WAIT_EVERY = 15;
 /** Frames a side holding for the other may hear nothing from it before the other is taken for gone: five seconds. */
 const HOLD_SILENCE = 300;
+/** Frames a side holds for the other's word that it is ready while the other says nothing of loading: three seconds, past which the other went into the fight without saying so. */
+const READY_WAIT = 180;
 /** Frames between asking the server for its room list, while it is shown. */
 const ROOMS_EVERY = 180;
 /** Milliseconds the host waits, both hellos in, before it starts the match: the opponent found shown a moment on both sides. */
@@ -175,9 +186,10 @@ const rosterOf = (word: string | undefined): bigint => {
   }
 };
 
-/** A player as another is matched against them: their game's version, the fighters whose data they have (`rosterWord`), and the fighter they chose (its roster id; -1 none yet). */
+/** A player as another is matched against them: their game's version (and the versions it plays a match as, its own first, where it says them), the fighters whose data they have (`rosterWord`), and the fighter they chose (its roster id; -1 none yet). */
 export interface Side {
   readonly version: string;
+  readonly plays?: readonly string[];
   readonly roster: string;
   readonly fighter: number;
 }
@@ -187,12 +199,13 @@ const hasFighter = (side: Side, fighter: number): boolean => fighter < 0 || ((ro
 
 /**
  * Why two players cannot play each other, as a player is shown it, or the empty string where they
- * can: the same version, and each one's fighter one whose data the other has. Their rosters may
+ * can: a version both play a match as, and each one's fighter one whose data the other has. Their rosters may
  * differ otherwise, and their games' data too: should it make the two games play differently, the
  * match's own comparison ends it.
  */
 export function cannotPlay(ours: Side, theirs: Side, name: (fighter: number) => string = (fighter) => `FIGHTER ${fighter}`): string {
-  if (ours.version !== theirs.version) return `THE OTHER PLAYER HAS VERSION ${theirs.version || '?'}`;
+  const shared = theirs.plays ?? [theirs.version];
+  if (!(ours.plays ?? [ours.version]).some((version) => shared.includes(version))) return `THE OTHER PLAYER HAS VERSION ${theirs.version || '?'}`;
   if (!hasFighter(theirs, ours.fighter)) return `THE OTHER PLAYER LACKS ${name(ours.fighter)}`;
   if (!hasFighter(ours, theirs.fighter)) return `YOU LACK ${name(theirs.fighter)}`;
   return '';
@@ -201,8 +214,8 @@ export function cannotPlay(ours: Side, theirs: Side, name: (fighter: number) => 
 /** A side as another sent it (its fighter a number, its roster a word), or null. */
 function sideOf(value: unknown): Side | null {
   if (value === null || typeof value !== 'object') return null;
-  const { version, roster, fighter } = value as Record<string, unknown>;
-  return { version: String(version ?? ''), roster: typeof roster === 'string' ? roster : '0', fighter: Number.isInteger(fighter) ? (fighter as number) : -1 };
+  const { version, plays, roster, fighter } = value as Record<string, unknown>;
+  return { version: String(version ?? ''), ...(Array.isArray(plays) ? { plays: plays.map(String) } : {}), roster: typeof roster === 'string' ? roster : '0', fighter: Number.isInteger(fighter) ? (fighter as number) : -1 };
 }
 
 export class Online<S> {
@@ -231,6 +244,8 @@ export class Online<S> {
   rematchMine: boolean | null = null;
   /** This side's seat once paired: 0 the host's (the first pad), 1 the guest's. */
   seat: 0 | 1 = 0;
+  /** The version the pairing's matches are played as: the server's word as they were paired (where it says one), the game's own otherwise. */
+  playsAs = '';
   /** Why the last match or attempt ended, as a line (the empty string while none has). */
   ended = '';
   /** The round trip to the server, or through it to the other player while paired, in milliseconds. */
@@ -255,6 +270,9 @@ export class Online<S> {
   /** The match the other side said it is ready to fight, and the match this side last said so of. */
   private theyAreReady = -1;
   private saidReady = -1;
+  /** The match this side last held for the other in, and the frame it began to. */
+  private heldFor = -1;
+  private heldSince = 0;
   /** The frame the other side was last heard from. */
   private heardAt = 0;
   private listing = false;
@@ -267,18 +285,25 @@ export class Online<S> {
 
   constructor(options: OnlineOptions<S>) {
     this.options = options;
+    this.playsAs = options.game.version;
   }
 
-  /** This player as another is matched against them: the version, the fighters whose data this side has, the fighter chosen. */
+  /** The versions this game plays a match as: its own, then the older ones it also plays. */
+  private get versions(): readonly string[] {
+    return [this.options.game.version, ...(this.options.game.plays ?? [])];
+  }
+
+  /** This player as another is matched against them: the versions it plays a match as, the fighters whose data this side has, the fighter chosen. */
   private get side(): Side {
     const fighter = this.options.player().fighter?.roster;
-    return { version: this.options.game.version, roster: rosterWord(this.options.game.roster), fighter: Number.isInteger(fighter) ? fighter! : -1 };
+    return { version: this.options.game.version, plays: this.versions, roster: rosterWord(this.options.game.roster), fighter: Number.isInteger(fighter) ? fighter! : -1 };
   }
 
-  /** Why this player cannot play the side another sent (`cannotPlay`), or the empty string (also where it sent none). */
-  private whyNot(theirs: unknown): string {
+  /** Why this player cannot play the side another sent (`cannotPlay`), or the empty string (also where it sent none); `paired`, against the version the pairing plays as alone. */
+  private whyNot(theirs: unknown, paired = false): string {
     const side = sideOf(theirs);
-    return side === null ? '' : cannotPlay(this.side, side, this.options.game.fighterName);
+    const ours = paired ? { ...this.side, version: this.playsAs, plays: [this.playsAs] } : this.side;
+    return side === null ? '' : cannotPlay(ours, side, this.options.game.fighterName);
   }
 
   private get now(): number {
@@ -330,7 +355,7 @@ export class Online<S> {
         this.state = 'off';
       };
       const { name, id } = this.options.player();
-      if (!carried.some((text) => text.includes('"do":"hello"'))) relay.say({ do: 'hello', game: GAME, protocol: PROTOCOL, name, build: this.options.game.version, roster: rosterWord(this.options.game.roster), ...(id === undefined ? {} : { id }) });
+      if (!carried.some((text) => text.includes('"do":"hello"'))) relay.say({ do: 'hello', game: GAME, protocol: PROTOCOL, name, build: this.options.game.version, plays: this.versions, roster: rosterWord(this.options.game.roster), ...(id === undefined ? {} : { id }) });
       return true;
     }
     this.ended = whyLine(refused ? 'insecure' : 'unreachable');
@@ -396,7 +421,7 @@ export class Online<S> {
   /** Both asked for a rematch: the host starts the same two fighters again, on a stage drawn anew. */
   private maybeRematch(): void {
     if (this.state !== 'result' || this.rematchMine !== true || this.rematchTheirs !== true || this.seat !== 0 || this.lastStart === null) return;
-    const start: Start = { ...this.lastStart, options: this.options.game.options(), match: this.lastStart.match + 1 };
+    const start: Start = { ...this.lastStart, options: this.options.game.options(this.playsAs), match: this.lastStart.match + 1 };
     this.relay?.toPeer(start);
     this.begin(start);
   }
@@ -475,7 +500,9 @@ export class Online<S> {
     /*
      * The fight's last loading field, this side ready: it says so, and with another that starts each
      * fight together holds there until that one has said so too, both then going into the fight on
-     * the same field rather than one stopping in it for the other.
+     * the same field rather than one stopping in it for the other. One that has said nothing of
+     * loading for `READY_WAIT` went in without saying it was ready (as a 0.7.0 game that played a
+     * match before the pairing does): this side goes in after it.
      */
     const match = this.lastStart?.match ?? 0;
     if (atStart) {
@@ -484,9 +511,18 @@ export class Online<S> {
         this.saidReady = match;
       }
       if (this.theirs?.together === true && this.theyAreReady !== match) {
-        if (this.frames - this.heardAt > HOLD_SILENCE) this.finish('disconnected', 'left');
-        else this.holding = true;
-        return false;
+        if (this.heldFor !== match) {
+          this.heldFor = match;
+          this.heldSince = this.frames;
+        }
+        if (this.frames - this.heardAt > HOLD_SILENCE) {
+          this.finish('disconnected', 'left');
+          return false;
+        }
+        if (this.theyWait || this.frames - this.heldSince < READY_WAIT) {
+          this.holding = true;
+          return false;
+        }
       }
     }
     const played = session.advance(word);
@@ -569,7 +605,7 @@ export class Online<S> {
         return;
       case 'paired':
         this.opponentWins = Number.isInteger(event.peer.wins) ? event.peer.wins! : -1;
-        this.paired(event.seat, event.code, event.peer.name);
+        this.paired(event.seat, event.code, event.peer.name, event.as);
         return;
       case 'wins':
         if (!Number.isInteger(event.wins)) return;
@@ -597,19 +633,26 @@ export class Online<S> {
     }
   }
 
-  private paired(seat: 0 | 1, code: string, opponent: string): void {
+  private paired(seat: 0 | 1, code: string, opponent: string, as: string | undefined): void {
     this.seat = seat;
+    this.playsAs = as !== undefined && this.versions.includes(as) ? as : this.options.game.version;
     this.code = code;
     this.opponent = opponent;
     this.state = 'greeting';
     this.theirs = null;
     this.trips.length = 0;
+    /* A new pairing's matches are numbered from 1 again: nothing either side said of being ready, or loading, in the last one holds. */
+    this.theyAreReady = -1;
+    this.saidReady = -1;
+    this.heldFor = -1;
+    this.theyWait = false;
+    this.theyWaitAt = -1;
     /* The transport made now: the host's first words may come before its start is read here. */
     this.wire = switchableSocket(this.relay!.forInputs);
     const transport = new WebSocketTransport({ socket: this.wire.socket, self: seat });
     this.transport = (this.options.lagMs ?? 0) > 0 ? new LateTransport(transport, this.options.lagMs!, () => this.now) : transport;
     const { name, delay, keys, fighter } = this.options.player();
-    const hello: Hello = { k: 'hello', version: this.options.game.version, roster: rosterWord(this.options.game.roster), name, delay, keys, fighter, together: true };
+    const hello: Hello = { k: 'hello', version: this.playsAs, roster: rosterWord(this.options.game.roster), name, delay, keys, fighter, together: true };
     this.relay!.toPeer(hello);
   }
 
@@ -641,16 +684,15 @@ export class Online<S> {
         if ((kind === 'offer' || kind === 'answer' || kind === 'candidate') && typeof text === 'string') void this.signal(kind, text);
         return;
       }
+      /* A ping or a pong says the other's page is there, not that its game plays: a match stalled on it ends all the same. */
       case 'ping':
         this.relay?.toPeer({ k: 'pong', t: (body as { t?: unknown }).t, ahead: this.session?.ahead ?? 0 });
         this.session?.theirLead(Number((body as { ahead?: unknown }).ahead));
-        this.session?.heard();
         return;
       case 'pong': {
         const t = (body as { t?: unknown }).t;
         if (t === this.pinged) this.trip(this.now - this.pinged);
         this.session?.theirLead(Number((body as { ahead?: unknown }).ahead));
-        this.session?.heard();
         return;
       }
       case 'wait':
@@ -676,7 +718,7 @@ export class Online<S> {
   private hello(theirs: Hello): void {
     if (this.state !== 'greeting') return;
     this.theirs = theirs;
-    const why = this.whyNot({ version: theirs.version, roster: theirs.roster, fighter: theirs.fighter?.roster });
+    const why = this.whyNot({ version: theirs.version, roster: theirs.roster, fighter: theirs.fighter?.roster }, true);
     if (why !== '') {
       this.relay?.toPeer({ k: 'refuse', why: 'different game', side: this.side });
       this.stop('different game');
@@ -690,7 +732,7 @@ export class Online<S> {
     const { keyChoices, defaultKeys } = this.options.game;
     const keys = (k: readonly number[]): readonly number[] => (Array.isArray(k) && k.length === 8 && k.every((n) => Number.isInteger(n) && 0 <= n && n < keyChoices) ? [...k] : [...defaultKeys]);
     const fighter = (f: Fighter | undefined): Fighter => ({ roster: Number.isInteger(f?.roster) ? f!.roster : 0, costume: Number.isInteger(f?.costume) ? f!.costume & 3 : 0 });
-    const start: Start = { k: 'start', options: this.options.game.options(), delay, keys: [keys(ours.keys), keys(theirs.keys)], fighters: [fighter(ours.fighter), fighter(theirs.fighter)], match: 1 };
+    const start: Start = { k: 'start', options: this.options.game.options(this.playsAs), delay, keys: [keys(ours.keys), keys(theirs.keys)], fighters: [fighter(ours.fighter), fighter(theirs.fighter)], match: 1 };
     this.starting = { start, at: this.now + GREETING_HOLD_MS };
   }
 
@@ -700,7 +742,7 @@ export class Online<S> {
     this.heardAt = this.frames;
     /* What the last match left in the transport is no word of this one's. */
     this.transport?.drain(() => {});
-    const { step, snapshotter } = this.options.game.begin(start, this.seat);
+    const { step, snapshotter } = this.options.game.begin(start, this.seat, this.playsAs);
     this.session = new MatchSession({ step, snapshotter, transport: this.transport!, self: this.seat, inputDelay: [start.delay, start.delay], match: Number.isInteger(start.match) ? start.match : 0 });
     this.state = 'playing';
     this.ended = '';

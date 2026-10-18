@@ -13,7 +13,7 @@ import type { FightData } from '../fight/state.ts';
 import { voiceLine } from '../fight/voices.ts';
 import { tile } from './draw.ts';
 import { print } from './printer.ts';
-import type { GameState } from './state.ts';
+import { Scene, type GameState } from './state.ts';
 
 /** The page's number among the Options' (past REMAKE OPTION's). */
 export const ONLINE_PAGE = 0x11;
@@ -495,7 +495,8 @@ const CARD_SETTLE = 30;
 
 /**
  * A field of the waiting room's practice, before its scene: 'leave' once nothing is waited for any
- * more (the match was refused or is over, the queue left), the page then shown again; 'hold' while
+ * more (the match was refused or is over, the queue left) or the practice goes to the mode menu,
+ * the page then shown again; 'hold' while
  * an opponent found is offered or greeted, the practice held under its card, which start answers yes
  * and select no (the buttons the fight does not fight with); else null, the practice playing on, in its fight what is
  * waited for at the foot of the screen. `centre` is the middle of the scene's screen, in its units
@@ -503,6 +504,11 @@ const CARD_SETTLE = 30;
  */
 export function warmUpFrame(game: GameState, data: Data, centre: number, place: 'fight' | 'select' | 'other'): 'leave' | 'hold' | null {
   const online = game.online;
+  /* Bound for the mode menu (Practice's RESET): the waiting room left as its pause menu leaves it, what is waited for cancelled, so no other mode is played still waiting. */
+  if (game.scene === Scene.MENU || (game.scene === Scene.LOGO && game.next === Scene.MENU)) {
+    Object.assign(online, { warming: 0, opens: 1, ask: 'cancel', screen: OnlineScreen.LIST });
+    return 'leave';
+  }
   /* Nothing is waited for while the character is chosen; on the select, L1 and R1 choose the side it is seen on. */
   if (online.warming === 1) {
     if (place === 'select') sideFrame(game, data, centre);

@@ -28,13 +28,16 @@ export class StateSnapshotter<T extends object> implements Snapshotter<Tree> {
   private readonly shared = new WeakSet<object>();
   /** The state's fields, by name at its root, left out of the fingerprint: this machine's own (its settings), which never decide anything. */
   private readonly own: ReadonlySet<string>;
+  /** Fields, by name wherever they stand, left out of the fingerprint too (an older version's state has none of them); saved and restored as any. */
+  private readonly left: ReadonlySet<string>;
   /** The fingerprint's two halves while it is made. */
   private low = FNV_OFFSET;
   private high = HIGH_OFFSET;
 
-  constructor(state: T, own: readonly string[] = []) {
+  constructor(state: T, own: readonly string[] = [], left: readonly string[] = []) {
     this.state = state;
     this.own = new Set(own);
+    this.left = new Set(left);
   }
 
   /** Every object of `data` (a match's loaded data, the game's tables) marked as the data's, so the state's references to it are copied as they are. */
@@ -143,7 +146,7 @@ export class StateSnapshotter<T extends object> implements Snapshotter<Tree> {
       return;
     }
     for (const key in v as Record<string, unknown>) {
-      if (root && this.own.has(key)) continue;
+      if ((root && this.own.has(key)) || this.left.has(key)) continue;
       const item = (v as Record<string, unknown>)[key];
       if (data && item !== null && typeof item === 'object') continue;
       this.hash(item);

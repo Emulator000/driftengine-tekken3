@@ -39,7 +39,7 @@ export type ServerEvent =
   | { readonly ev: 'queued'; readonly waiting: number }
   | { readonly ev: 'offer'; readonly peer: { readonly name: string }; readonly seconds: number }
   | { readonly ev: 'idle'; readonly why: string }
-  | { readonly ev: 'paired'; readonly seat: 0 | 1; readonly code: string; readonly peer: { readonly name: string; readonly wins?: number } }
+  | { readonly ev: 'paired'; readonly seat: 0 | 1; readonly code: string; readonly peer: { readonly name: string; readonly wins?: number }; readonly as?: string }
   | { readonly ev: 'rooms'; readonly rooms: readonly ListedRoom[] }
   | { readonly ev: 'peer'; readonly body: unknown }
   | { readonly ev: 'left'; readonly why: string }

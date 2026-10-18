@@ -7,8 +7,10 @@
  * A player says hello (their game's version, the fighters whose data they have), then hosts a room
  * (a code to give the other player, listed in the server's room list or not, with a password or
  * not), joins one by its code, or waits in the quick match's queue, each with the fighter they
- * chose. Two players are brought together only where they can play each other: the same version,
- * and each one's fighter one whose data the other has. Two players the queue brings together, or
+ * chose. Two players are brought together only where they can play each other: a version both
+ * play a match as (a game says its own and the older ones it also plays; the match is played as the
+ * newest the two share, and both are told it as they are paired), and each one's fighter one whose
+ * data the other has. Two players the queue brings together, or
  * a room's host and the player joining it, are offered each other first: both must say yes within
  * the offer's seconds. In the queue a no puts both back in it, kept apart from each other a while, and
  * an offer not answered in time puts both back to look again; at a room a no or no answer sends the
@@ -125,14 +127,22 @@ function rosterOf(word) {
 /** Whether a player has this fighter's data (any, for no fighter chosen). */
 const hasFighter = (client, fighter) => fighter < 0 || ((client.roster >> BigInt(fighter)) & 1n) === 1n;
 
+/** The most versions a game may say it plays a match as. */
+const MOST_PLAYS = 8;
+/** The versions a game plays a match as: its own (`build`), then the older ones it also plays, as it said them, newest first. */
+const playsOf = (build, plays) => [build, ...(Array.isArray(plays) ? plays.filter((v) => typeof v === 'string' && v !== '').map((v) => v.slice(0, 64)) : [])].filter((v, i, all) => all.indexOf(v) === i).slice(0, MOST_PLAYS);
+
+/** The version two players play a match as: the newest of the first's that the second plays too, or undefined. */
+const versionOf = (a, b) => a.plays.find((version) => b.plays.includes(version));
+
 /**
- * Whether two players can play each other: the same version of the game, and each one's chosen
+ * Whether two players can play each other: a version both play a match as, and each one's chosen
  * fighter one whose data the other has. Their rosters and their games' data may differ otherwise.
  */
-const compatible = (a, b) => a.build === b.build && hasFighter(b, a.fighter) && hasFighter(a, b.fighter);
+const compatible = (a, b) => versionOf(a, b) !== undefined && hasFighter(b, a.fighter) && hasFighter(a, b.fighter);
 
 /** A player as another is told of them on a refusal, to say why. */
-const sideOf = (client) => ({ version: client.build, roster: client.roster.toString(16), fighter: client.fighter });
+const sideOf = (client) => ({ version: client.build, plays: client.plays, roster: client.roster.toString(16), fighter: client.fighter });
 
 const flag = (name) => name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
 const envName = (name) => `T3_RELAY_${name.replace(/[A-Z]/g, (c) => `_${c}`).toUpperCase()}`;
@@ -335,7 +345,7 @@ export class Relay {
   }
 
   connected(socket, request) {
-    const client = { id: (this.ids += 1), address: addressOf(request), offer: null, socket, hello: false, name: 'PLAYER', build: '', own: '', roster: 0n, fighter: -1, room: null, seat: -1, queued: false, heard: this.now(), window: this.now(), count: 0, alive: true };
+    const client = { id: (this.ids += 1), address: addressOf(request), offer: null, socket, hello: false, name: 'PLAYER', build: '', plays: [], own: '', roster: 0n, fighter: -1, room: null, seat: -1, queued: false, heard: this.now(), window: this.now(), count: 0, alive: true };
     this.clients.add(client);
     socket.on('pong', () => (client.alive = true));
     socket.on('message', (data, binary) => this.message(client, data, binary));
@@ -405,7 +415,7 @@ export class Relay {
     }
   }
 
-  hello(client, { game, protocol, name, build, roster, id }) {
+  hello(client, { game, protocol, name, build, plays, roster, id }) {
     if (game !== GAME || protocol !== PROTOCOL) {
       this.tell(client, { ev: 'refused', why: protocol !== PROTOCOL ? 'protocol' : 'game' });
       client.socket.close(1008, 'refused');
@@ -414,6 +424,7 @@ export class Relay {
     client.hello = true;
     client.name = cleanName(name);
     client.build = String(build ?? '').slice(0, 64);
+    client.plays = playsOf(client.build, plays);
     client.own = typeof id === 'string' && OWN_ID.test(id) ? id : '';
     client.roster = rosterOf(roster);
     this.log(`[relay] ${who(client)} connected (${this.clients.size} on the server)`);
@@ -597,8 +608,9 @@ export class Relay {
     client.seat = 1;
     const [first, second] = room.seats;
     const peer = (one) => ({ name: one.name, ...(one.own === '' ? {} : { wins: this.winsOf(one) }) });
-    this.tell(first, { ev: 'paired', seat: 0, code: room.code, peer: peer(second) });
-    this.tell(second, { ev: 'paired', seat: 1, code: room.code, peer: peer(first) });
+    const as = versionOf(first, second) ?? first.build;
+    this.tell(first, { ev: 'paired', seat: 0, code: room.code, peer: peer(second), as });
+    this.tell(second, { ev: 'paired', seat: 1, code: room.code, peer: peer(first), as });
     this.log(`[relay] ${room.quick ? 'quick match' : `room ${room.code}`}: ${who(first)} and ${who(second)}`);
   }
 
@@ -606,7 +618,7 @@ export class Relay {
     const rooms = [...this.rooms.values()]
       .filter((room) => room.listed && room.seats[1] === null && room.offering === null)
       .slice(0, this.config.listed)
-      .map((room) => ({ code: room.code, title: room.title, host: room.seats[0].name, locked: room.pass !== '', same: room.seats[0].build === client.build && hasFighter(client, room.seats[0].fighter) }));
+      .map((room) => ({ code: room.code, title: room.title, host: room.seats[0].name, locked: room.pass !== '', same: versionOf(room.seats[0], client) !== undefined && hasFighter(client, room.seats[0].fighter) }));
     this.tell(client, { ev: 'rooms', rooms });
   }
 

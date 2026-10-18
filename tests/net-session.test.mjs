@@ -16,6 +16,7 @@ import { LoopbackNetwork } from '@driftengine/network';
 
 import { MatchSession, ROLLBACK_DEPTH, STALL_DISCONNECT } from '../src/net/session.ts';
 import { StateSnapshotter } from '../src/net/snapshot.ts';
+import { releaseCode } from './lib/release.mjs';
 
 const FIELD_MS = 1000 / 60;
 
@@ -342,4 +343,64 @@ test('two Versus games with the walls over a bad link reach the wall and stay th
   const safe = Math.min(a.session.tick, b.session.tick) - 2 * ROLLBACK_DEPTH;
   const { differ } = agreed(match.sides, safe);
   assert.deepEqual(differ, [], 'the same game, field by field');
+});
+
+/**
+ * A Versus game at its select, both pads in, from a release's code (`load`, its modules by their
+ * paths) on the imported data, its snapshotter leaving out each machine's own parts and `left`.
+ */
+async function versusGameOf(load, left = []) {
+  const json = async (name) => JSON.parse(readFileSync(path.join(assets, name), 'utf8'));
+  const { loadFightTables, loadMoveset } = await load('src/assets/load.ts');
+  const { fightDataFor, matchMovesets } = await load('src/sim/fight/match.ts');
+  const { Game } = await load('src/sim/game/game.ts');
+  const { MenuMode, startMode } = await load('src/sim/game/menu.ts');
+  const { StateSnapshotter: Snapshotter } = await load('src/net/snapshot.ts');
+  const { tables, scenes } = await loadFightTables(json);
+  const movesets = new Map();
+  for (const id of manifest.movesets) movesets.set(id, await loadMoveset(json, String(id).padStart(2, '0')));
+  const common = await loadMoveset(json, 'common');
+  const made = new Map();
+  let snapshotter = null;
+  const fightData = (setup) => {
+    const [a, b] = matchMovesets(tables, setup);
+    const key = `${a} ${b}`;
+    if (!made.has(key)) made.set(key, fightDataFor(tables, setup, (id) => movesets.get(id), common));
+    snapshotter?.share(made.get(key));
+    return made.get(key);
+  };
+  const game = new Game({ tables, scenes, fightData, introData: () => assert.fail('no intro plays') });
+  snapshotter = new Snapshotter(game.state, ['remake', 'online'], left);
+  snapshotter.share(tables);
+  snapshotter.share(scenes);
+  startMode(game.state, MenuMode.VERSUS, 1);
+  return { state: game.state, game, snapshotter, field: (words) => game.field(words), scene: () => game.state.scene, Snapshotter };
+}
+
+test("a Versus game of this release with the walls off and one of 0.6.5 pick their characters, fight and stay the same game over a bad link, the fields the walls added left out of this one's fingerprint", { skip, timeout: 300_000 }, async (t) => {
+  const older = releaseCode('0.6.5');
+  if (older === null) return t.skip('no git, or no tag v0.6.5, to play beside');
+  try {
+    const { ALSO_PLAYS } = await import('../src/net/online.ts');
+    const left = ALSO_PLAYS['0.6.5'];
+    const games = [await versusGameOf(older.load), await versusGameOf((file) => import(`../${file}`), left)];
+    assert.equal(games[1].state.world.options.walls, 0, "no walls on this release's side");
+    /* As they start: the same fingerprint with the walls' fields left out, another with them in. */
+    assert.equal(games[1].snapshotter.digestNow(), games[0].snapshotter.digestNow(), 'the same game as they start');
+    assert.notEqual(new StateSnapshotter(games[1].state, ['remake', 'online']).digestNow(), games[0].snapshotter.digestNow(), "the walls' fields in, they differ");
+    const match = pair(games, { latencyMs: 45, jitterMs: 20, loss: 0.05, reorder: 0.05, reorderMs: 20 });
+    run(match, 2400, versusScript);
+    const [a, b] = match.sides;
+    assert.equal(a.session.desync, null, a.session.reason);
+    assert.equal(b.session.desync, null, b.session.reason);
+    const { Scene } = await import('../src/sim/game/state.ts');
+    assert.equal(games[1].scene(), Scene.FIGHT, 'they reached the fight');
+    assert.ok(a.session.quality.rollbacks > 0, 'late words were rolled back');
+    const safe = Math.min(a.session.tick, b.session.tick) - 2 * ROLLBACK_DEPTH;
+    const { ticks, differ } = agreed(match.sides, safe);
+    assert.ok(ticks.length > 30, `fields compared: ${ticks.length}`);
+    assert.deepEqual(differ, [], 'the same game, field by field');
+  } finally {
+    older.remove();
+  }
 });

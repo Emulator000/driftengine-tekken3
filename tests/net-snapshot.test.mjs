@@ -87,3 +87,18 @@ test('a slot is filled again in place, and a save and a restore take a fraction 
   const each = (performance.now() - start) / 50;
   assert.ok(each < 8, `a save and a restore took ${each.toFixed(2)} ms`);
 });
+
+test("fields left out of the fingerprint wherever they stand: it is the state's without them, and they are saved and restored all the same", () => {
+  const state = { a: 1, f: [{ x: 2, wallHit: 5, y: new Int32Array([3, 4]) }, { x: 6, wallHit: 7, y: new Int32Array([8, 9]) }], options: { r: 1, walls: 1 }, remake: { walls: 2 } };
+  const without = { a: 1, f: [{ x: 2, y: new Int32Array([3, 4]) }, { x: 6, y: new Int32Array([8, 9]) }], options: { r: 1 }, remake: { walls: 2 } };
+  const left = new StateSnapshotter(state, ['remake'], ['wallHit', 'walls']);
+  assert.equal(left.digestNow(), new StateSnapshotter(without, ['remake']).digestNow(), "the fingerprint of the state without them");
+  assert.notEqual(new StateSnapshotter(state, ['remake']).digestNow(), left.digestNow(), 'where they are not left out, they count');
+  const slot = left.create();
+  left.save(slot);
+  state.f[0].wallHit = 99;
+  state.options.walls = 0;
+  assert.equal(left.digestNow(), left.digest(slot), 'a change to them changes it not');
+  left.restore(slot);
+  assert.deepEqual([state.f[0].wallHit, state.options.walls], [5, 1], 'saved and restored all the same');
+});

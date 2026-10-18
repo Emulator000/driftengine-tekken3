@@ -17,8 +17,9 @@ import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 
 import { Relay, readConfig } from '../server/relay.mjs';
-import { Online, PLAYS_AS } from '../src/net/online.ts';
+import { ALSO_PLAYS, Online, PLAYS_AS } from '../src/net/online.ts';
 import { StateSnapshotter } from '../src/net/snapshot.ts';
+import { releaseCode } from './lib/release.mjs';
 
 const quiet = { log: () => {} };
 
@@ -36,18 +37,22 @@ const EVERY = Array.from({ length: 23 }, (_, i) => i);
 const DEFAULT_KEYS = [12, 12, 12, 12, 1, 3, 2, 0];
 const OWN_KEYS = [12, 12, 12, 12, 0, 1, 2, 3];
 
-function side(url, { version = '0.6.1', roster = EVERY, fighter = 0, name = 'A', delay = 2, now, keys = DEFAULT_KEYS, id } = {}) {
+function side(url, { version = '0.6.1', plays, roster = EVERY, fighter = 0, name = 'A', delay = 2, now, keys = DEFAULT_KEYS, id } = {}) {
   const chosen = { fighter };
-  const log = { began: null, ended: null, begun: 0, waited: 0 };
+  const log = { began: null, ended: null, begun: 0, waited: 0, optionsAs: null };
   const state = { at: [0, 0], mix: 1, fields: 0 };
   const game = {
     version,
+    ...(plays === undefined ? {} : { plays }),
     roster,
     keyChoices: 13,
     defaultKeys: DEFAULT_KEYS,
-    options: () => ({ rounds: 3 }),
-    begin(start, seat) {
-      log.began = { start, seat };
+    options: (as) => {
+      log.optionsAs = as;
+      return { rounds: 3 };
+    },
+    begin(start, seat, as) {
+      log.began = { start, seat, as };
       log.begun += 1;
       /* Every match from the same start, as the game's own begins from the state it powers on with. */
       Object.assign(state, { at: [0, 0], mix: 1, fields: 0 });
@@ -177,6 +182,83 @@ test("a side ready for the fight holds on its last loading field, saying no wait
   }
 });
 
+test("a page that has played a match carries no word of being ready into its next pairing: a fresh player paired with it next goes into the fight with it", async () => {
+  const { relay, url } = await server();
+  const [a, b] = await playing(url);
+  const c = side(url, { name: 'Fresh' });
+  try {
+    /* A first match, through the hold into the fight, over with no rematch. */
+    const first = a.online.session.tick + 40;
+    await toTheFight(a, b, first, () => true, () => a.online.session.tick > first + 60 && b.online.session.tick > first + 60);
+    a.online.matchOver();
+    b.online.matchOver();
+    b.online.rematch(false);
+    await frames([a, b], () => a.online.state === 'lobby' && b.online.state === 'lobby');
+    b.online.disconnect();
+    /* The same page paired with a fresh one: its match numbered 1 again. */
+    a.online.quickMatch();
+    await frames([a, c], () => a.online.state === 'queued');
+    c.online.quickMatch();
+    await frames([a, c], () => a.online.state === 'offered' && c.online.state === 'offered');
+    a.online.answer(true);
+    c.online.answer(true);
+    await frames([a, c], () => a.online.state === 'playing' && c.online.state === 'playing');
+    assert.equal(c.log.began.start.match, a.log.began.start.match, "the same match number as the page's last");
+    const line = a.online.session.tick + 40;
+    await toTheFight(a, c, line, () => true, () => a.online.session === null || c.online.session === null || (a.online.session.tick > line + 60 && c.online.session.tick > line + 60), 900);
+    assert.ok(a.online.session !== null && c.online.session !== null, `the match went on (${a.online.ended} ${c.online.ended})`);
+    assert.ok(c.online.session.tick > line + 60, `the fresh player went into the fight, not held on its last loading field (${c.online.session.tick}, the line ${line})`);
+    assert.ok(a.online.session.tick > line + 60, `and the page with it (${a.online.session.tick})`);
+  } finally {
+    a.online.disconnect();
+    c.online.disconnect();
+    await relay.close();
+  }
+});
+
+test("a side holding for the other goes into the fight once the other has been neither loading nor ready a few seconds: one that went in without saying so (a 0.7.0 page that thought it had)", async () => {
+  const { relay, url } = await server();
+  const [a, b] = await playing(url);
+  try {
+    /* The guest never says it is ready, and goes in as one told the host already is. */
+    const send = b.online.relay.toPeer.bind(b.online.relay);
+    b.online.relay.toPeer = (message) => (message.k === 'ready' ? undefined : send(message));
+    const line = a.online.session.tick + 40;
+    await toTheFight(a, b, line, () => true, () => false, 120);
+    assert.equal(a.online.session.tick, line, 'the host holds a while for a word');
+    await toTheFight(a, b, line, () => true, () => a.online.session === null || b.online.session === null || (a.online.session.tick > line + 60 && b.online.session.tick > line + 60), 900);
+    assert.ok(a.online.session !== null && b.online.session !== null, `the match went on (${a.online.ended} ${b.online.ended})`);
+    assert.ok(a.online.session.tick > line + 60 && b.online.session.tick > line + 60, `both went into the fight (${a.online.session.tick} ${b.online.session.tick}, the line ${line})`);
+    assert.equal(a.online.session.desync, null);
+  } finally {
+    a.online.disconnect();
+    b.online.disconnect();
+    await relay.close();
+  }
+});
+
+test("a match whose other side stops playing ends as a disconnection after five seconds, though its page still answers the pings", async () => {
+  const { relay, url } = await server();
+  const [a, b] = await playing(url);
+  try {
+    const line = a.online.session.tick + 40;
+    await toTheFight(a, b, line, () => true, () => a.online.session.tick > line + 60 && b.online.session.tick > line + 60);
+    /* The guest's game stops (its frames no longer run); its socket still answers. */
+    let frame = 0;
+    for (; frame < 600 && a.online.state === 'playing'; frame += 1) {
+      a.online.frame((frame >> 3) & 1);
+      await sleep(4);
+    }
+    assert.notEqual(a.online.state, 'playing', `the host's match ended (${frame} frames, ${a.online.session?.state})`);
+    assert.ok(frame >= 300, `not before five seconds of it (${frame})`);
+    assert.equal(a.online.ended, 'THE CONNECTION WAS LOST');
+  } finally {
+    a.online.disconnect();
+    b.online.disconnect();
+    await relay.close();
+  }
+});
+
 test('a side does not hold for an older one, which says nothing of being ready', async () => {
   const { relay, url } = await server();
   const [a, b] = await playing(url);
@@ -189,6 +271,50 @@ test('a side does not hold for an older one, which says nothing of being ready',
   } finally {
     a.online.disconnect();
     b.online.disconnect();
+    await relay.close();
+  }
+});
+
+test("a game that also plays as an older version is paired with that version's players, both told to play it and the match set up and begun as it; two of the newer play the newer; a version neither plays is not paired", async () => {
+  const { relay, url } = await server();
+  const NEWER = { version: '0.7.0', plays: ['0.7.0', '0.6.5'] };
+  const sides = [];
+  const make = (options) => {
+    const one = side(url, options);
+    sides.push(one);
+    return one;
+  };
+  const meet = async (a, b) => {
+    a.online.quickMatch();
+    await frames([a, b], () => a.online.state === 'queued');
+    b.online.quickMatch();
+    await frames([a, b], () => a.online.state === 'offered' && b.online.state === 'offered', 120);
+    if (a.online.state !== 'offered') return false;
+    a.online.answer(true);
+    b.online.answer(true);
+    await frames([a, b], () => a.online.state === 'playing' && b.online.state === 'playing');
+    await frames([a, b], () => a.online.session?.tick > 60 && b.online.session?.tick > 60, 800);
+    return true;
+  };
+  try {
+    const newer = make({ name: 'New', ...NEWER });
+    const older = make({ name: 'Old', version: '0.6.5' });
+    assert.ok(await meet(newer, older), 'the newer and the older paired');
+    assert.deepEqual([newer.log.optionsAs, newer.log.began.as, newer.log.began.seat], ['0.6.5', '0.6.5', 0], "the newer, hosting, sets the match up and plays it as the older");
+    assert.equal(older.log.began.as, '0.6.5', 'the older plays its own');
+    assert.equal(newer.online.session.desync, null);
+    assert.equal(older.online.session.desync, null);
+    for (const one of [newer, older]) one.online.disconnect();
+    const first = make({ name: 'First', ...NEWER });
+    const second = make({ name: 'Second', ...NEWER });
+    assert.ok(await meet(first, second), 'two of the newer paired');
+    assert.deepEqual([first.log.began.as, second.log.began.as], ['0.7.0', '0.7.0'], 'they play the newer');
+    for (const one of [first, second]) one.online.disconnect();
+    const third = make({ name: 'Third', ...NEWER });
+    const oldest = make({ name: 'Oldest', version: '0.6.0' });
+    assert.equal(await meet(third, oldest), false, 'a version neither plays is not paired');
+  } finally {
+    for (const one of sides) one.online.disconnect();
     await relay.close();
   }
 });
@@ -414,12 +540,15 @@ test("the server's page, for a browser: how busy it is, its versions, and the ad
   }
 });
 
+const order = (v) => v.split('.').map(Number).reduce((sum, part) => sum * 1000 + part, 0);
+
 test("a release is paired as the oldest one it plays exactly as, its simulation and its match's words those of that release", (t) => {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const game = JSON.parse(readFileSync(path.join(here, '../package.json'), 'utf8')).version;
-  const order = (v) => v.split('.').map(Number).reduce((sum, part) => sum * 1000 + part, 0);
   assert.match(PLAYS_AS, /^\d+\.\d+\.\d+$/);
   assert.ok(order('0.6.0') <= order(PLAYS_AS) && order(PLAYS_AS) <= order(game), `${PLAYS_AS} lies between the oldest version the server serves and the game's own, ${game}`);
+  /* The older ones it also plays are played beside their own code (net-session.test.mjs). */
+  for (const older of Object.keys(ALSO_PLAYS)) assert.ok(order('0.6.0') <= order(older) && order(older) < order(PLAYS_AS), `${older} is older than ${PLAYS_AS}`);
   if (PLAYS_AS === game) return;
   const root = path.join(here, '..');
   if (spawnSync('git', ['rev-parse', '--verify', '--quiet', `v${PLAYS_AS}^{commit}`], { cwd: root }).status !== 0) {
@@ -428,11 +557,44 @@ test("a release is paired as the oldest one it plays exactly as, its simulation 
   }
   /*
    * ONLINE MODE's page and its waiting room are left out: no match runs them, and their state is
-   * each machine's own. So is the attract overlay's intro, which no match plays.
+   * each machine's own. So is the attract overlay's intro, which no match plays. The fingerprint and
+   * the copies are compared by what they make (below).
    */
-  const played = ['src/sim', ':(exclude)src/sim/game/online-page.ts', ':(exclude)src/sim/game/intro.ts', 'src/assets', 'src/net/session.ts', 'src/net/wire.ts', 'src/net/snapshot.ts'];
+  const played = ['src/sim', ':(exclude)src/sim/game/online-page.ts', ':(exclude)src/sim/game/intro.ts', 'src/assets', 'src/net/session.ts', 'src/net/wire.ts'];
   const changed = spawnSync('git', ['diff', '--name-only', `v${PLAYS_AS}`, '--', ...played], { cwd: root, encoding: 'utf8' }).stdout.trim();
   assert.equal(changed, '', `changed since v${PLAYS_AS}, so this release plays otherwise and PLAYS_AS is to be its own version`);
+});
+
+test("the state's fingerprint and copies, nothing left out, are those of the release a match is played as", async (t) => {
+  const tagged = releaseCode(PLAYS_AS, ['src/net/snapshot.ts']);
+  if (tagged === null) return t.skip(`no git, or no tag v${PLAYS_AS}, to compare with`);
+  try {
+    const { StateSnapshotter: Tagged } = await tagged.load('src/net/snapshot.ts');
+    const data = { table: [1, 2, 3], move: { id: 7, frames: new Int16Array([1, -2]) } };
+    const tree = () => ({
+      remake: { walls: 1 },
+      a: 1,
+      b: -0.5,
+      c: 'TEXT',
+      d: true,
+      e: null,
+      f: [{ x: 2, y: new Int32Array([3, 4]), z: [5, [6, 7]] }, { x: 8, y: new Int32Array([9, 10]), z: [] }],
+      g: { h: new Uint8Array([1, 2, 3, 4, 5]), i: new Float32Array([0.25]), move: data.move },
+    });
+    for (const own of [[], ['remake']]) {
+      const [ours, theirs] = [new StateSnapshotter(tree(), own), new Tagged(tree(), own)];
+      ours.share(data);
+      theirs.share(data);
+      assert.equal(ours.digestNow(), theirs.digestNow(), `the same fingerprint (${own})`);
+      const [slotA, slotB] = [ours.create(), theirs.create()];
+      ours.save(slotA);
+      theirs.save(slotB);
+      assert.deepEqual(slotA, slotB, 'the same copy');
+      assert.equal(ours.digest(slotA), theirs.digest(slotB));
+    }
+  } finally {
+    tagged.remove();
+  }
 });
 
 /** Two players paired by the quick match and playing, and each match after on the pairing: played a while, then ended with each side's word on its winner. */

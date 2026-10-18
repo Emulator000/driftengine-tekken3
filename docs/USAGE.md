@@ -218,7 +218,8 @@ one. The versus screen counts the matches on your pairing: FIGHT 1, then FIGHT 2
 and so on (a 0.6.5 game shows FIGHT 1 at each). Both of you stay on the versus screen until both
 games have the fight loaded and ready, and go into it together; the one ready first shows WAITING FOR
 the other, or that it IS LOADING (with a 0.6.5 or 0.6.6 game, which does not say when it is ready,
-the one ready first goes on as before). A round's end (its replay, the win poses) is cut short only
+the one ready first goes on as before; with one that says nothing of loading or of being ready for
+three seconds, it goes in after it). A round's end (its replay, the win poses) is cut short only
 once both of you have pressed to skip it; until then it plays on, for both.
 
 What the other player presses is guessed until it arrives, and a guess put right rolls the game
@@ -246,8 +247,8 @@ has no streak counted, and the player it plays is counted on their own game's wo
 
 Each side plays its own pad at once and the other's as it arrives, guessing it held until then; a
 press that comes late rolls the game back to its field and plays on again within the frame (eight
-fields at most: one later waits for it, and five seconds of waiting with nothing heard ends the
-match). A press made while a side waits is played with its next field. Both sides compare a
+fields at most: one later waits for it, and five seconds of waiting ends the match, the other's
+page answering or not, unless the other side is loading). A press made while a side waits is played with its next field. Both sides compare a
 fingerprint of the game's state every eight fields; a difference ends the match and the console
 names the field. The line over the picture shows the opponent, the round trip, the input delay,
 the rollbacks and whether the presses go straight between the two machines (DIRECT) or through the
@@ -256,8 +257,11 @@ close, or a wait over it last half a second, the presses go through the server a
 of the match. `?netlag=MS` holds each of the
 other side's presses that many milliseconds more, to try a match over a slower link.
 
-Two players are paired, and a room is joined, only where they can play each other: the same
-version, and each one's fighter one whose data the other has. A player without Kazuya, say, is
+Two players are paired, and a room is joined, only where they can play each other: a version both
+games play a match as, and each one's fighter one whose data the other has. 0.7.1 plays its own
+matches with the 0.7.0 and later players, and those of 0.6.5, 0.6.6 and 0.6.7 with theirs, without
+the walls (whatever REACHABLE WALLS says; the line over the picture says AS 0.6.5, NO WALLS); the
+server pairs them so from its 0.7.1 on. A player without Kazuya, say, is
 paired with one who has him unless either of you chose him, and a room whose host plays him shows
 greyed in the room list. ONLINE MODE says why a pairing cannot be made (THE OTHER PLAYER HAS
 VERSION 0.6.0, YOU LACK KAZUYA, THE OTHER PLAYER LACKS KAZUYA). The rest of the game's data may

@@ -56,7 +56,10 @@ issue and pull request, is public.
   the oldest release whose matches this one plays exactly as. A release that changes the
   simulation, the match's setup or the words between the games sets it to its own version; one
   that only draws or sounds otherwise keeps it, so its players still meet those of earlier
-  releases (`tests/net-online.test.mjs` compares the simulation with that release's tag).
+  releases (`tests/net-online.test.mjs` compares the simulation with that release's tag). A release
+  may also play an older version's matches (`ALSO_PLAYS`), the server pairing the two as it and the
+  fields of the state that version lacks left out of the fingerprint; `tests/net-session.test.mjs`
+  plays it beside that release's own code.
 - The engine comes from npm. A checkout at `../drftrun/driftengine` replaces it in development
   (`DRIFT_ENGINE_LOCAL=0` forces the npm packages).
 

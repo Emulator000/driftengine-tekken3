@@ -8,7 +8,7 @@
  * the keyboard and the mouse edit it as a text field (`text-field.ts`), the clipboard with them;
  * while a match is played, a line over the picture says how its connection goes.
  */
-import { Online, PLAYS_AS, REMATCH_MS, type Start } from '../net/online.ts';
+import { ALSO_PLAYS, Online, PLAYS_AS, REMATCH_MS, type Start } from '../net/online.ts';
 import { serverAddresses } from '../net/address.ts';
 import { StateSnapshotter } from '../net/snapshot.ts';
 import { ROLLBACK_DEPTH } from '../net/session.ts';
@@ -140,12 +140,13 @@ export class OnlinePlay {
       lagMs: Math.max(0, Number(params.get('netlag') ?? 0) || 0),
       game: {
         version: PLAYS_AS,
+        plays: Object.keys(ALSO_PLAYS),
         roster: this.hooks.roster,
         keyChoices: this.hooks.data.scenes.keyBits.length,
         defaultKeys: this.hooks.data.scenes.powerOn.keys[0]!,
         fighterName: (fighter) => this.hooks.data.tables.roster.codes[fighter * 4]?.name ?? `FIGHTER ${fighter}`,
-        options: () => this.decided(),
-        begin: (start, seat) => this.begin(start, seat),
+        options: (as) => this.decided(as),
+        begin: (start, seat, as) => this.begin(start, seat, as),
         end: (why) => this.end(why),
         waiting: () => this.waitAgain(),
       },
@@ -258,12 +259,13 @@ export class OnlinePlay {
   }
 
   /** The host's options for the match, its stage (the home stage of a fighter both have, at random), and its walls (REACHABLE WALLS's for an online match). */
-  private decided(): Record<string, unknown> {
+  /** The host's options for a match played as version `as`: the walls where it is this release's own, none (nor a word of them) against an older one. */
+  private decided(as: string): Record<string, unknown> {
     const { options, records } = this.game.state;
     const homes = this.hooks.roster.filter((fighter) => fighter <= LAST_STAGE_ROSTER);
     const stage = (homes[crypto.getRandomValues(new Uint32Array(1))[0]! % Math.max(1, homes.length)] ?? 0) * 4;
-    const walls = wallsFor(MenuMode.VERSUS, this.game.state.remake.settings.walls, true);
-    return { ...Object.fromEntries(DECIDED.map((key) => [key, options[key]])), earnedRoster: records.earnedRoster, extraCostumes: records.extraCostumes, stage, walls };
+    const walls = as === PLAYS_AS ? { walls: wallsFor(MenuMode.VERSUS, this.game.state.remake.settings.walls, true) } : {};
+    return { ...Object.fromEntries(DECIDED.map((key) => [key, options[key]])), earnedRoster: records.earnedRoster, extraCostumes: records.extraCostumes, stage, ...walls };
   }
 
   /**
@@ -444,7 +446,7 @@ export class OnlinePlay {
     return [out[this.online.seat] ?? [0, 0], [0, 0]];
   }
 
-  private begin(start: Start, seat: 0 | 1): { step: (words: readonly [number, number], field: number) => void; snapshotter: StateSnapshotter<GameState> } {
+  private begin(start: Start, seat: 0 | 1, as: string): { step: (words: readonly [number, number], field: number) => void; snapshotter: StateSnapshotter<GameState> } {
     const game = this.game;
     /* A rematch counts on; a new opponent from nothing. */
     if (this.online.state !== 'result') this.score.fill(0);
@@ -471,8 +473,8 @@ export class OnlinePlay {
     /* Three rounds to win (the option is the rounds less one), whatever the host's options; a round's end cut short by both players alone. */
     state.world.options.rounds = 2;
     state.world.match.online = 1;
-    /* The remake's walls as the host's REACHABLE WALLS has them for an online match. */
-    state.world.options.walls = start.options.walls === 1 ? 1 : 0;
+    /* The remake's walls as the host's REACHABLE WALLS has them for an online match; none in one played as an older version. */
+    state.world.options.walls = as === PLAYS_AS && start.options.walls === 1 ? 1 : 0;
     state.run.onlineStage = typeof start.options.stage === 'number' ? start.options.stage : -1;
     start.fighters.forEach((fighter, n) => {
       state.entrants.roster[n] = fighter.roster;
@@ -489,9 +491,10 @@ export class OnlinePlay {
     state.remake.remasterMade = own.made;
     Object.assign(state.online, page, { warming: 0, ask: '', typed: '', card: 0, fight: Number.isInteger(start.match) && start.match > 0 ? start.match : 1 });
     this.pastFields = 0;
-    this.match = new StateSnapshotter(state, OWN);
+    /* Against an older version, the fields of the state it lacks left out of the fingerprint. */
+    this.match = new StateSnapshotter(state, OWN, ALSO_PLAYS[as] ?? []);
     this.shareData(this.match);
-    console.log(`[tekken3 online] a match with ${this.online.opponent}, this side the ${seat === 0 ? 'first' : 'second'} pad, input delay ${start.delay}`);
+    console.log(`[tekken3 online] a match with ${this.online.opponent}, this side the ${seat === 0 ? 'first' : 'second'} pad, input delay ${start.delay}, played as ${as}`);
     this.presses.clear();
     this.journal = new MatchJournal();
     this.heard.clear();
@@ -544,7 +547,8 @@ export class OnlinePlay {
       return;
     }
     const session = this.online.session!;
-    const lines = [`VS ${this.online.opponent}   ${Math.round(quality.roundTripMs)} MS   DELAY ${quality.inputDelay}   ROLLBACKS ${quality.rollbacks}${quality.deepest > 0 ? ` (UP TO ${quality.deepest})` : ''}   ${this.online.direct ? 'DIRECT' : 'VIA SERVER'}`];
+    const older = this.online.playsAs !== PLAYS_AS ? `   AS ${this.online.playsAs}, NO WALLS` : '';
+    const lines = [`VS ${this.online.opponent}   ${Math.round(quality.roundTripMs)} MS   DELAY ${quality.inputDelay}   ROLLBACKS ${quality.rollbacks}${quality.deepest > 0 ? ` (UP TO ${quality.deepest})` : ''}   ${this.online.direct ? 'DIRECT' : 'VIA SERVER'}${older}`];
     if (this.online.theyWait) lines.push(`${this.online.opponent} IS LOADING`);
     else if (this.online.holding || (session.state === 'stalled' && session.stalling > 20)) lines.push(`WAITING FOR ${this.online.opponent}`);
     else {
