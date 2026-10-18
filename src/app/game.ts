@@ -418,12 +418,17 @@ export async function playGame(): Promise<void> {
     canvas.style.transform = flipped ? `${moved} scaleX(-1)`.trim() : moved;
   };
 
-  /** A field of an online match: stepped through its session once this side's fight is ready, its sound and this side's motors after. */
+  /**
+   * A field of an online match: stepped through its session once this side's fight is ready, and
+   * into the fight from the versus screen's last field once the other's is too, both sides staying
+   * on that screen until then; its sound and this side's motors after.
+   */
   const onlineField = (play: OnlinePlay, pads: readonly [number, number]): boolean => {
     const next = game.upcoming();
     if (next !== null) fightData(next);
     const ready = !game.blocked() && drawingReady();
-    const played = play.matchField(pads[0] | pads[1], ready);
+    const atStart = game.state.scene === Scene.FIGHT && game.state.step === FightStep.HOLD;
+    const played = play.matchField(pads[0] | pads[1], ready, atStart);
     if (!play.playing || !played) return played;
     rumble.field(play.ownRumble(game.state.rumble.out), performance.now());
     /* The sound of each field once it is final, the other side's words for it in: what a rollback puts right is never heard wrong. */

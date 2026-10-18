@@ -372,7 +372,7 @@ export class FightView {
         }
         const force = backdrop !== undefined && FORCE_STAGES.first <= id && id <= FORCE_STAGES.last;
         const beach = backdrop === undefined || force ? null : new Beach(this.renderer, backdrop, this.white);
-        const forceBackdrop = force ? new ForceBackdrop(this.renderer, backdrop) : null;
+        const forceBackdrop = force ? new ForceBackdrop(this.renderer, backdrop, this.white) : null;
         const background = arcade?.panorama === undefined ? null : new ArcadeBackground(this.renderer, arcade.panorama, remaster);
         const objects = (arcade?.objects ?? []).map((o) => ({ stage: createStage(this.renderer, o.mesh, this.renderer.createSurfaceTexture(o.texture, this.textureOptions(true, remaster && arcade?.maps != null))), motion: o, placed: [] }));
         const built = sky === undefined ? null : new Backdrop(this.renderer, sky.picture, sky.clouds, sky.ridge, stageLook.ownMountains === true ? null : (arcade?.panorama ?? null), this.white, id, stageLook);
@@ -745,7 +745,11 @@ export class FightView {
     else if (drawn?.background != null && only.scenery && state.match.trueOgres === 0) drawn.background.draw(lookOf(this.camera), aspect, this.scenery.yaw, sky);
     const ball = state.mode === TEKKEN_BALL && !stageAlone;
     /* Tekken Force's backdrop is the farthest thing drawn: everything after it lies over it. */
-    if (drawn?.force != null && state.mode === TEKKEN_FORCE) drawn.force.draw(state, this.data, aspect);
+    if (drawn?.force != null && state.mode === TEKKEN_FORCE) {
+      drawn.force.draw(state, this.data, aspect);
+      /* Its depth where the frame is put together from the ones before, for the fight's own camera (the free camera's view is not the one it scrolls with). */
+      if (this.files.remaster === true && !freeView.active) drawn.force.drawDepth(this.view, this.camera.position, state.screen.distance || 500);
+    }
     if (drawn !== null && layout != null) {
       const arcade = drawn.stage.grid === ARCADE_GRID;
       layGround(state, this.data, this.arena, layout, { widening }, this.ground, arcade, arcade && scenery ? this.scenery : null);

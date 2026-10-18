@@ -18,7 +18,7 @@ import { parseMathTables } from '../src/assets/math.ts';
 import { layGround, newGround } from '../src/present/3d/layout.ts';
 
 import { blankFightState } from '../src/sim/fight/blank.ts';
-import { backdropPlace, floorLine } from '../src/present/3d/stage/force-backdrop.ts';
+import { backdropPlace, depthPlane, floorLine } from '../src/present/3d/stage/force-backdrop.ts';
 import { itemRects } from '../src/present/3d/effects/force-items.ts';
 import { layOutHud, progressBar } from '../src/present/hud/hud-layout.ts';
 
@@ -64,6 +64,47 @@ test("the backdrop stands on the floor's line, its seven columns across the pict
   assert.deepEqual(tiles.at(-1), { x: 6 * 64, y: line - 64, column: 6, row: 4 });
   const moved = backdropPlace(force(0xf, 70 * 20), DATA, 0, 384).tiles;
   assert.deepEqual(moved[0], { x: -6, y: line - 5 * 64, column: 1, row: 0 }, '70 units on: the second column, 6 units off the left');
+});
+
+/** A view matrix (column-major, its height row stretched as the fight's is) of a camera at `eye` turned `degrees` about the vertical. */
+function viewOf(eye, degrees) {
+  const a = (degrees * Math.PI) / 180;
+  const rows = [
+    [Math.cos(a), 0, -Math.sin(a)],
+    [0, 1.74, 0],
+    [Math.sin(a), 0, Math.cos(a)],
+  ];
+  const view = new Float32Array(16);
+  rows.forEach((row, i) => {
+    row.forEach((v, j) => (view[j * 4 + i] = v));
+    view[12 + i] = -(row[0] * eye[0] + row[1] * eye[1] + row[2] * eye[2]);
+  });
+  view[15] = 1;
+  return view;
+}
+
+test("the backdrop's depth stands square to the view, as far ahead as a wall the strip's scroll would match: twenty times the projection's distance", () => {
+  for (const [eye, degrees, distance] of [
+    [[1, 2, -7], 0, 500],
+    [[-3.5, 1.2, 4], 30, 500],
+    [[0, 3.5, -7], -50, 420],
+  ]) {
+    const view = viewOf(eye, degrees);
+    const model = depthPlane(view, eye, distance);
+    const ahead = (20 * distance) / 1000;
+    for (const [u, v] of [
+      [-1, -1],
+      [1, -1],
+      [-1, 1],
+      [1, 1],
+    ]) {
+      const p = [0, 1, 2].map((i) => model[i] * u + model[4 + i] * v + model[12 + i]);
+      const depth = -(view[2] * p[0] + view[6] * p[1] + view[10] * p[2] + view[14]);
+      assert.ok(Math.abs(depth - ahead) < 1e-4, `${depth} m ahead, not ${ahead}`);
+    }
+    const half = Math.hypot(model[0], model[1], model[2]);
+    assert.ok(half >= 2 * ahead, 'wider than any view the fight takes');
+  }
 });
 
 test('the backdrop wraps round its map either way, and a wider picture takes more columns', () => {

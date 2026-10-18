@@ -213,7 +213,10 @@ you on the other side than SIDE asks, the fight is drawn mirrored: your fighter 
 your side, the stick's left and right with the picture. Each player's name shows under their
 fighter's, on a dark tag of its own, with their streak of wins (WINS 3) where the server counts
 one. The versus screen counts the matches on your pairing: FIGHT 1, then FIGHT 2 at the first rematch
-and so on (a 0.6.5 game shows FIGHT 1 at each). A round's end (its replay, the win poses) is cut short only
+and so on (a 0.6.5 game shows FIGHT 1 at each). Both of you stay on the versus screen until both
+games have the fight loaded and ready, and go into it together; the one ready first shows WAITING FOR
+the other, or that it IS LOADING (with a 0.6.5 or 0.6.6 game, which does not say when it is ready,
+the one ready first goes on as before). A round's end (its replay, the win poses) is cut short only
 once both of you have pressed to skip it; until then it plays on, for both.
 
 What the other player presses is guessed until it arrives, and a guess put right rolls the game

@@ -123,6 +123,76 @@ test('a quick match pairs two players, the host starts it and both play the same
   }
 });
 
+/** Two sides paired by a quick match and playing, through `relay`'s `url`. */
+async function playing(url) {
+  const a = side(url, { name: 'Host' });
+  const b = side(url, { name: 'Guest' });
+  a.online.quickMatch();
+  await frames([a, b], () => a.online.state === 'queued');
+  b.online.quickMatch();
+  await frames([a, b], () => a.online.state === 'offered' && b.online.state === 'offered');
+  a.online.answer(true);
+  b.online.answer(true);
+  await frames([a, b], () => a.online.state === 'playing' && b.online.state === 'playing');
+  return [a, b];
+}
+
+/**
+ * Both sides' frames until `done`, each told whether it is ready and whether it stands on the
+ * fight's last loading field: field `line` of the match, the guest still loading there until
+ * `loaded()` says otherwise.
+ */
+async function toTheFight(a, b, line, loaded, done, most = 1500) {
+  for (let frame = 0; frame < most; frame += 1) {
+    if (done()) return frame;
+    for (const one of [a, b]) {
+      const at = one.online.session?.tick === line;
+      const ready = one === a || !at || loaded(frame);
+      one.online.frame((frame >> 3) & 1, ready, at);
+    }
+    await sleep(4);
+  }
+  return most;
+}
+
+test("a side ready for the fight holds on its last loading field, saying no wait itself, until the other is ready too: both then start it", async () => {
+  const { relay, url } = await server();
+  const [a, b] = await playing(url);
+  try {
+    const line = a.online.session.tick + 40;
+    let loadedAt = 600;
+    await toTheFight(a, b, line, (frame) => frame >= loadedAt, () => false, 400);
+    assert.equal(a.online.session.tick, line, 'the host holds on the line, not past it');
+    assert.equal(b.online.session.tick, line, 'the guest loading on it');
+    assert.equal(a.online.theyWait, true, 'the host told the guest is loading');
+    assert.equal(b.online.theyWait, false, 'the guest told nothing of a wait by the host');
+    loadedAt = 0;
+    await toTheFight(a, b, line, () => true, () => a.online.session.tick > line + 60 && b.online.session.tick > line + 60);
+    assert.ok(a.online.session.tick > line + 60 && b.online.session.tick > line + 60, 'both went on into the fight');
+    assert.equal(a.online.session.desync, null);
+  } finally {
+    a.online.disconnect();
+    b.online.disconnect();
+    await relay.close();
+  }
+});
+
+test('a side does not hold for an older one, which says nothing of being ready', async () => {
+  const { relay, url } = await server();
+  const [a, b] = await playing(url);
+  try {
+    /* The guest's hello as an older version's: no word that it starts each fight with the other. */
+    a.online.theirs = { ...a.online.theirs, together: undefined };
+    const line = a.online.session.tick + 40;
+    await toTheFight(a, b, line, () => false, () => false, 300);
+    assert.ok(a.online.session.tick > line, 'the host went on past the line, as before');
+  } finally {
+    a.online.disconnect();
+    b.online.disconnect();
+    await relay.close();
+  }
+});
+
 test('a room is joined by its code, listed while it waits if asked; a player leaving ends the match for the other', async () => {
   const { relay, url } = await server();
   const a = side(url);
@@ -356,8 +426,11 @@ test("a release is paired as the oldest one it plays exactly as, its simulation 
     t.skip(`no git, or no tag v${PLAYS_AS}, to compare with`);
     return;
   }
-  /* ONLINE MODE's page and its waiting room are left out: no match runs them, and their state is each machine's own. */
-  const played = ['src/sim', ':(exclude)src/sim/game/online-page.ts', 'src/assets', 'src/net/session.ts', 'src/net/wire.ts', 'src/net/snapshot.ts'];
+  /*
+   * ONLINE MODE's page and its waiting room are left out: no match runs them, and their state is
+   * each machine's own. So is the attract overlay's intro, which no match plays.
+   */
+  const played = ['src/sim', ':(exclude)src/sim/game/online-page.ts', ':(exclude)src/sim/game/intro.ts', 'src/assets', 'src/net/session.ts', 'src/net/wire.ts', 'src/net/snapshot.ts'];
   const changed = spawnSync('git', ['diff', '--name-only', `v${PLAYS_AS}`, '--', ...played], { cwd: root, encoding: 'utf8' }).stdout.trim();
   assert.equal(changed, '', `changed since v${PLAYS_AS}, so this release plays otherwise and PLAYS_AS is to be its own version`);
 });

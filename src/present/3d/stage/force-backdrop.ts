@@ -4,8 +4,14 @@
  * its bottom on the floor's line 2.5 m ahead of the camera. MISHIMA FORTRESS's strip climbs a step
  * every third column, a black band and black seams behind it. The final stage shows no tiles,
  * only black down to the floor's line.
+ *
+ * Where the frame is put together from the frames before it (remastered), the backdrop writes a
+ * depth of its own (`depthPlane`): drawn as a picture, it would be taken for the farthest thing in
+ * sight, which a camera moving across the view does not move at all, and each frame's strip would
+ * be blended with where it stood in the last ones, a trail behind every tile while the camera
+ * scrolls.
  */
-import type { RendererApi } from '@driftengine/core';
+import type { MeshHandle, RendererApi, SurfaceMaterial, SurfaceTextureHandle } from '@driftengine/core';
 import { createSpritePass, drawSprite, type SpritePass } from '@driftengine/ui2d';
 import { PICTURE_SCALE } from '../../../assets/manifest.ts';
 import { cosine, sine } from '../../../sim/math/angles.ts';
@@ -32,6 +38,10 @@ const TOP_TO = 0x1e0001;
 const COLUMNS = 7;
 /** The fight's picture: its middle across, its lines, and its units across a 4:3 picture's height. */
 const PICTURE = { middle: 192, lines: 480, across: 288 } as const;
+/** How wide the backdrop's depth is, either way, for each metre it stands ahead: past the sides of any view the fight takes. */
+const PLANE_REACH = 4;
+/** The opacity a draw writing depth alone is drawn at. */
+const DEPTH_ONLY = 1 / 1024;
 
 export interface BackdropTile {
   readonly x: number;
@@ -116,6 +126,35 @@ export function backdropPlace(state: FightState, data: Pick<FightData, 'force' |
   return { rects, tiles };
 }
 
+/**
+ * Where the backdrop's depth stands, as the model matrix of a square two units across (column-major,
+ * metres): square to the view of `view` (column-major, its rows perhaps scaled apart) from `eye`, as
+ * far ahead as a wall that slides across the picture as the strip scrolls, a unit for every `SCROLL`
+ * the camera moves at the projection's `distance`, so `SCROLL` times that distance (mm).
+ */
+export function depthPlane(view: ArrayLike<number>, eye: ArrayLike<number>, distance: number, out = new Float32Array(16)): Float32Array {
+  const ahead = (SCROLL * distance) / 1000;
+  const unit = (v: number[]): number[] => {
+    const n = Math.hypot(v[0]!, v[1]!, v[2]!) || 1;
+    return v.map((x) => x / n);
+  };
+  const forward = unit([-view[2]!, -view[6]!, -view[10]!]);
+  const across = [view[0]!, view[4]!, view[8]!];
+  const along = across[0]! * forward[0]! + across[1]! * forward[1]! + across[2]! * forward[2]!;
+  const right = unit(across.map((v, i) => v - forward[i]! * along));
+  const up = [right[1]! * forward[2]! - right[2]! * forward[1]!, right[2]! * forward[0]! - right[0]! * forward[2]!, right[0]! * forward[1]! - right[1]! * forward[0]!];
+  const half = ahead * PLANE_REACH;
+  out.fill(0);
+  for (let i = 0; i < 3; i += 1) {
+    out[i] = right[i]! * half;
+    out[4 + i] = up[i]! * half;
+    out[8 + i] = forward[i]!;
+    out[12 + i] = eye[i]! + forward[i]! * ahead;
+  }
+  out[15] = 1;
+  return out;
+}
+
 /** The backdrop's pass: a sprite per tile from the stage's picture (its map laid out whole), and the black. */
 export class ForceBackdrop {
   private readonly renderer: RendererApi;
@@ -124,10 +163,15 @@ export class ForceBackdrop {
   private readonly transform = new Float32Array(6);
   private readonly columns: number;
   private readonly rows: number;
+  /** The backdrop's depth: a square, drawn from either side, and where it stands this frame. */
+  private plane: MeshHandle | null = null;
+  private readonly planeMaterial: SurfaceMaterial<SurfaceTextureHandle>;
+  private readonly planeModel = new Float32Array(16);
 
-  /** `picture` the stage's backdrop laid out whole, enlarged. */
-  constructor(renderer: RendererApi, picture: ImageBitmap) {
+  /** `picture` the stage's backdrop laid out whole, enlarged; `white` a white texture. */
+  constructor(renderer: RendererApi, picture: ImageBitmap, white: SurfaceTextureHandle) {
     this.renderer = renderer;
+    this.planeMaterial = { albedo: white, doubleSided: true };
     this.columns = picture.width / PICTURE_SCALE / TILE;
     this.rows = picture.height / PICTURE_SCALE / TILE;
     this.pass = createSpritePass({ label: 'force backdrop', capacity: 512, slots: 1 });
@@ -151,5 +195,21 @@ export class ForceBackdrop {
       drawSprite(pass.batch, 0, { x: t.x, y: t.y, w: TILE, h: TILE }, { u0, v0, u1: u0 + 1 / this.columns, v1: v0 + 1 / this.rows }, null);
     }
     this.renderer.drawPass(this.handle);
+  }
+
+  /** The backdrop's depth (`depthPlane`), writing nothing else, for the view `view` from `eye` at the projection's `distance`. */
+  drawDepth(view: ArrayLike<number>, eye: ArrayLike<number>, distance: number): void {
+    const r = this.renderer;
+    this.plane ??= r.createMesh({
+      positions: new Float32Array([-1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0]),
+      normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
+      colors: new Float32Array(12),
+      emissive: new Float32Array(4),
+      uvs: new Float32Array(8),
+      indices: new Uint32Array([0, 1, 2, 1, 3, 2]),
+    });
+    r.setMaterial(this.planeMaterial);
+    r.drawTranslucentMesh(this.plane, depthPlane(view, eye, distance, this.planeModel), DEPTH_ONLY, { depthWrite: true, lit: false, fog: false, tint: [0, 0, 0], reconstructed: true });
+    r.setMaterial(null);
   }
 }

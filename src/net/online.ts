@@ -33,6 +33,12 @@ export interface Hello {
   readonly keys: readonly number[];
   /** The fighter this player chose (its roster id and costume). */
   readonly fighter: Fighter;
+  /**
+   * Whether this side starts each fight with the other: once ready on the fight's last loading
+   * field it says so (`ready`) and holds there until the other has said so too. Absent from an
+   * older version's hello, which neither says nor waits for it.
+   */
+  readonly together?: boolean;
 }
 
 /** A fighter chosen: its roster id and its costume. */
@@ -111,8 +117,10 @@ export const PLAYS_AS = '0.6.5';
 const PING_EVERY = 30;
 /** Round trips the shown one is the mean of. */
 const PING_WINDOW = 8;
-/** Frames between the heartbeats a side sends while it cannot play on (it is loading). */
+/** Frames between the heartbeats a side sends while it cannot play on (it is loading), and between its words that it is ready for the fight while it holds for the other. */
 const WAIT_EVERY = 15;
+/** Frames a side holding for the other may hear nothing from it before the other is taken for gone: five seconds. */
+const HOLD_SILENCE = 300;
 /** Frames between asking the server for its room list, while it is shown. */
 const ROOMS_EVERY = 180;
 /** Milliseconds the host waits, both hellos in, before it starts the match: the opponent found shown a moment on both sides. */
@@ -229,6 +237,8 @@ export class Online<S> {
   roundTripMs = 0;
   /** Whether the other side is waiting for this one (it said so lately), or loading. */
   theyWait = false;
+  /** Whether this side held on the fight's last loading field this frame, ready, for the other to be. */
+  holding = false;
   session: MatchSession<unknown> | null = null;
 
   private readonly options: OnlineOptions<S>;
@@ -242,6 +252,11 @@ export class Online<S> {
   private pinged = 0;
   private readonly trips: number[] = [];
   private theyWaitAt = -1;
+  /** The match the other side said it is ready to fight, and the match this side last said so of. */
+  private theyAreReady = -1;
+  private saidReady = -1;
+  /** The frame the other side was last heard from. */
+  private heardAt = 0;
   private listing = false;
   /** The host's start, decided and waiting for its moment (`GREETING_HOLD_MS`); the last match's start, a rematch's ground; the other player's rematch answer. */
   private starting: { readonly start: Start; readonly at: number } | null = null;
@@ -427,9 +442,10 @@ export class Online<S> {
   /**
    * One frame of the page: the server asked what it should be asked, and while a match is played
    * this player's word given to it. `ready` false holds this side (it is loading the fight): the
-   * other is told so, and waits. Whether a field was played.
+   * other is told so, and waits. `atStart` where the field to play is the fight's last loading one:
+   * there a side ready holds for the other to be. Whether a field was played.
    */
-  frame(word: number, ready = true): boolean {
+  frame(word: number, ready = true, atStart = false): boolean {
     this.frames += 1;
     this.peering?.tick();
     if (this.tail !== null && this.frames % TAIL_EVERY === 0) {
@@ -450,10 +466,28 @@ export class Online<S> {
     if (this.state === 'lobby' && this.listing && this.frames % ROOMS_EVERY === 0) this.relay?.say({ do: 'rooms' });
     if (this.frames % PING_EVERY === 0) this.ping();
     const session = this.session;
+    this.holding = false;
     if (session === null) return false;
     if (!ready) {
       if (this.frames % WAIT_EVERY === 0) this.relay?.toPeer({ k: 'wait' });
       return false;
+    }
+    /*
+     * The fight's last loading field, this side ready: it says so, and with another that starts each
+     * fight together holds there until that one has said so too, both then going into the fight on
+     * the same field rather than one stopping in it for the other.
+     */
+    const match = this.lastStart?.match ?? 0;
+    if (atStart) {
+      if (this.saidReady !== match || this.frames % WAIT_EVERY === 0) {
+        this.relay?.toPeer({ k: 'ready', match });
+        this.saidReady = match;
+      }
+      if (this.theirs?.together === true && this.theyAreReady !== match) {
+        if (this.frames - this.heardAt > HOLD_SILENCE) this.finish('disconnected', 'left');
+        else this.holding = true;
+        return false;
+      }
     }
     const played = session.advance(word);
     const state: SessionState = session.state;
@@ -575,13 +609,14 @@ export class Online<S> {
     const transport = new WebSocketTransport({ socket: this.wire.socket, self: seat });
     this.transport = (this.options.lagMs ?? 0) > 0 ? new LateTransport(transport, this.options.lagMs!, () => this.now) : transport;
     const { name, delay, keys, fighter } = this.options.player();
-    const hello: Hello = { k: 'hello', version: this.options.game.version, roster: rosterWord(this.options.game.roster), name, delay, keys, fighter };
+    const hello: Hello = { k: 'hello', version: this.options.game.version, roster: rosterWord(this.options.game.roster), name, delay, keys, fighter, together: true };
     this.relay!.toPeer(hello);
   }
 
   private peer(body: unknown): void {
     if (body === null || typeof body !== 'object') return;
     const message = body as { readonly k?: unknown };
+    this.heardAt = this.frames;
     switch (message.k) {
       case 'hello':
         return this.hello(body as Hello);
@@ -623,6 +658,11 @@ export class Online<S> {
         this.theyWaitAt = this.frames;
         this.session?.heard();
         return;
+      case 'ready':
+        this.theyAreReady = Number((body as { match?: unknown }).match);
+        this.theyWait = false;
+        this.session?.heard();
+        return;
       case 'bye': {
         const why = String((body as { why?: unknown }).why ?? 'left');
         if (this.state === 'result') this.afterResult(why);
@@ -657,6 +697,7 @@ export class Online<S> {
   private begin(start: Start): void {
     this.lastStart = start;
     this.tail = null;
+    this.heardAt = this.frames;
     /* What the last match left in the transport is no word of this one's. */
     this.transport?.drain(() => {});
     const { step, snapshotter } = this.options.game.begin(start, this.seat);

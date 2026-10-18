@@ -3,7 +3,8 @@
  * characters on stage 4 acting out a script of moves, changing model along the way, under the
  * intro's scripted camera, ending in a fade to white), then the title picture faded in with the
  * copyright and the start line, held five seconds, faded out, and the attract demo's fight. Start
- * goes to the mode menu.
+ * goes to the mode menu. The remake's shortcut, for showing them: select while an intro plays goes
+ * on to the next of the three, earned or not, from its start.
  *
  * The intro is one of three (`attract.intro`): its script (events of a frame, what and three
  * arguments), its own moveset for both sides, and its own models, one for each pack it names (its
@@ -48,6 +49,8 @@ const FADE_OUT = 8;
 const Event = { MODEL: 0, MODEL_TWO: 1, MOVE: 2, MOVE_TWO: 3, WHITE: 5, END: -1 } as const;
 /** What a side is doing: nothing, a move, changing model (2 to 6). */
 const Doing = { NOTHING: 0, MOVE: 1, CHANGE: 2, CHANGE_WAIT: 3, CHANGE_FIND: 4, CHANGE_LOAD: 5, CHANGE_DONE: 6 } as const;
+/** The raw pad's select button. */
+const SELECT = 0x100;
 /** The replay's stage while the intro plays: none recorded. */
 const NO_REPLAY_STAGE = 0x17;
 const NO_KNOCKOUT = -2;
@@ -304,6 +307,12 @@ export function attractScene(game: GameState, data: AttractData): void {
     stopMotors(game);
     goToLogo(game, Scene.MENU);
     return;
+  }
+  if (game.step === 2 && ((world.input.fresh[0]! | world.input.fresh[1]!) & SELECT) !== 0) {
+    game.attract.intro = (game.attract.intro + 1) % data.scenes.intros.length;
+    stopSounds(world, true);
+    stopMotors(game);
+    game.step = 1;
   }
   switch (game.step) {
     case 0:

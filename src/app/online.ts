@@ -379,14 +379,15 @@ export class OnlinePlay {
 
   /**
    * One field of the match, from this player's pad: played if this side is ready (its fight's data
-   * and drawing loaded), the other told to wait if not. Whether a field was played. A match that
-   * ends (or whose game leaves Versus) brings the local game back.
+   * and drawing loaded), the other told to wait if not; on the fight's last loading field
+   * (`atStart`), once both are. Whether a field was played. A match that ends (or whose game leaves
+   * Versus) brings the local game back.
    */
-  matchField(word: number, ready: boolean): boolean {
+  matchField(word: number, ready: boolean, atStart: boolean): boolean {
     this.endedNow = false;
     /* The stick goes by the screen: on a mirrored fight, its left is the game's right. */
     const pressed = this.mirrored ? mirroredStick(word) : word;
-    const played = this.online.frame(pressed, ready);
+    const played = this.online.frame(pressed, ready, atStart);
     /* Over once past Versus for longer than a rollback reaches: every press behind it in, on both sides alike. */
     if (played) this.pastFields = PAST_VERSUS.has(this.game.state.scene) ? this.pastFields + 1 : 0;
     if (this.local !== null && PAST_FIELDS < this.pastFields) {
@@ -542,7 +543,7 @@ export class OnlinePlay {
     const session = this.online.session!;
     const lines = [`VS ${this.online.opponent}   ${Math.round(quality.roundTripMs)} MS   DELAY ${quality.inputDelay}   ROLLBACKS ${quality.rollbacks}${quality.deepest > 0 ? ` (UP TO ${quality.deepest})` : ''}   ${this.online.direct ? 'DIRECT' : 'VIA SERVER'}`];
     if (this.online.theyWait) lines.push(`${this.online.opponent} IS LOADING`);
-    else if (session.state === 'stalled' && session.stalling > 20) lines.push(`WAITING FOR ${this.online.opponent}`);
+    else if (this.online.holding || (session.state === 'stalled' && session.stalling > 20)) lines.push(`WAITING FOR ${this.online.opponent}`);
     else {
       /* A round's end this player asked to cut short, the other not yet. */
       const asks = this.game.state.world.match.skipAsks;

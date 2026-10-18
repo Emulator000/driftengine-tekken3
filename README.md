@@ -175,6 +175,8 @@ are for your own devices. Never share or upload an app built from your disc.
 ## Playing
 
 The game starts as the console does: the logo, the opening movie, the title (Enter), the mode menu.
+Backspace (Select) during the opening movie plays an attract intro at once, and again during one,
+the next of the three, earned or not.
 The mode menu shows the game's version at the screen's top right, followed by (NEW VERSION
 AVAILABLE!) once the repository has tagged a newer one ([docs/USAGE.md](docs/USAGE.md#the-version)).
 
@@ -201,8 +203,8 @@ you both choose a rematch or the waiting room. Only the pads' presses and the ma
 go between the two games; each runs the whole match itself, at once from your own pad, the other's
 put right as it arrives (rollback), straight between the two machines where they can reach each
 other and through the server where not. Both of you need versions that play a match alike (a
-release that changes only how the game is drawn or sounds plays the one before it: 0.6.6 and 0.6.5
-play each other), and each the data of the fighter the other chose: a player with Kazuya is paired
+release that changes only how the game is drawn or sounds plays the one before it: 0.6.5, 0.6.6 and
+0.6.7 play each other), and each the data of the fighter the other chose: a player with Kazuya is paired
 with one without him as long as neither of you plays him. The server counts each player's streak of
 wins (WINS, by your name and in the waiting room's corner), in its memory alone.
 
