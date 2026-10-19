@@ -179,7 +179,7 @@ ONLINE MODE, after VS MODE in the mode menu, lists:
 | CREATE ROOM | Opens a room and shows its code, to give the other player; with ROOM set to LISTED it shows in the server's room list too |
 | JOIN ROOM | The room with the code you enter |
 | ROOM LIST | The rooms the server lists; those you cannot join (another version, or a host playing a fighter you lack) greyed, CANNOT JOIN |
-| SPECTATE | The fights under way on the server, each its two players (VS between them), their streaks of wins and how many watch it, seven at a time with a scrollbar beside them; a button watches one (one your game cannot show, of another version or with a fighter you lack, greyed: CANNOT WATCH) |
+| SPECTATE | The fights under way on the server, each its two players (VS between them), their streaks of wins and how many watch it, seven at a time with a scrollbar beside them; a button watches one (one your game cannot show, of another version, with a fighter you lack, or swinging an arcade board's fighters yours does not draw alike, greyed: CANNOT WATCH) |
 | INPUT DELAY | The fields your presses wait before they count, 0 to 6 (2 by default): the larger of both players' is the match's |
 | ROOM | PRIVATE (by its code alone) or LISTED |
 | SIDE | The side your fighter is seen on in the match, LEFT (the default) or RIGHT, whichever the server seats you on |
@@ -300,16 +300,20 @@ of the match. `?netlag=MS` holds each of the
 other side's presses that many milliseconds more, to try a match over a slower link.
 
 Two players are paired, and a room is joined, only where they can play each other: a version both
-games play a match as, and each one's fighter one whose data the other has. 0.7.6 plays its own
-matches with the 0.7.6 and later players, those of 0.7.0 with the 0.7.0 to 0.7.5 players (the line
+games play a match as, and each one's fighter one whose data the other has. 0.7.8 plays its own
+matches with the 0.7.8 and later players and alike with the 0.7.6 and 0.7.7 players, those of 0.7.0 with the 0.7.0 to 0.7.5 players (the line
 over the picture says AS 0.7.0), and those of 0.6.5, 0.6.6 and 0.6.7 with theirs, without the walls
 (whatever REACHABLE WALLS says; the line over the picture says AS 0.6.5, NO WALLS); the server pairs
 them so from its 0.7.1 on. A player without Kazuya, say, is
 paired with one who has him unless either of you chose him, and a room whose host plays him shows
 greyed in the room list. ONLINE MODE says why a pairing cannot be made (THE OTHER PLAYER HAS
 VERSION 0.6.0, YOU LACK KAZUYA, THE OTHER PLAYER LACKS KAZUYA). The rest of the game's data may
-differ between the two (a disc ripped without its cue sheet, an arcade board's models); should it
-make the two games play differently, the match ends as they part (THE GAMES DIFFERED).
+differ between the two (a disc ripped without its cue sheet, the remaster, an arcade board's
+stages); should it make the two games play differently, the match ends as they part (THE GAMES
+DIFFERED). The arcade board's fighters swing their own hair, tails and belts, which the fight
+plays: two games keep them only where both draw the same fighters from the same board; otherwise
+both swing the disc's, and a game with the board's fighters shows that match with the console's
+models.
 
 **A server to play over.** `npm run dev` runs one beside the page for players on the same machine,
 `npm run dev:lan` for players on the same home network. Over the internet, one of you runs

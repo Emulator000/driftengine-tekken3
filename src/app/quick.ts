@@ -18,6 +18,8 @@ import { assetBytes, assetImage, crtAsked, dataBytes, floorFade, image, json, pa
 import { CrtFilter } from './crt.ts';
 import { asked, settings } from './settings.ts';
 import { startSound } from './sound.ts';
+import { rosterWord } from '../net/online.ts';
+import { StateSnapshotter } from '../net/snapshot.ts';
 
 /** Roster ids the remake cannot set up yet: Mokujin's draw. */
 const NOT_YET = new Set([15]);
@@ -57,17 +59,37 @@ const arcadeStagesOf = (): Promise<ArcadeList> =>
           };
         })
       : Promise.resolve({ stages: new Set(), panoramas: [], objects: [], fighters: new Set() }));
+let boardOwn: Promise<ReturnType<typeof parseArcadeFighters>> | null = null;
+/** The arcade board's fighters' own accessories, by pack, for the packs drawn with the board's models (none without them). */
+const boardAccessories = (): Promise<ReturnType<typeof parseArcadeFighters>> =>
+  (boardOwn ??= arcadeStagesOf().then(async ({ fighters }) => {
+    if (fighters.size === 0) return new Map();
+    const own = parseArcadeFighters(await json('tables/arcade-fighters.json'));
+    for (const pack of [...own.keys()]) if (!fighters.has(pack)) own.delete(pack);
+    return own;
+  }));
 /**
  * The fight's tables with the arcade board's fighters' own accessories, for the packs drawn with
  * the board's models: the fight hangs and swings each on its own joint and the board's spring.
  */
 export async function withArcadeFighters<T extends { readonly tables: FightTables }>(loaded: T): Promise<T> {
-  const { fighters } = await arcadeStagesOf();
-  if (fighters.size === 0) return loaded;
-  const own = parseArcadeFighters(await json('tables/arcade-fighters.json'));
-  for (const pack of [...own.keys()]) if (!fighters.has(pack)) own.delete(pack);
+  const own = await boardAccessories();
+  if (own.size === 0) return loaded;
   return { ...loaded, tables: { ...loaded.tables, models: withOwnAccessories(loaded.tables.models, own) } };
 }
+/**
+ * The board's fighters as an online match's hello says them: the packs drawn with the board's
+ * models (`rosterWord`) and the fingerprint of their accessories; '0' none.
+ */
+export async function boardWord(): Promise<string> {
+  const own = await boardAccessories();
+  return own.size === 0 ? '0' : `${rosterWord(own.keys())}.${new StateSnapshotter({ own: [...own.entries()] }).digestNow()}`;
+}
+/**
+ * Whether the packs the board's models draw are drawn with them: off for an online match whose
+ * other side draws them otherwise, which swings the disc's accessories and shows the console's models.
+ */
+export const boardFighters = { on: true };
 const optional = (path: string): Promise<ImageBitmap | null> => assetImage(path).catch(() => null);
 /** A fighter's, an intro model's or a stage's texture atlas by its file's name: remastered, the one made for it; the enlarged one, or the original. */
 const atlas = async (kind: string, name: string): Promise<ImageBitmap> =>
@@ -138,7 +160,7 @@ const stage = async (id: number): Promise<{ mesh: ArrayBuffer; ground: ArrayBuff
 /** The fighters' and stages' drawing data, by pack and stage. */
 export const drawingFiles: DrawingFiles = {
   fighter: async (pack) => {
-    const kind = (await arcadeStagesOf()).fighters.has(pack) ? 'arcade/fighters' : 'fighters';
+    const kind = boardFighters.on && (await arcadeStagesOf()).fighters.has(pack) ? 'arcade/fighters' : 'fighters';
     const [mesh, texture, maps] = await Promise.all([fighterMesh(kind, two(pack)), atlas(kind, two(pack)), mapsOf(kind, two(pack))]);
     return { mesh, texture, maps };
   },

@@ -88,6 +88,12 @@ export const SETTINGS = {
 
 /** A player as the log names them: their name and the address they connect from (and, behind a proxy, the one it forwards for them). */
 const who = (client) => `${client.name} (${client.address})`;
+/** A log line's time: the server's clock in UTC, to the millisecond. */
+const stamp = (ms) => new Date(ms).toISOString();
+/** A pairing as the log names it. */
+const pairingOf = (room) => (room.quick ? 'quick match' : `room ${room.code}`);
+/** A word a game said of itself to the other (its version, its board's fighters), as the log shows it: letters, digits, dots and dashes. */
+const saidWord = (raw, most = 64) => (typeof raw === 'string' ? raw.replace(/[^0-9A-Za-z.\-]/g, '').slice(0, most) : undefined);
 
 function addressOf(request) {
   const remote = (request?.socket?.remoteAddress ?? '?').replace(/^::ffff:/, '');
@@ -224,7 +230,8 @@ export class Relay {
     this.started = now();
     this.config = config;
     this.now = now;
-    this.log = log;
+    /* Each line stamped with the time it was written. */
+    this.log = (line) => log(`${stamp(this.now())} ${line}`);
     /** Every connected player. */
     this.clients = new Set();
     /** Rooms by code. */
@@ -354,7 +361,7 @@ export class Relay {
   }
 
   connected(socket, request) {
-    const client = { id: (this.ids += 1), address: addressOf(request), offer: null, socket, hello: false, name: 'PLAYER', build: '', plays: [], own: '', roster: 0n, fighter: -1, available: true, room: null, joining: null, watching: null, seat: -1, queued: false, heard: this.now(), window: this.now(), count: 0, alive: true };
+    const client = { id: (this.ids += 1), address: addressOf(request), offer: null, socket, hello: false, name: 'PLAYER', build: '', plays: [], own: '', roster: 0n, fighter: -1, available: true, room: null, joining: null, watching: null, seat: -1, queued: false, told: null, heard: this.now(), window: this.now(), count: 0, alive: true };
     this.clients.add(client);
     socket.on('pong', () => (client.alive = true));
     socket.on('message', (data, binary) => this.message(client, data, binary));
@@ -428,6 +435,7 @@ export class Relay {
         if (other === null) return;
         /* The host's start: a match under way on the pairing, by its number. */
         const body = command.body;
+        if (body !== null && typeof body === 'object') this.heardOfPeer(client, body);
         if (client.seat === 0 && body !== null && typeof body === 'object' && body.k === 'start' && Number.isInteger(body.match)) this.underway(client.room, body.match);
         this.tell(other, { ev: 'peer', body: body ?? null });
         return;
@@ -476,6 +484,32 @@ export class Relay {
     });
   }
 
+  /**
+   * What a player's game tells the other, as far as the log keeps it: its hello's version and
+   * board's fighters, the match's start (who plays which fighter, where, with what delay), and its
+   * goodbye's reason (the field where the two games differed, where it says so).
+   */
+  heardOfPeer(client, body) {
+    const room = client.room;
+    if (room === null) return;
+    if (body.k === 'hello') client.told = { version: saidWord(body.version), board: saidWord(body.board, 80) };
+    else if (body.k === 'start' && client.seat === 0) {
+      const fighters = Array.isArray(body.fighters) ? body.fighters : [];
+      const sides = room.seats.map((one, seat) => {
+        if (one === null) return '?';
+        const fighter = fighters[seat];
+        const chose = Number.isInteger(fighter?.roster) ? `fighter ${fighter.roster}/${Number.isInteger(fighter.costume) ? fighter.costume : 0}` : 'fighter ?';
+        const board = one.told?.board;
+        return `${who(one)} ${one.build || '?'}, ${chose}, ${board === undefined ? 'no board word' : board === '0' ? 'no board' : `board ${board}`}`;
+      });
+      const stage = Number.isInteger(body.options?.stage) ? body.options.stage : '?';
+      this.log(`[relay] ${pairingOf(room)}: match ${Number.isInteger(body.match) ? body.match : '?'} began, played as ${client.told?.version ?? '?'}, stage ${stage}, delay ${Number.isInteger(body.delay) ? body.delay : '?'}${body.options?.walls === 1 ? ', walls' : ''}${body.board === undefined ? '' : `, the board's fighters ${saidWord(body.board, 80)}`}: ${sides.join('; ')}`);
+    } else if (body.k === 'bye') {
+      const at = Number.isInteger(body.at) ? ` at field ${body.at}` : '';
+      this.log(`[relay] ${pairingOf(room)}: ${who(client)} ended match ${room.match?.number ?? '?'} (${saidWord(body.why) ?? 'left'}${at})`);
+    }
+  }
+
   /** A match begun on a pairing (its number): under way until its result is said. */
   underway(room, match) {
     if (room === null) return;
@@ -512,7 +546,7 @@ export class Relay {
     const [won, lost] = [room.seats[winner], room.seats[1 - winner]];
     if (won !== null) this.setWins(won, this.winsOf(won) + 1);
     if (lost !== null) this.setWins(lost, 0);
-    this.log(`[relay] ${room.quick ? 'quick match' : `room ${room.code}`} match ${under.number}: ${won === null ? '?' : who(won)} won`);
+    this.log(`[relay] ${pairingOf(room)} match ${under.number}: ${won === null ? '?' : who(won)} won`);
     this.tellWins(room);
   }
 
@@ -670,7 +704,7 @@ export class Relay {
     const as = versionOf(first, second) ?? first.build;
     this.tell(first, { ev: 'paired', seat: 0, code: room.code, peer: peer(second), as });
     this.tell(second, { ev: 'paired', seat: 1, code: room.code, peer: peer(first), as });
-    this.log(`[relay] ${room.quick ? 'quick match' : `room ${room.code}`}: ${who(first)} and ${who(second)}`);
+    this.log(`[relay] ${pairingOf(room)}: ${who(first)} and ${who(second)}`);
   }
 
   /** A match's start, from its host as it begins: the fight's record started afresh, and given anew to those watching it. */
@@ -701,7 +735,8 @@ export class Relay {
       const [first, second] = room.seats;
       const fighters = Array.isArray(tape.start.fighters) ? tape.start.fighters.map((fighter) => (Number.isInteger(fighter?.roster) ? fighter.roster : -1)) : [];
       const watchable = client.plays.includes(tape.as) && fighters.every((fighter) => hasFighter(client, fighter));
-      fights.push({ code: room.code, names: [first.name, second.name], wins: [this.winsOf(first), this.winsOf(second)], watchers: room.watchers.size, watchable });
+      const board = saidWord(tape.start.board, 80);
+      fights.push({ code: room.code, names: [first.name, second.name], wins: [this.winsOf(first), this.winsOf(second)], watchers: room.watchers.size, watchable, ...(board === undefined ? {} : { board }) });
       if (fights.length === MOST_FIGHTS) break;
     }
     this.tell(client, { ev: 'fights', fights });
@@ -755,6 +790,7 @@ export class Relay {
     if (client.offer !== null) this.settle(client.offer, 'gone', client);
     const room = client.room;
     if (room === null) return;
+    this.log(`[relay] ${pairingOf(room)}: ${who(client)} left the pairing (${why}${room.match == null ? '' : `, match ${room.match.number} under way`})`);
     /* Left with a match under way that neither has said is over: lost, for the one who left; said over by one, settled as said. */
     if (room.match != null) {
       if (room.match.said.every((one) => one === null)) {
@@ -822,7 +858,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   try {
     config = readConfig();
   } catch (error) {
-    console.error(`[relay] ${error.message}\n\n${usage()}`);
+    console.error(`${stamp(Date.now())} [relay] ${error.message}\n\n${usage()}`);
     process.exit(2);
   }
   if (config.help) {
@@ -831,7 +867,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   }
   const relay = new Relay(config);
   relay.listen().catch((error) => {
-    console.error(`[relay] ${error.message}`);
+    console.error(`${stamp(Date.now())} [relay] ${error.message}`);
     process.exit(1);
   });
   /* Stopped at once: a second signal, or a second gone by, ends it whatever is still closing. */
@@ -840,7 +876,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     process.on(signal, () => {
       if (stopping) process.exit(130);
       stopping = true;
-      console.log('[relay] stopping');
+      console.log(`${stamp(Date.now())} [relay] stopping`);
       setTimeout(() => process.exit(0), 1000).unref();
       void relay.close().then(() => process.exit(0));
     });

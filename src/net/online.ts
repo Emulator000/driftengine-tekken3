@@ -59,6 +59,12 @@ export interface Hello {
    * says nothing for a few seconds is taken to have gone into the fight.
    */
   readonly saysReady?: boolean;
+  /**
+   * The fighters' packs this side draws with the arcade board's models, whose own accessories its
+   * fight swings (`rosterWord`), and their accessories' fingerprint; '0' none. A match keeps them
+   * only where both sides say the same (`ownBoard`). Absent from an older version's hello.
+   */
+  readonly board?: string;
 }
 
 /**
@@ -95,6 +101,8 @@ export interface Start {
   readonly draws?: number;
   /** A bit a seat (the host's 1): its player sees the fight from the other side (`Hello`'s `side`), its moves into the screen going by that view. Absent where none does or a side said nothing of its side. */
   readonly turned?: number;
+  /** The board's fighters both sides swing (`Hello`'s `board`), for one watching the match: absent where they swing the disc's. */
+  readonly board?: string;
 }
 
 /** The game an online match plays, as the page gives it. */
@@ -112,8 +120,12 @@ export interface OnlineGame<S> {
   readonly defaultKeys: readonly number[];
   /** The match's options, as the host decides them for a match played as version `as`. */
   options(as: string): Readonly<Record<string, unknown>>;
-  /** The match begun from its start, this side in `seat`, played as version `as`: the game reset to it, and how a field of it is stepped and saved. */
-  begin(start: Start, seat: 0 | 1, as: string): { readonly step: (words: readonly [number, number], field: number) => void; readonly snapshotter: Snapshotter<unknown> };
+  /**
+   * The match begun from its start, this side in `seat`, played as version `as`, with the board's
+   * fighters' own accessories where `ownBoard` (both sides draw the same with them) and the disc's
+   * otherwise: the game reset to it, and how a field of it is stepped and saved.
+   */
+  begin(start: Start, seat: 0 | 1, as: string, ownBoard: boolean): { readonly step: (words: readonly [number, number], field: number) => void; readonly snapshotter: Snapshotter<unknown> };
   /** The match is over, for `why` (the game goes back to where it was; 'over' its fight ended, its result asked about). */
   end(why: string): void;
   /** A match's result left without a rematch: back to waiting. */
@@ -130,6 +142,8 @@ export interface Player {
   readonly id?: string;
   /** The side this player asks to see their fighter on (0 the left, 1 the right). */
   readonly side?: number;
+  /** The packs this side draws with the arcade board's models and their accessories' fingerprint (`Hello`'s `board`; '0' none). */
+  readonly board?: string;
 }
 
 export interface OnlineOptions<S> {
@@ -154,16 +168,25 @@ export interface OnlineOptions<S> {
  * players and those of every release back to that one play each other; one that changes any of
  * them sets it to its own version.
  */
-export const PLAYS_AS = '0.7.7';
+export const PLAYS_AS = '0.7.8';
 
 /**
  * The older versions this release also plays a match as, each with the fields of the state its own
  * matches have and that version's has not: a match as one is played without what those fields
  * hold (the remake's walls; the moves into the screen of a player who sees the fight from the
  * other side going by that view), and those fields (all at rest) left out of its fingerprint. A
- * version whose matches differ from this one's in nothing but the code, as 0.7.6's, leaves none out.
+ * version whose matches differ from this one's in nothing but the code, as 0.7.6's and 0.7.7's,
+ * leaves none out.
  */
-export const ALSO_PLAYS: Readonly<Record<string, readonly string[]>> = { '0.7.6': [], '0.7.0': ['depthTurned'], '0.6.5': ['wallHit', 'carried', 'splatted', 'splatHits', 'walls', 'depthTurned'] };
+export const ALSO_PLAYS: Readonly<Record<string, readonly string[]>> = { '0.7.7': [], '0.7.6': [], '0.7.0': ['depthTurned'], '0.6.5': ['wallHit', 'carried', 'splatted', 'splatHits', 'walls', 'depthTurned'] };
+
+/**
+ * Whether a match keeps the arcade board's fighters' own accessories: only where both sides draw
+ * the same packs with the board's models, so both fights swing the same; otherwise both swing the
+ * disc's, which every player has. A side that says nothing of it (before 0.7.8) is taken to draw
+ * the disc's.
+ */
+export const ownBoard = (ours: string | undefined, theirs: string | undefined): boolean => ours !== undefined && ours !== '0' && ours === theirs;
 
 /** Whether a match played as version `as` has `field` of the state: every one but those that version lacks. */
 export function playedWith(as: string, field: string): boolean {
@@ -226,6 +249,7 @@ const WHY: Readonly<Record<string, string>> = {
   declined: 'THE OTHER PLAYER SAID NO',
   disconnected: 'THE CONNECTION WAS LOST',
   desynced: 'THE GAMES DIFFERED',
+  'cannot watch': 'CANNOT WATCH THIS FIGHT',
   quit: 'MATCH OVER',
 };
 
@@ -661,7 +685,7 @@ export class Online<S> {
     if (state === 'disconnected' || state === 'desynced' || state === 'halted') {
       const why = state === 'desynced' ? `desynced` : state === 'halted' ? session.reason : 'disconnected';
       if (state === 'desynced' && session.desync !== null) console.warn(`[tekken3 online] the games differed at field ${session.desync.tick} (${session.desync.ours} here, ${session.desync.theirs} there)`);
-      this.finish(why, why === 'desynced' ? 'desynced' : 'left');
+      this.finish(why, why === 'desynced' ? 'desynced' : 'left', state === 'desynced' ? session.desync?.tick : undefined);
     }
     return played;
   }
@@ -740,11 +764,20 @@ export class Online<S> {
       case 'rooms':
         this.rooms = event.rooms;
         return;
-      case 'fights':
-        this.fights = Array.isArray(event.fights) ? event.fights : [];
+      case 'fights': {
+        /* A fight whose two swing the board's fighters is shown only by a game that draws the same with them. */
+        const board = this.options.player().board;
+        this.fights = Array.isArray(event.fights) ? event.fights.map((fight) => (fight.board === undefined || ownBoard(board, fight.board) ? fight : { ...fight, watchable: false })) : [];
         return;
+      }
       case 'tape': {
         if (this.state !== 'watching' || event.start === null || typeof event.start !== 'object') return;
+        const board = (event.start as Start).board;
+        if (board !== undefined && !ownBoard(this.options.player().board, board)) {
+          this.unwatch();
+          this.ended = whyLine('cannot watch');
+          return;
+        }
         const [first = '', second = ''] = event.names;
         const [won = 0, theirs = 0] = event.wins;
         this.tape = { code: event.code, match: event.match, start: event.start as Start, as: event.as, names: [first, second], wins: [won, theirs], words: [[...(event.words[0] ?? [])], [...(event.words[1] ?? [])]] };
@@ -809,8 +842,8 @@ export class Online<S> {
     this.wire = switchableSocket(this.relay!.forInputs);
     const transport = new WebSocketTransport({ socket: this.wire.socket, self: seat });
     this.transport = (this.options.lagMs ?? 0) > 0 ? new LateTransport(transport, this.options.lagMs!, () => this.now) : transport;
-    const { name, delay, keys, fighter, side } = this.options.player();
-    const hello: Hello = { k: 'hello', version: this.playsAs, roster: rosterWord(this.options.game.roster), name, delay, keys, fighter, together: true, draws: true, saysReady: true, ...(side === undefined ? {} : { side: side === 1 ? 1 : 0 }) };
+    const { name, delay, keys, fighter, side, board } = this.options.player();
+    const hello: Hello = { k: 'hello', version: this.playsAs, roster: rosterWord(this.options.game.roster), name, delay, keys, fighter, together: true, draws: true, saysReady: true, ...(side === undefined ? {} : { side: side === 1 ? 1 : 0 }), ...(board === undefined ? {} : { board }) };
     this.relay!.toPeer(hello);
   }
 
@@ -892,7 +925,8 @@ export class Online<S> {
     const fighter = (f: Fighter | undefined): Fighter => ({ roster: Number.isInteger(f?.roster) ? f!.roster : 0, costume: Number.isInteger(f?.costume) ? f!.costume & 3 : 0 });
     /* A player whose seat is not the side they asked for sees the fight from the other side, where both said which they asked for. */
     const turned = ours.side === undefined || (theirs.side !== 0 && theirs.side !== 1) ? 0 : (ours.side === 1 ? 1 : 0) | (theirs.side === 1 ? 0 : 2);
-    const start: Start = { k: 'start', options: this.options.game.options(this.playsAs), delay, keys: [keys(ours.keys), keys(theirs.keys)], fighters: [fighter(ours.fighter), fighter(theirs.fighter)], match: 1, ...(theirs.draws === true ? { draws: 1 } : {}), ...(turned !== 0 ? { turned } : {}) };
+    const board = ownBoard(ours.board, theirs.board) ? { board: ours.board! } : {};
+    const start: Start = { k: 'start', options: this.options.game.options(this.playsAs), delay, keys: [keys(ours.keys), keys(theirs.keys)], fighters: [fighter(ours.fighter), fighter(theirs.fighter)], match: 1, ...(theirs.draws === true ? { draws: 1 } : {}), ...(turned !== 0 ? { turned } : {}), ...board };
     this.starting = { start, at: this.now + GREETING_HOLD_MS };
   }
 
@@ -903,7 +937,7 @@ export class Online<S> {
     this.heardAt = this.frames;
     /* What the last match left in the transport is no word of this one's. */
     this.transport?.drain(() => {});
-    const { step: played, snapshotter } = this.options.game.begin(start, this.seat, this.playsAs);
+    const { step: played, snapshotter } = this.options.game.begin(start, this.seat, this.playsAs, ownBoard(this.options.player().board, this.theirs?.board));
     /* This side's own presses kept, each field's the first time it is played, for those watching (its own press never guessed); the host gives the match's start. */
     const match = Number.isInteger(start.match) ? start.match : 0;
     const taped = { match, words: [] as number[], sent: 0 };
@@ -963,9 +997,9 @@ export class Online<S> {
     this.session?.measured(this.roundTripMs);
   }
 
-  /** The match over on this side for `why`, the other side told `told`. */
-  private finish(why: string, told: string): void {
-    this.relay?.toPeer({ k: 'bye', why: told });
+  /** The match over on this side for `why`, the other side told `told` (and `at`, the field where the games differed, for the server's log). */
+  private finish(why: string, told: string, at?: number): void {
+    this.relay?.toPeer({ k: 'bye', why: told, ...(at === undefined ? {} : { at }) });
     this.relay?.say({ do: 'leave' });
     this.stop(why);
   }

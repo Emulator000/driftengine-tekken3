@@ -8,7 +8,7 @@
  * the keyboard and the mouse edit it as a text field (`text-field.ts`), the clipboard with them;
  * while a match is played, a line over the picture says how its connection goes.
  */
-import { ALSO_PLAYS, Online, PLAYS_AS, REMATCH_MS, playedWith, whyLine, type Start } from '../net/online.ts';
+import { ALSO_PLAYS, Online, PLAYS_AS, REMATCH_MS, ownBoard, playedWith, whyLine, type Start } from '../net/online.ts';
 import { serverAddresses } from '../net/address.ts';
 import { StateSnapshotter } from '../net/snapshot.ts';
 import { ROLLBACK_DEPTH } from '../net/session.ts';
@@ -115,6 +115,10 @@ export interface OnlineHooks {
   readonly matches: () => Iterable<FightData>;
   /** The fighters whose data this side has (their roster ids): the roster both sides must share. */
   readonly roster: readonly number[];
+  /** The packs this side draws with the arcade board's models and their accessories' fingerprint (`Hello`'s `board`; '0' none). */
+  readonly board: string;
+  /** Whether a match's fighters swing the board's accessories and are drawn with its models (else the disc's and the console's). */
+  readonly drawBoard: (on: boolean) => void;
 }
 
 export class OnlinePlay {
@@ -163,7 +167,7 @@ export class OnlinePlay {
     Object.assign(online, { delay: this.kept.delay, listed: this.kept.listed, side: this.kept.side, name: this.kept.name, server: params.get('server') ?? this.kept.server });
     this.online = new Online({
       url: () => serverUrls(this.game.state.online.server),
-      player: () => ({ name: this.kept.name, delay: this.kept.delay, keys: this.localKeys(), fighter: this.localFighter(), id: this.kept.id, side: this.kept.side }),
+      player: () => ({ name: this.kept.name, delay: this.kept.delay, keys: this.localKeys(), fighter: this.localFighter(), id: this.kept.id, side: this.kept.side, board: this.hooks.board }),
       lagMs: Math.max(0, Number(params.get('netlag') ?? 0) || 0),
       game: {
         version: PLAYS_AS,
@@ -173,7 +177,7 @@ export class OnlinePlay {
         defaultKeys: this.hooks.data.scenes.powerOn.keys[0]!,
         fighterName: (fighter) => this.hooks.data.tables.roster.codes[fighter * 4]?.name ?? `FIGHTER ${fighter}`,
         options: (as) => this.decided(as),
-        begin: (start, seat, as) => this.begin(start, seat, as),
+        begin: (start, seat, as, board) => this.begin(start, seat, as, board),
         end: (why) => this.end(why),
         waiting: () => this.waitAgain(),
       },
@@ -542,8 +546,10 @@ export class OnlinePlay {
     return [out[this.online.seat] ?? [0, 0], [0, 0]];
   }
 
-  private begin(start: Start, seat: 0 | 1, as: string): { step: (words: readonly [number, number], field: number) => void; snapshotter: StateSnapshotter<GameState> } {
+  private begin(start: Start, seat: 0 | 1, as: string, board: boolean): { step: (words: readonly [number, number], field: number) => void; snapshotter: StateSnapshotter<GameState> } {
     const game = this.game;
+    /* The board's fighters as both sides draw them: their own accessories where both have the same, the disc's (and the console's models) otherwise. */
+    this.hooks.drawBoard(board);
     /* A rematch counts on; a new opponent from nothing. */
     if (this.online.state !== 'result') this.score.fill(0);
     const state = game.state;
@@ -629,6 +635,7 @@ export class OnlinePlay {
     this.local = null;
     this.match = null;
     local.snapshotter.restore(local.slot);
+    this.hooks.drawBoard(true);
     /* The waiting room's fight back, counted as shown afresh: no offer before it has been on the screen a moment. */
     this.available.drawn(false, performance.now());
     /* The local fight's own data with it: the match's movesets are not its fighters'. */
@@ -650,7 +657,7 @@ export class OnlinePlay {
   /** The fight in the record the server gave begun, as its players began it: the local game kept to come back to. */
   private startWatching(): void {
     const tape = this.online.tape!;
-    const { step } = this.begin(tape.start, 0, tape.as);
+    const { step } = this.begin(tape.start, 0, tape.as, ownBoard(this.hooks.board, tape.start.board));
     /* Every button taken as held, so the press that chose the fight opens nothing: a press counts once released. */
     this.watched = { code: tape.code, match: tape.match, step, played: 0, paused: false, choice: 0, songs: [], pads: 0xffff };
   }

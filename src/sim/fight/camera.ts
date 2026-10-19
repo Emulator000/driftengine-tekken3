@@ -913,7 +913,8 @@ function startScript(c: Camera, shot: ShotRef): number {
   if (!isScript(shot)) throw new Error(`camera shot ${shot} is not a script`);
   const cam = c.state.camera;
   const script = scriptOf(c, shot);
-  cam.script = shot;
+  /* A copy of the shot's reference: the state holds no object in two places, which an online match's rollback could not put back as it was. */
+  cam.script = { set: shot.set, index: shot.index };
   cam.scriptFrame = 0;
   cam.scriptFrames = script.frames;
   return script.side;

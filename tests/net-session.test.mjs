@@ -422,3 +422,5 @@ test("a Versus game of this release with the walls off and one of 0.6.5 pick the
 test("a Versus game of this release and one of 0.7.0 pick their characters, fight and stay the same game over a bad link, the field of the players who see the fight from the other side left out of this one's fingerprint", { skip, timeout: 300_000 }, (t) => besideRelease(t, '0.7.0'));
 
 test('a Versus game of this release and one of 0.7.6 pick their characters, fight and stay the same game over a bad link, nothing left out of either fingerprint', { skip, timeout: 300_000 }, (t) => besideRelease(t, '0.7.6'));
+
+test('a Versus game of this release and one of 0.7.7 pick their characters, fight and stay the same game over a bad link, nothing left out of either fingerprint', { skip, timeout: 300_000 }, (t) => besideRelease(t, '0.7.7'));

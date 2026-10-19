@@ -37,7 +37,7 @@ const EVERY = Array.from({ length: 23 }, (_, i) => i);
 const DEFAULT_KEYS = [12, 12, 12, 12, 1, 3, 2, 0];
 const OWN_KEYS = [12, 12, 12, 12, 0, 1, 2, 3];
 
-function side(url, { version = '0.6.1', plays, roster = EVERY, fighter = 0, name = 'A', delay = 2, now, keys = DEFAULT_KEYS, id, seen } = {}) {
+function side(url, { version = '0.6.1', plays, roster = EVERY, fighter = 0, name = 'A', delay = 2, now, keys = DEFAULT_KEYS, id, seen, board } = {}) {
   const chosen = { fighter };
   const log = { began: null, ended: null, begun: 0, waited: 0, optionsAs: null, steps: [] };
   const state = { at: [0, 0], mix: 1, fields: 0 };
@@ -51,8 +51,8 @@ function side(url, { version = '0.6.1', plays, roster = EVERY, fighter = 0, name
       log.optionsAs = as;
       return { rounds: 3 };
     },
-    begin(start, seat, as) {
-      log.began = { start, seat, as };
+    begin(start, seat, as, ownBoard) {
+      log.began = { start, seat, as, ownBoard };
       log.begun += 1;
       /* Every match from the same start, as the game's own begins from the state it powers on with. */
       Object.assign(state, { at: [0, 0], mix: 1, fields: 0 });
@@ -75,7 +75,7 @@ function side(url, { version = '0.6.1', plays, roster = EVERY, fighter = 0, name
       log.waited += 1;
     },
   };
-  const online = new Online({ url: () => url, game, player: () => ({ name, delay, keys, fighter: { roster: chosen.fighter, costume: 0 }, ...(id === undefined ? {} : { id }), ...(seen === undefined ? {} : { side: seen }) }), open: (at) => new WebSocket(at), peerConnection: null, now });
+  const online = new Online({ url: () => url, game, player: () => ({ name, delay, keys, fighter: { roster: chosen.fighter, costume: 0 }, ...(id === undefined ? {} : { id }), ...(seen === undefined ? {} : { side: seen }), ...(board === undefined ? {} : { board }) }), open: (at) => new WebSocket(at), peerConnection: null, now });
   return { online, state, log, pick: (to) => (chosen.fighter = to) };
 }
 
@@ -298,6 +298,33 @@ test("a side gone into the fight holds its picture while the other, gone in too,
   }
 });
 
+test("two games draw a match's fighters with the arcade board's models and their own accessories only where both draw the same with them, the start saying so for those watching; else both with the disc's, so their games agree, and against one that says nothing of it (one before 0.7.8), the disc's", async () => {
+  const { relay, url } = await server();
+  const cases = [
+    [{ board: '1c.00ff00ff00ff00ff' }, { board: '1c.00ff00ff00ff00ff' }, true, 'both with the same board fighters'],
+    [{ board: '1c.00ff00ff00ff00ff' }, { board: '0' }, false, 'one with the board, one without'],
+    [{ board: '1c.00ff00ff00ff00ff' }, { board: '18.00ff00ff00ff00ff' }, false, 'both with some, not the same'],
+    [{ board: '1c.00ff00ff00ff00ff' }, { board: '1c.ff00ff00ff00ff00' }, false, 'the same fighters, their accessories otherwise (another board)'],
+    [{ board: '0' }, { board: '0' }, false, 'neither with any'],
+    [{ board: '1c.00ff00ff00ff00ff' }, {}, false, 'the other says nothing of it'],
+  ];
+  try {
+    for (const [host, guest, own, what] of cases) {
+      const [a, b] = await playing(url, host, guest);
+      try {
+        assert.equal(a.log.began.ownBoard, own, `the host, ${what}`);
+        assert.equal(a.log.began.start.board, own ? host.board : undefined, `the start, ${what}`);
+        if (guest.board !== undefined) assert.equal(b.log.began.ownBoard, own, `the guest, ${what}`);
+      } finally {
+        a.online.disconnect();
+        b.online.disconnect();
+      }
+    }
+  } finally {
+    await relay.close();
+  }
+});
+
 test("where both players ask to be seen on the same side, the start says which of them sees the fight from the other side; both seen as they asked, neither; with a game that says nothing of its side (one before 0.7.6), no word of it", async () => {
   const { relay, url } = await server();
   const sides = [];
@@ -402,6 +429,65 @@ test("a fight between two games that tape it can be watched: listed with both pl
     await frames([b, c], () => c.online.state !== 'watching', 300);
     assert.equal(c.online.state, 'lobby', 'back once the fight is over');
     assert.equal(c.online.tape, null);
+  } finally {
+    for (const one of sides) one.online.disconnect();
+    await relay.close();
+  }
+});
+
+test("a fight whose two games swing the board's fighters is watched only by a game that draws the same with them: listed to another as one it cannot watch, and a watch asked of it anyway ends at once", async () => {
+  const { relay, url } = await server();
+  const sides = [];
+  const board = '1c.00ff00ff00ff00ff';
+  try {
+    const [a, b] = await playing(url, { board }, { board });
+    const same = side(url, { name: 'Same', board });
+    const other = side(url, { name: 'Other', board: '0' });
+    sides.push(a, b, same, other);
+    same.online.connect();
+    other.online.connect();
+    await frames(sides, () => same.online.state === 'lobby' && other.online.state === 'lobby' && a.online.session?.tick > 90 && b.online.session?.tick > 90, 800);
+    same.online.listFights();
+    other.online.listFights();
+    await frames(sides, () => same.online.fights.length === 1 && other.online.fights.length === 1, 200);
+    assert.equal(same.online.fights[0].watchable, true, 'one with the same board fighters can watch it');
+    assert.equal(other.online.fights[0].watchable, false, 'one without cannot');
+    same.online.watch(same.online.fights[0].code);
+    other.online.watch(other.online.fights[0].code);
+    await frames(sides, () => same.online.tape !== null && other.online.state === 'lobby', 400);
+    assert.equal(same.online.state, 'watching', 'the same board fighters: watching');
+    assert.equal(same.online.tape.start.board, board);
+    assert.equal(other.online.state, 'lobby', 'without: back at once');
+    assert.equal(other.online.ended, 'CANNOT WATCH THIS FIGHT');
+  } finally {
+    for (const one of sides) one.online.disconnect();
+    await relay.close();
+  }
+});
+
+test("the server's log: each line stamped with its time; a match's start with each player's version, fighter and board fighters; its end with why, and the field where the games differed", async () => {
+  const lines = [];
+  const relay = new Relay(readConfig(['--host', '127.0.0.1', '--port', '0'], {}), { log: (line) => lines.push(line) });
+  const url = `ws://127.0.0.1:${await relay.listen()}/`;
+  const sides = [];
+  try {
+    const [a, b] = await playing(url, { version: '0.7.8', fighter: 9, board: '1c.00ff00ff00ff00ff' }, { version: '0.7.8', fighter: 12 });
+    sides.push(a, b);
+    await frames(sides, () => a.online.session?.tick > 40 && b.online.session?.tick > 40, 400);
+    /* The guest's game made to differ: both sides catch it at a field both have every word for. */
+    b.state.mix ^= 1;
+    await frames(sides, () => a.online.state !== 'playing' && b.online.state !== 'playing', 600);
+    await frames(sides, () => lines.some((line) => line.includes('left the pairing')), 100);
+    assert.ok(lines.length > 0 && lines.every((line) => /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z \[relay\] /.test(line)), `every line stamped:\n${lines.join('\n')}`);
+    const began = lines.find((line) => line.includes('match 1 began'));
+    assert.ok(began !== undefined, 'the start logged');
+    assert.match(began, /played as 0\.7\.8/);
+    assert.match(began, /HOST \(127\.0\.0\.1\) 0\.7\.8, fighter 9\/0, board 1c\.00ff00ff00ff00ff; GUEST \(127\.0\.0\.1\) 0\.7\.8, fighter 12\/0, no board word/);
+    /* The first side's word ends the pairing: the other's, after it, has none to be logged with. */
+    const ended = lines.filter((line) => line.includes('ended match 1'));
+    assert.equal(ended.length, 1, 'its end');
+    assert.match(ended[0], /\(desynced at field \d+\)$/);
+    assert.ok(lines.some((line) => /: (HOST|GUEST) \(127\.0\.0\.1\) left the pairing \(left, match 1 under way\)$/.test(line)), 'and its leaving');
   } finally {
     for (const one of sides) one.online.disconnect();
     await relay.close();

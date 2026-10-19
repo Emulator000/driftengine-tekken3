@@ -102,3 +102,36 @@ test("fields left out of the fingerprint wherever they stand: it is the state's 
   left.restore(slot);
   assert.deepEqual([state.f[0].wallHit, state.options.walls], [5, 1], 'saved and restored all the same');
 });
+
+test("a fight's state holds each of its objects in one place only, the data's aside, so a restore puts back every one as it was saved", { skip }, async () => {
+  const { game } = await versusFight();
+  /* The loaded data's objects, which the state holds by reference wherever it likes. */
+  const data = new WeakSet();
+  const mark = (v) => {
+    if (v === null || typeof v !== 'object' || data.has(v)) return;
+    data.add(v);
+    if (!ArrayBuffer.isView(v)) for (const key in v) mark(v[key]);
+  };
+  mark(game.data.tables);
+  mark(game.data.scenes);
+  mark(game.fightData);
+  const twice = new Set();
+  const walk = () => {
+    const first = new Map();
+    const go = (v, at) => {
+      if (v === null || typeof v !== 'object' || data.has(v)) return;
+      const seen = first.get(v);
+      if (seen !== undefined) return void twice.add(`${seen} and ${at}`);
+      first.set(v, at);
+      if (!ArrayBuffer.isView(v)) for (const key in v) go(v[key], `${at}.${key}`);
+    };
+    go(game.state, 'state');
+  };
+  /* Steps, punches, kicks and throws on both sides, through the match: its cameras' scripts among them. */
+  const press = (seat, i) => [0x40, 0x2000, 0x80, 0, 0xc0, 0x4000, 0x30, 0x8000, 0x10][(Math.floor(i / (seat === 0 ? 5 : 7)) + seat * 4) % 9];
+  for (let field = 0; field < 6000 && game.state.scene === Scene.FIGHT; field += 1) {
+    game.field([press(0, field), press(1, field)]);
+    if (field % 3 === 0) walk();
+  }
+  assert.deepEqual([...twice], [], 'no object in two places');
+});

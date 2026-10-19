@@ -32,7 +32,7 @@ import { SCREEN } from '../present/scenes/screen.ts';
 import { applyBrightness, applyLook, assetImage, crtAsked, fiftyHz, floorFade, canvas, controllers, dataUrl, json, pageRenderer, params, play, remasterMadeHere, remastered, status, touchStick, two } from './page.ts';
 import { CrtFilter } from './crt.ts';
 import { controlWords } from '../present/2d/controls.ts';
-import { drawingFiles, introFiles, withArcadeFighters } from './quick.ts';
+import { boardFighters, boardWord, drawingFiles, introFiles, withArcadeFighters } from './quick.ts';
 import { readProgress, writeProgress } from './save.ts';
 import { holdSongs } from './hold-song.ts';
 import { settings, writeSettings } from './settings.ts';
@@ -72,8 +72,9 @@ export async function playGame(): Promise<void> {
   status.textContent = 'loading';
   const picture = (name: string): Promise<ImageBitmap> => assetImage(`pictures/${name}.png`);
   const names = ['title', 'namco', 'portraits', 'select-icons-big', 'select-icons-small', 'captions', 'credits-mark', 'results', 'force-results', 'options', 'options-pads', 'options-labels', 'options-arrows', 'options-buttons', 'theater-thumbs', 'theater-cover', 'theater-caption', 'theater-disc'] as const;
-  const [[{ tables, arena, commands, scenes }, common, , introSet, introModels], pictures, sound] = await Promise.all([
-    Promise.all([loadFightTables(json).then(withArcadeFighters), loadMoveset(json, 'common'), loadTypefaces(), loadMoveset(json, 'intro'), loadIntroModels(json)]),
+  /* The disc's tables beside them: an online match swings the disc's accessories where the other side's game does not draw the board's fighters as this one does. */
+  const [[{ tables, arena, commands, scenes, disc }, common, , introSet, introModels], pictures, sound] = await Promise.all([
+    Promise.all([loadFightTables(json).then(async (loaded) => ({ ...(await withArcadeFighters(loaded)), disc: loaded.tables })), loadMoveset(json, 'common'), loadTypefaces(), loadMoveset(json, 'intro'), loadIntroModels(json)]),
     Promise.all(names.map(picture)),
     startSound(),
   ]);
@@ -95,15 +96,16 @@ export async function playGame(): Promise<void> {
   };
   const matches = new Map<string, FightData>();
   const fightData = (setup: MatchSetup): FightData | null => {
-    const [a, b] = matchMovesets(tables, setup);
-    const drawn = setup.draws === undefined ? [] : drawnMovesets(tables, setup.draws);
-    const boss = bossMoveset(tables, setup);
-    const key = `${a} ${b} ${setup.draws ?? 0} ${setup.force === undefined ? '' : boss}`;
+    const from = boardFighters.on ? tables : disc;
+    const [a, b] = matchMovesets(from, setup);
+    const drawn = setup.draws === undefined ? [] : drawnMovesets(from, setup.draws);
+    const boss = bossMoveset(from, setup);
+    const key = `${a} ${b} ${setup.draws ?? 0} ${setup.force === undefined ? '' : boss}${from === tables ? '' : ' disc'}`;
     const known = matches.get(key);
     if (known !== undefined) return known;
     const needed = [a, ...(b < 0 ? [] : [b]), ...drawn, ...(boss < 0 ? [] : [boss])].map(want);
     if (needed.some((set) => set === null)) return null;
-    const data = fightDataFor(tables, setup, (id) => movesets.get(id)!, common);
+    const data = fightDataFor(from, setup, (id) => movesets.get(id)!, common);
     matches.set(key, data);
     online?.shared(data);
     return data;
@@ -127,7 +129,13 @@ export async function playGame(): Promise<void> {
   /* The fighters whose data is in: their moveset imported, Kazuya with his files. */
   const roster = Array.from({ length: KAZUYA + 1 }, (_, fighter) => fighter).filter((fighter) => (fighter === KAZUYA ? manifest.kazuya === true : (manifest.movesets ?? []).includes(tables.roster.codes[fighter * 4]?.moveset ?? -1)));
   let online: OnlinePlay | null = null;
-  online = new OnlinePlay(game, { data: game.data, matches: () => matches.values(), roster });
+  /* An online match's fighters with the board's accessories and models, or the disc's and the console's: the fight's models let go as it changes. */
+  const drawBoard = (on: boolean): void => {
+    if (boardFighters.on === on || disc === tables) return;
+    boardFighters.on = on;
+    fight?.view.forgetFighters();
+  };
+  online = new OnlinePlay(game, { data: game.data, matches: () => matches.values(), roster, board: await boardWord(), drawBoard });
   /* The pads' vibration, felt on the gamepads. */
   const rumble = new Rumble(window);
   /*

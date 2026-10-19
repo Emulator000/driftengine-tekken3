@@ -61,6 +61,8 @@ export interface ListedFight {
   readonly wins: readonly number[];
   readonly watchers: number;
   readonly watchable: boolean;
+  /** The board's fighters its two swing (the start's `board`), where they do. */
+  readonly board?: string;
 }
 
 const OPEN = 1;

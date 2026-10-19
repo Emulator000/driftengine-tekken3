@@ -329,6 +329,16 @@ export class FightView {
     return null;
   }
 
+  /** Every side's models let go, each loaded again as the files give it now (an online match's fighters drawn with the console's models where the board's were). */
+  forgetFighters(): void {
+    for (const models of this.sides) {
+      for (const entry of models.values()) entry.fighter?.dispose();
+      models.clear();
+    }
+    this.prepared = '';
+    this.preparing = '';
+  }
+
   /** The sides a fight draws: three in Tekken Force (the third not on its final stage), else two. */
   private sidesOf(state: FightState): number {
     if (state.mode !== TEKKEN_FORCE) return 2;

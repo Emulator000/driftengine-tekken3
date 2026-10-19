@@ -222,7 +222,8 @@ release that changes only how the game is drawn or sounds plays the one before i
 0.6.7 play each other; 0.7.0, whose walls change how a match plays, plays 0.7.0 to 0.7.5; 0.7.6,
 whose sidesteps go by the view of a player who sees the fight from the other side, plays 0.7.6 and
 later, and 0.7.0 to 0.7.5 as 0.7.0's matches; 0.7.7, whose REMAKE OPTION gained two settings, plays
-0.7.6 alike; 0.7.1 and later play 0.6.5 to 0.6.7 too, without the
+0.7.6 alike; 0.7.8, whose camera a rollback puts back as it was, plays 0.7.6 and 0.7.7 alike;
+0.7.1 and later play 0.6.5 to 0.6.7 too, without the
 walls, on a server of 0.7.1 or later), and each the
 data of the fighter the other chose: a player with Kazuya is paired with one without him as long
 as neither of you plays him. The server counts each player's streak of wins (WINS:3 at the foot of
