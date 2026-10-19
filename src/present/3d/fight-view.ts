@@ -9,7 +9,7 @@
  * fighters (each enemy's soldiers and the boss loaded ahead, as they change mid-stage), and the
  * +LIFE items.
  */
-import { Camera, computeLightMatrix, createEnvironment, type RendererApi, type ShadowCasters, type SurfaceTextureHandle } from '@driftengine/core';
+import { Camera, computeLightMatrix, createEnvironment, createFrustum, frustumFromViewProjection, sphereInFrustum, type RendererApi, type ShadowCasters, type SurfaceTextureHandle } from '@driftengine/core';
 import type { ArenaTables } from '../../assets/arena.ts';
 import { handPart, wingsPart } from '../../sim/fight/hands.ts';
 import type { FightData, FightState, Fighter as FighterState } from '../../sim/fight/state.ts';
@@ -24,7 +24,7 @@ import { Puddles } from './stage/puddles.ts';
 import { lookOfStage, pixelsOf } from './stage/looks.ts';
 import { backLight, fighterLight, lightOn, lightRecord, type FighterLight } from './fighter/fighter-light.ts';
 import { Backdrop, type Ridge } from './stage/backdrop.ts';
-import { createStage, stageAtlasSize, type Stage } from './stage/stage.ts';
+import { createStage, stageAtlasSize, wholePieces, type Stage, type StagePiece } from './stage/stage.ts';
 import { ACCESSORIES, fadeScenery, FEET, GROUND_TILE, layGround, layScenery, liftOnto, newGround, newHeldScenery, newScenery, newSceneryFade } from './layout.ts';
 import { Effects } from './effects/effects.ts';
 import { BallView } from './ball.ts';
@@ -34,7 +34,8 @@ import { ArcadeBackground } from './stage/arcade-background.ts';
 import { placeParts } from './stage/pieces.ts';
 import { freeView } from './free-view.ts';
 import { mirror } from '../2d/mirror.ts';
-import { focusOf, otherSideCamera, otherSideView, type DrawnCamera } from './other-side.ts';
+import { ClosingShots, focusOf, otherSideCamera, otherSideView, type DrawnCamera } from './other-side.ts';
+import { SwordGlows } from './fighter/sword-glow.ts';
 import type { ArcadePanorama, PieceMotion } from '../../assets/manifest.ts';
 import { ForceItems } from './effects/force-items.ts';
 import { stageCodes } from '../../sim/fight/force-stage.ts';
@@ -259,6 +260,15 @@ export class FightView {
   private sceneryScale = 1;
   /** The camera as drawn this frame, where it is not the game's: an online fight seen from the other side. */
   private drawnCamera: DrawnCamera | null = null;
+  /** Seen from the other side, whether the frame shows a round's closing as the game frames it. */
+  private readonly closingShots = new ClosingShots();
+  /** Yoshimitsu's sword glow, each side's. */
+  private readonly swordGlows: SwordGlows;
+  /** The solid scenery pieces a frame draws whole, laid out afresh each pass. */
+  private readonly whole: StagePiece[] = [];
+  /** The view's bounds this frame, and per cell of the stage whether it is in view (`seeCells`). */
+  private readonly frustum = createFrustum();
+  private inView = new Uint8Array(0);
   private readonly fighterModel = new Float32Array(16);
   private readonly casting: Fighter[] = [];
   /** Per side, its head's easing (`head-ease.ts`). */
@@ -299,6 +309,7 @@ export class FightView {
     this.groundTint = [0, 1, 2].map((c) => 1 / (this.env.ambient[c]! + this.env.directionalColor[c]! * up)) as [number, number, number];
     this.white = renderer.createSurfaceTexture(new ImageData(new Uint8ClampedArray([255, 255, 255, 255]), 1, 1), { colorSpace: 'linear', filter: 'nearest', mipmap: false, wrap: 'clamp' });
     this.effects = new Effects(renderer);
+    this.swordGlows = new SwordGlows(renderer);
   }
 
   /**
@@ -440,7 +451,7 @@ export class FightView {
     if (this.preparing === key) return false;
     this.preparing = key;
     for (const fighter of fighters) this.renderer.prepareMesh(fighter!.handle, fighter!.material);
-    for (const cell of drawn.stage.cells) for (const piece of cell) this.renderer.prepareMesh(piece.mesh, piece.oneSided ? drawn.stage.oneSidedMaterial : drawn.stage.material, { translucent: true });
+    for (const cell of [...drawn.stage.cells, ...drawn.stage.blocks.flatMap((level) => level.blocks)]) for (const piece of cell) this.renderer.prepareMesh(piece.mesh, piece.oneSided ? drawn.stage.oneSidedMaterial : drawn.stage.material, { translucent: true });
     for (const object of drawn.objects) for (const cell of object.stage.cells) for (const piece of cell) this.renderer.prepareMesh(piece.mesh, object.stage.material, { translucent: true });
     /* A sunk floor's grids made, and their pipelines compiled, before the fight shows. */
     drawn.ground.prepare(state.mode === TEKKEN_FORCE ? undefined : GROUND_TILE, drawn.stage.grid === ARCADE_GRID);
@@ -519,7 +530,25 @@ export class FightView {
    * reconstructed, drawn into it, its edges resolved with the rest of the picture's (drawn after it,
    * they would be stepped, and lit at the fighters' outlines).
    */
-  private drawScenery(state: FightState, drawn: StageDrawing, cut: boolean, shown: Float32Array, fading = false): void {
+  /**
+   * The cells in view of this frame's camera: those whose sphere, placed as the scenery is, lies at
+   * all within its bounds. The frame's scenery draws leave the rest out; a stage's reflection seen
+   * from elsewhere keeps them.
+   */
+  private seeCells(drawn: StageDrawing): Uint8Array {
+    const bounds = drawn.stage.cellBounds;
+    const cells = bounds.length / 4;
+    if (this.inView.length !== cells) this.inView = new Uint8Array(cells);
+    frustumFromViewProjection(this.camera.viewProjection, this.frustum);
+    const m = this.sceneryMatrix();
+    for (let c = 0; c < cells; c += 1) {
+      const [x, y, z, r] = [bounds[c * 4]!, bounds[c * 4 + 1]!, bounds[c * 4 + 2]!, bounds[c * 4 + 3]!];
+      this.inView[c] = r > 0 && sphereInFrustum(this.frustum, m[0]! * x + m[4]! * y + m[8]! * z + m[12]!, m[1]! * x + m[5]! * y + m[9]! * z + m[13]!, m[2]! * x + m[6]! * y + m[10]! * z + m[14]!, r * this.sceneryScale) ? 1 : 0;
+    }
+    return this.inView;
+  }
+
+  private drawScenery(state: FightState, drawn: StageDrawing, cut: boolean, shown: Float32Array, fading = false, seen: Uint8Array | null = null): void {
     const renderer = this.renderer;
     const model = this.sceneryMatrix();
     /* A ceiling drawn whole over the cells left out round the camera while the camera is under it (the eye's height over the scenery's floors). */
@@ -527,7 +556,15 @@ export class FightView {
     const overhead = ceiling !== null && (this.scenery.y - (this.drawnCamera ?? state.camera.drawn).eye[1]!) / 1000 < ceiling * this.sceneryScale;
     for (const oneSided of [false, true]) {
       renderer.setMaterial(oneSided ? drawn.stage.oneSidedMaterial : drawn.stage.material);
+      if (!cut && !fading) {
+        /* The solid pieces shown whole: a block of cells in a draw a kind where all its cells are. */
+        this.whole.length = 0;
+        wholePieces(drawn.stage, shown, oneSided, overhead, this.whole, seen);
+        for (const piece of this.whole) renderer.drawTranslucentMesh(piece.mesh, model, 1, { lit: drawn.stage.lit && piece.far !== true, fog: false, depthLayer: piece.layer, reconstructed: true, depthWrite: true });
+        continue;
+      }
       drawn.stage.cells.forEach((cell, i) => {
+        if (seen !== null && seen[i] !== 1) return;
         const opacity = shown[i]!;
         /* The sky over the stage a picture, unlit as the game draws it. */
         for (const piece of cell) {
@@ -753,7 +790,9 @@ export class FightView {
     const renderer = this.renderer;
     const widening = Math.max(1, aspect / (4 / 3));
     this.adoptCamera(state, aspect);
-    this.drawnCamera = !freeView.active && mirror.on ? this.lookFromOtherSide(state) : null;
+    /* Seen from the other side, turned, but for a round's closing framed on the fighters' fronts. */
+    const framed = this.closingShots.shows(state.camera.drawn, state.round.flow);
+    this.drawnCamera = !freeView.active && mirror.on && !framed ? this.lookFromOtherSide(state) : null;
     if (freeView.active) freeView.apply(this.camera, 0.6 * aspect);
     if (this.files.remaster === true) this.cutIfJumped();
     this.casting.length = 0;
@@ -874,7 +913,7 @@ export class FightView {
         /* Remastered, an arcade stage's own floors fade as the fight's does. */
         drawn.stage.darkenFloors(this.sceneryMatrix(), fade ? this.ground.shadeOf : null);
         this.warmScenery(drawn);
-        this.drawScenery(state, drawn, false, this.sceneryFade.shown);
+        this.drawScenery(state, drawn, false, this.sceneryFade.shown, false, this.seeCells(drawn));
       }
       /*
        * The floor is solid, so the fighters' shadows and the occlusion where they stand land on it;
@@ -929,9 +968,10 @@ export class FightView {
      */
     if (drawn !== null && layout != null && scenery) {
       const shown = this.sceneryFade.shown;
-      this.drawScenery(state, drawn, true, shown);
-      this.drawScenery(state, drawn, false, shown, true);
-      this.drawScenery(state, drawn, true, shown, true);
+      const seen = this.seeCells(drawn);
+      this.drawScenery(state, drawn, true, shown, false, seen);
+      this.drawScenery(state, drawn, false, shown, true, seen);
+      this.drawScenery(state, drawn, true, shown, true, seen);
     }
     /*
      * What goes behind the fighters (the gauges, the names, the time), as the game layers it; but
@@ -951,6 +991,10 @@ export class FightView {
     }
     if (state.mode === TEKKEN_FORCE && !stageAlone) this.itemsFor()?.draw(state);
     if (!stageAlone && only.effects) this.effects.draw(this.camera, this.env, state.frameCount / 60);
+    /* Yoshimitsu's sword glow over his blade, placed as his fighter is drawn. */
+    this.swordGlows.begin();
+    posed.forEach((f, i) => this.swordGlows.add(f, state.frameCount, this.fighterMatrix(state, this.lifts[i]!)));
+    this.swordGlows.draw(this.camera, this.env, state.frameCount / 60);
     if (ball) this.ball?.drawBeams(state, aspect);
     renderer.endFrame();
     if (remastered) behind?.();

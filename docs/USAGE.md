@@ -65,8 +65,8 @@ address's.
 | `cloth=original` | Draws the fighters' cloth as the board and the console do, a leg passing through a coat's panel or a tail where it swings into it (by default each is kept clear of the legs, the disc's models' tails too, in the attract intros as well) |
 | `models=psx`, `models=rounded` | Draws the fighters with the console's meshes, or the rounded ones (by default the rounded ones, but at `quality=verylow`) |
 | `quality=high` | The whole picture: ambient occlusion and bloom over the multisampled HDR scene; the default but on a phone |
-| `quality=low` | Leaves out the ambient occlusion and the bloom; a phone's default |
-| `quality=verylow` | The picture for an entry-level phone: the scene drawn straight to the screen with no pass after it, one pixel to the CSS pixel and no more pixels than a 640 by 480 picture, thirty pictures a second (the game still runs sixty fields), and the fighters with the console's meshes. It is the default on a phone whose GPU the browser names as an entry-level part (a Mali-G31, G51, G52 or G57, an Adreno 5xx or 600s to 610s, or a PowerVR) |
+| `quality=low` | Leaves out the ambient occlusion and the bloom, the fighters' shadows from a smaller map filtered less; a phone's default |
+| `quality=verylow` | The picture for an entry-level phone: the scene drawn straight to the screen with no pass after it and no multisampling, one pixel to the CSS pixel and no more pixels than a 640 by 480 picture, the shadows from a small map filtered least, and the fighters with the console's meshes; sixty pictures a second while its frames keep up, and an even thirty for the rest of the start from the first second and a half they do not with its density at its least (the game runs sixty fields either way). It is the default on a phone whose GPU the browser names as an entry-level part (a Mali-G31, G51, G52 or G57, any Mali of one or two cores, an Adreno 5xx or 600s to 610s, or a PowerVR) |
 | `budget=N` | The frame time, in milliseconds, the picture's density is held to (20 by default): while most of a fight's frames take longer, the picture steps down toward half its pixels each way, and back up as the frames allow; `0` holds it still |
 | `touch=1`, `touch=0` | The touch pad over the picture anywhere and always, or hidden (as TOUCH PAD in REMAKE OPTION; by default on a touch screen or a phone while no gamepad is connected). A phone shows it while no gamepad is connected even with `touch=0` |
 | `stick=on`, `stick=off` | The touch pad steering with a stick where the thumb lands, or its d-pad (as TOUCH DIRECTIONS in REMAKE OPTION) |
@@ -236,7 +236,9 @@ game powers on with: the host's options and earned characters, each player's own
 you on the other side than SIDE asks (both of you asking for the same one), you see the fight from
 the other side of the stage, the game's camera turned half round the fighters as Tekken's own online play does
 it: your fighter and its plate on your side, the stage's far side behind them, nothing drawn
-mirrored, the stick's left and right with the picture. Between two games of 0.7.6 or later, the
+mirrored, the stick's left and right with the picture; a knockout's closing (the winner's pose,
+framed on the fighters' fronts) is shown as the game frames it, from its first cut to the next
+round's. Between two games of 0.7.6 or later, the
 moves into and out of the screen go by your view too: a sidestep up (a tap up, or L2) goes into
 your screen and a sidestep down out of it, as do the moves a character makes into the screen or out
 of it, while up held still jumps and down held still crouches; with an older game they go by the
@@ -478,5 +480,8 @@ each way, and back up as they allow. A frame after the game waited (an online ma
 the other side, a fight loading) or the page was hidden does not count: its time is the wait's.
 Nothing is kept between starts: each starts at its full density and picks its picture afresh (the
 address's, REMAKE OPTION's, or the device's own as above), so `quality=verylow` is drawn only where
-it is chosen, or on an entry-level phone. A setting an earlier version kept, after a fight it found
+it is chosen, or on an entry-level phone. Without the remaster, an arcade stage's scenery (sixteen
+cells by sixteen) is drawn a block of cells at a time where every cell of the block shows whole,
+and a cell out of the camera's view is left out, so the stage takes a few dozen draws a picture
+rather than hundreds. A setting an earlier version kept, after a fight it found
 too slow, is cleared at the first start.

@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { evenTime, FIFTY_HZ, pacedTime } from '../src/app/pacing.ts';
+import { evenTime, FIFTY_HZ, pacedTime, VeryLowPace } from '../src/app/pacing.ts';
 
 const FIELD = 1 / 60;
 
@@ -53,4 +53,21 @@ test("at GAME SPEED's 50 Hz a 60 Hz display runs five fields in every six frames
   assert.ok(counted.every((n) => n <= 1), 'never two fields in a frame');
   for (let i = 6; i + 6 <= counted.length; i += 6) assert.equal(counted.slice(i, i + 6).reduce((a, b) => a + b, 0), 5, `frames ${i} to ${i + 5}`);
   assert.equal(pacedTime(1000 / 60, 1), evenTime(1000 / 60), 'at 60 Hz the frame times as they were');
+});
+
+test("a very low page draws sixty pictures a second while its fight's frames keep up, and thirty from the first second and a half they come over 20 ms apart with the picture at its least density, for the rest of the start", () => {
+  const pace = new VeryLowPace();
+  const run = (frames, ms, counted = true, least = true) => Array.from({ length: frames }, () => pace.sample(ms, counted, least)).some(Boolean);
+  assert.equal(pace.half, false, 'sixty at first');
+  run(200, 17);
+  assert.equal(pace.half, false, 'keeping up: sixty still');
+  run(200, 30, true, false);
+  assert.equal(pace.half, false, 'slow, but its density still coming down: sixty still');
+  run(200, 30, false);
+  assert.equal(pace.half, false, "slow frames that do not count (after a wait, away from a fight) change nothing");
+  assert.equal(run(89, 30), false, 'not yet a second and a half of slow frames at the least density');
+  assert.equal(run(1, 30), true, 'a second and a half: thirty, said once');
+  assert.equal(pace.half, true);
+  assert.equal(run(500, 10), false, 'and kept for the rest of the start');
+  assert.equal(pace.half, true);
 });

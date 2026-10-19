@@ -13,7 +13,7 @@ import { FreeCamera } from './free-camera.ts';
 import { freeView } from '../present/3d/free-view.ts';
 import { gamepadConnected, PadInput } from './input.ts';
 import { CONSOLE_PADS, type Controllers } from '../present/2d/controls.ts';
-import { evenFrames, FIFTY_HZ } from './pacing.ts';
+import { evenFrames, FIFTY_HZ, VeryLowPace } from './pacing.ts';
 import { tellWith } from './remote-log.ts';
 import { asked, settings } from './settings.ts';
 import { onPhone, TouchPad, touchChoice, touchDevice, touchShown } from './touch.ts';
@@ -198,7 +198,7 @@ export interface Player {
 const BUDGET_MS = 20;
 /** The least share of its density the picture is drawn at. */
 const LEAST_SCALE = 0.5;
-/** The fewest milliseconds between pictures on a very low page: thirty a second, the game still running sixty fields. */
+/** The fewest milliseconds between pictures on a very low page gone to thirty a second, the game still running sixty fields. */
 const VERY_LOW_FRAME_MS = 1000 / 30 - 4;
 
 /**
@@ -214,8 +214,10 @@ const VERY_LOW_FRAME_MS = 1000 / 30 - 4;
  * none) or the page was hidden, whose time is the wait's. The density is the start's own: the next
  * starts at its full density again.
  *
- * A very low page draws thirty pictures a second at most (`VERY_LOW_FRAME_MS`), its budget doubled;
- * the fields still run sixty a second.
+ * A very low page draws sixty pictures a second while its fight's frames keep up, and thirty
+ * (`VERY_LOW_FRAME_MS`, its budget doubled) from the first second and a half they do not with its
+ * density at its least, for the rest of the start (`VeryLowPace`); the fields run sixty a second
+ * either way.
  *
  * `FrameStats` measures the fields and the drawing, for a page on another device to tell.
  *
@@ -251,8 +253,9 @@ export function play(player: Player, renderer: RendererApi, backend: string): vo
   const touch = touchShown(choice, device, false) ? new TouchPad() : null;
   if (touch !== null) input.uses(0, 'touch');
   const veryLow = quality === 'verylow';
-  const budget = Number(params.get('budget') ?? (veryLow ? 2 * BUDGET_MS : BUDGET_MS));
-  const governor = budget > 0 ? new ResolutionGovernor(1, { budgetMs: budget, minScale: LEAST_SCALE }) : null;
+  const pace = new VeryLowPace();
+  const budget = Number(params.get('budget') ?? BUDGET_MS);
+  let governor = budget > 0 ? new ResolutionGovernor(1, { budgetMs: budget, minScale: LEAST_SCALE }) : null;
   const stats = new FrameStats(() => `${backend}, ${canvas.width}x${canvas.height} at ${(governor?.scale ?? 1).toFixed(3)}`);
   tellWith(() => stats.line());
   /** When the last frame was drawn, and whether the game waited since (a field due ran none: a match waiting for the other side or leaving a field out, a fight loading) or the page was hidden: that frame's time is not the drawing's, and does not count toward the density. */
@@ -295,7 +298,7 @@ export function play(player: Player, renderer: RendererApi, backend: string): vo
         const { width, height } = canvas;
         const now = performance.now();
         const same = fields === drawnAt.fields && width === drawnAt.width && height === drawnAt.height && player.moving?.() !== true && !freeView.active;
-        if (same || (veryLow && now - lastDrawn < VERY_LOW_FRAME_MS)) {
+        if (same || (pace.half && now - lastDrawn < VERY_LOW_FRAME_MS)) {
           frames.kept += 1;
           if (same) meter.frame(now);
           return;
@@ -304,6 +307,12 @@ export function play(player: Player, renderer: RendererApi, backend: string): vo
           const counted = !waited && document.visibilityState === 'visible' && player.fighting();
           const scale = governor?.sample(now - lastDrawn, counted) ?? null;
           if (scale !== null) renderer.applyResolutionScale(scale);
+          /* A very low page that cannot keep sixty at its least density: thirty from now on, its budget doubled. */
+          if (veryLow && pace.sample(now - lastDrawn, counted, (governor?.scale ?? LEAST_SCALE) <= LEAST_SCALE + 1e-6) && governor !== null) {
+            governor = new ResolutionGovernor(1, { budgetMs: 2 * budget, minScale: LEAST_SCALE });
+            renderer.applyResolutionScale(governor.scale);
+            console.log('[tekken3 remake] very low: thirty pictures a second from now on');
+          }
         }
         lastDrawn = now;
         waited = false;

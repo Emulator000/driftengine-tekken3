@@ -165,11 +165,13 @@ DualSense's (a thumb between two keys holds both; TOUCH DIRECTIONS in REMAKE OPT
 where your left thumb lands instead), the four buttons on the right in a diamond as on the pad (2
 above, 1 and 4 either side, 3 below; a thumb between two holds both), Select and Start between the
 thumbs. A phone draws the
-picture without the ambient occlusion and the bloom, at fewer pixels while its frames run slow; an
-entry-level phone (its GPU a small Mali, an older Adreno or a PowerVR) draws the very low
-picture: fewer pixels, thirty pictures a second while the game runs at sixty, and the console's
-meshes for the fighters. Each start picks its picture afresh: nothing measured on a start before
-keeps a device on a lower one.
+picture without the ambient occlusion and the bloom, its shadows lighter, at fewer pixels while its
+frames run slow; an entry-level phone (its GPU a small Mali or one of one or two cores, an older
+Adreno or a PowerVR) draws the very low picture: fewer pixels, no multisampling, the lightest
+shadows and the console's meshes for the fighters, sixty pictures a second while it keeps up and an
+even thirty from the first moment it does not, the game running sixty either way. An arcade stage's
+scenery is drawn a block of cells at a time where it can be, and only what is in view. Each start
+picks its picture afresh: nothing measured on a start before keeps a device on a lower one.
 
 Every app carries your disc's converted data, and the home network's page serves it: all of them
 are for your own devices. Never share or upload an app built from your disc.

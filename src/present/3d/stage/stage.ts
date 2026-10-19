@@ -6,6 +6,11 @@
  * lie in over others in their plane, which orders them where a depth buffer cannot, by whether
  * they are seen from their front only, and by whether their texture has clear texels: those are
  * drawn after everything solid, so their soft edges blend over what truly lies behind them.
+ *
+ * An arcade stage's solid pieces are also merged by kind over blocks of 8, 4 and 2 cells a side
+ * (`Stage.blocks`): where every cell of a block is shown whole, the block is drawn in a draw a kind
+ * rather than one a cell and a kind (`wholePieces`), which a phone's browser spends most of a
+ * frame on.
  */
 import type { MeshHandle, RendererApi, SurfaceMaterial, SurfaceTextureHandle } from '@driftengine/core';
 
@@ -16,8 +21,12 @@ const UNIT_M = 0.008;
 const ONE_SIDED = 2;
 const LAYER_SHIFT = 2;
 const CUT = 16;
-/** A triangle's kind, past its flags: it lies wholly above the stage's ceiling height. */
+/** A triangle's kind, past its flags: it lies wholly above the stage's ceiling height; and, for a block's merging, its piece is the sky. */
 const OVERHEAD = 256;
+const FAR = 512;
+/** The grids whose cells are merged into blocks (an arcade stage's), and the blocks' sizes, largest first. */
+const BLOCKED_GRID = 16;
+const BLOCK_SIZES = [8, 4, 2] as const;
 
 /** Some of a cell's polygons, all in one layer and alike in whether their backs are drawn and whether they are cut out. */
 export interface StagePiece {
@@ -36,9 +45,19 @@ const HIGH_UP = 4.5;
 const LEVEL = 0.9;
 const DOWN = 0.3;
 
+/** The blocks of one size: per block, row by row, its cells' solid pieces merged by kind. */
+export interface StageBlocks {
+  readonly size: number;
+  readonly blocks: readonly (readonly StagePiece[])[];
+}
+
 export interface Stage {
   /** Per cell of the grid, row by row, its pieces, none where the cell has no polygons. */
   readonly cells: readonly (readonly StagePiece[])[];
+  /** An arcade stage's blocks, largest first; none on a disc stage, or where its floors are raised or fade (pieces of their own each). */
+  readonly blocks: readonly StageBlocks[];
+  /** Per cell, a sphere holding its polygons (its middle and radius, metres, in the scenery's own place); a radius of 0 where it has none. */
+  readonly cellBounds: Float32Array;
   /** The model's cell size, which the game's culling grid is built from. */
   readonly cellSize: number;
   /** The grid's cells each way. */
@@ -452,7 +471,22 @@ export function createStage(renderer: RendererApi, buffer: ArrayBuffer, texture:
   };
   /* Whether a triangle lies wholly above the ceiling's height: its piece apart from the cell's others. */
   const above = (t: number): boolean => ceiling !== null && [0, 1, 2].every((k) => positions[indices[t + k]! * 3 + 1]! > ceiling);
-  const cells = ranges.map(([start, count]) => {
+  /* Each cell's sphere: about its box's middle, through its corners. */
+  const cellBounds = new Float32Array(grid * grid * 4);
+  ranges.forEach(([start, count], c) => {
+    if (count === 0) return;
+    const [lo, hi] = [[Infinity, Infinity, Infinity], [-Infinity, -Infinity, -Infinity]];
+    for (let t = start; t < start + count; t += 1) {
+      for (let k = 0; k < 3; k += 1) {
+        const v = positions[indices[t]! * 3 + k]!;
+        lo[k] = Math.min(lo[k]!, v);
+        hi[k] = Math.max(hi[k]!, v);
+      }
+    }
+    cellBounds.set([(lo[0]! + hi[0]!) / 2, (lo[1]! + hi[1]!) / 2, (lo[2]! + hi[2]!) / 2, Math.hypot(hi[0]! - lo[0]!, hi[1]! - lo[1]!, hi[2]! - lo[2]!) / 2], c * 4);
+  });
+  /* Each cell's triangles by kind, and its pieces. */
+  const kindsOfCells = ranges.map(([start, count]) => {
     const kinds = new Map<number, number[]>();
     for (let t = start; t < start + count; t += 3) {
       const kind = kindOf(indices[t]!) | (above(t) ? OVERHEAD : 0);
@@ -460,11 +494,59 @@ export function createStage(renderer: RendererApi, buffer: ArrayBuffer, texture:
       if (list === undefined) kinds.set(kind, (list = []));
       list.push(indices[t]!, indices[t + 1]!, indices[t + 2]!);
     }
-    return [...kinds.entries()].sort(([a], [b]) => a - b).map(([kind, own]) => piece(own, kind & ~OVERHEAD, (kind & OVERHEAD) !== 0));
+    return [...kinds.entries()].sort(([a], [b]) => a - b);
   });
+  const cells = kindsOfCells.map((kinds) => kinds.map(([kind, own]) => piece(own, kind & ~OVERHEAD, (kind & OVERHEAD) !== 0)));
+  /* A block's piece: its cells' triangles of one kind, on vertices of its own. */
+  const merged = (own: number[], kind: number, overhead: boolean, far: boolean): StagePiece => {
+    const local = new Map<number, number>();
+    const used: number[] = [];
+    const corners = Uint32Array.from(own, (i) => {
+      let j = local.get(i);
+      if (j === undefined) local.set(i, (j = used.push(i) - 1));
+      return j;
+    });
+    const gather = (from: Float32Array, size: number): Float32Array => {
+      const out = new Float32Array(used.length * size);
+      used.forEach((i, j) => out.set(from.subarray(i * size, i * size + size), j * size));
+      return out;
+    };
+    const normals = smooth !== null ? gather(smooth, 3) : new Float32Array(used.length * 3);
+    if (smooth === null) for (let j = 0; j < used.length; j += 1) normals[j * 3 + 1] = 1;
+    const mesh = renderer.createMesh({ positions: gather(positions, 3), normals, colors: gather(colors, 3), emissive: new Float32Array(used.length), uvs: gather(uvs, 2), indices: corners });
+    return { mesh, layer: (kind >> LAYER_SHIFT) & 3, oneSided: (kind & ONE_SIDED) !== 0, cut: false, far, overhead };
+  };
+  const blocks: StageBlocks[] = [];
+  if (grid === BLOCKED_GRID && broad === null && !fadingFloors) {
+    for (const size of BLOCK_SIZES) {
+      const per = grid / size;
+      const list: StagePiece[][] = [];
+      for (let by = 0; by < per; by += 1) {
+        for (let bx = 0; bx < per; bx += 1) {
+          const kinds = new Map<number, number[]>();
+          for (let y = by * size; y < (by + 1) * size; y += 1) {
+            for (let x = bx * size; x < (bx + 1) * size; x += 1) {
+              const c = y * grid + x;
+              kindsOfCells[c]!.forEach(([kind, own], j) => {
+                if ((kind & CUT) !== 0) return;
+                const key = kind | (cells[c]![j]!.far === true ? FAR : 0);
+                let all = kinds.get(key);
+                if (all === undefined) kinds.set(key, (all = []));
+                for (const i of own) all.push(i);
+              });
+            }
+          }
+          list.push([...kinds.entries()].sort(([a], [b]) => a - b).map(([key, own]) => merged(own, key & ~(OVERHEAD | FAR), (key & OVERHEAD) !== 0, (key & FAR) !== 0)));
+        }
+      }
+      blocks.push({ size, blocks: list });
+    }
+  }
   const maps = { ...(look?.normal == null ? {} : { normal: look.normal, normalStrength: 1 }), ...(look?.orm == null ? {} : { orm: look.orm }) };
   return {
     cells,
+    blocks,
+    cellBounds,
     cellSize,
     grid,
     atlasWidth: width,
@@ -493,6 +575,59 @@ export function createStage(renderer: RendererApi, buffer: ArrayBuffer, texture:
       }
     },
   };
+}
+
+/**
+ * The solid pieces a frame draws whole on its side (`oneSided`), into `out`: a block's merged pieces
+ * where every cell of it with solid polygons is shown whole (`shown` 1), else its smaller blocks',
+ * and at the last each cell's own: all its solid pieces where it is shown whole, and under the
+ * ceiling (`overhead`) those wholly above it however it is shown. With `seen` (1 a cell in view),
+ * a block none of whose cells is in view is left out, and so is a cell out of view.
+ */
+export function wholePieces(stage: Stage, shown: ArrayLike<number>, oneSided: boolean, overhead: boolean, out: StagePiece[], seen: ArrayLike<number> | null = null): void {
+  const { grid, cells, blocks: levels } = stage;
+  const cellPieces = (x: number, y: number): void => {
+    const i = y * grid + x;
+    if (seen !== null && seen[i] !== 1) return;
+    const whole = shown[i] === 1;
+    for (const p of cells[i]!) if (!p.cut && p.oneSided === oneSided && (whole || (overhead && p.overhead === true))) out.push(p);
+  };
+  const allWhole = (x0: number, y0: number, size: number): boolean => {
+    for (let y = y0; y < y0 + size; y += 1) {
+      for (let x = x0; x < x0 + size; x += 1) {
+        const i = y * grid + x;
+        if (shown[i] !== 1 && cells[i]!.some((p) => !p.cut)) return false;
+      }
+    }
+    return true;
+  };
+  const anySeen = (x0: number, y0: number, size: number): boolean => {
+    if (seen === null) return true;
+    for (let y = y0; y < y0 + size; y += 1) for (let x = x0; x < x0 + size; x += 1) if (seen[y * grid + x] === 1) return true;
+    return false;
+  };
+  const visit = (level: number, bx: number, by: number): void => {
+    const { size, blocks } = levels[level]!;
+    const [x0, y0] = [bx * size, by * size];
+    if (!anySeen(x0, y0, size)) return;
+    if (allWhole(x0, y0, size)) {
+      for (const p of blocks[by * (grid / size) + bx]!) if (p.oneSided === oneSided) out.push(p);
+      return;
+    }
+    const next = levels[level + 1];
+    if (next !== undefined) {
+      const k = size / next.size;
+      for (let y = 0; y < k; y += 1) for (let x = 0; x < k; x += 1) visit(level + 1, bx * k + x, by * k + y);
+      return;
+    }
+    for (let y = y0; y < y0 + size; y += 1) for (let x = x0; x < x0 + size; x += 1) cellPieces(x, y);
+  };
+  if (levels.length === 0) {
+    for (let y = 0; y < grid; y += 1) for (let x = 0; x < grid; x += 1) cellPieces(x, y);
+    return;
+  }
+  const per = grid / levels[0]!.size;
+  for (let by = 0; by < per; by += 1) for (let bx = 0; bx < per; bx += 1) visit(0, bx, by);
 }
 
 /** A stage mesh's atlas size, which its ground's texture coordinates are in too. */

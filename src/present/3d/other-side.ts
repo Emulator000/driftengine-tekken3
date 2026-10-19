@@ -3,8 +3,11 @@
  * side is the other one's: the game's camera turned half round the upright line through the point it
  * looks at (its focus, as the game finds one), so it moves as the game's camera moves and turns as it
  * turns, each fighter standing where the other stood, the stage behind them its far side, and nothing
- * drawn mirrored.
+ * drawn mirrored. A round's closing (the winner's pose, the finishing shot, framed on the fighters'
+ * fronts) is shown as the game frames it, the picture changing sides only where its camera cuts.
  */
+
+import { Flow } from '../../sim/fight/flow.ts';
 
 /** The game's camera as the scenery's layout reads it: its eye (the game's millimetres), its yaw and its pitch (4096ths of a turn). */
 export interface DrawnCamera {
@@ -14,6 +17,34 @@ export interface DrawnCamera {
 }
 
 const TURN = 4096;
+/** A cut: the eye moved more than a metre (the game's millimetres), or the camera turned more than 20 degrees. */
+const CUT_MOVE = 1000;
+const CUT_TURN = (20 / 360) * TURN;
+
+/** Whether the game's camera cut between two frames, rather than moved. */
+export function cameraCut(last: DrawnCamera, now: DrawnCamera): boolean {
+  const moved = Math.hypot(now.eye[0]! - last.eye[0]!, now.eye[1]! - last.eye[1]!, now.eye[2]! - last.eye[2]!);
+  const turned = Math.abs(((((now.yaw - last.yaw) % TURN) + TURN + TURN / 2) % TURN) - TURN / 2);
+  return moved > CUT_MOVE || turned > CUT_TURN;
+}
+
+/**
+ * Whether each frame of a fight seen from the other side shows the game's own camera rather than
+ * turned half round: a round's closing from its first cut on (a knockout's closing cuts to the
+ * winner's pose), until the next cut outside it (the next round's opening). A closing on the fight's
+ * own camera, which never cuts (a time up's), stays turned.
+ */
+export class ClosingShots {
+  private own = false;
+  private last: DrawnCamera | null = null;
+
+  /** This frame, from the game's camera and the round's flow. */
+  shows(camera: DrawnCamera, flow: number): boolean {
+    if (this.last !== null && cameraCut(this.last, camera)) this.own = flow === Flow.CLOSING_START || flow === Flow.CLOSING;
+    this.last = { eye: [...camera.eye], yaw: camera.yaw, pitch: camera.pitch };
+    return this.own;
+  }
+}
 
 /**
  * Where the camera looks, across the floor (the game's x and z), as the game finds a camera's focus:

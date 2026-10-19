@@ -38,8 +38,16 @@ import { createMover, type MeshHandle, type Mover, type PointSkinData, type Poin
 import type { Rotation } from '../../../motion/motion.ts';
 import { HelperRig, type Frame, type RigNode } from '../../../mod/kazuya/tekken4.ts';
 import { hingesOf, HIPS, keepClothOff, LEGS, newLimb, placeLimb, profileOf, unturn, type LimbNow } from './garment.ts';
+import { jointFlags, lowestPoint } from './lowest.ts';
 
 const FTR_MAGIC = 0x31525446;
+/** A joint set's flags (`jointFlags`), made once a set. */
+const flagged = new WeakMap<ReadonlySet<number>, Uint8Array>();
+const flagsOf = (joints: ReadonlySet<number>): Uint8Array => {
+  let flags = flagged.get(joints);
+  if (flags === undefined) flagged.set(joints, (flags = jointFlags(joints)));
+  return flags;
+};
 /** The most joints a vertex hangs on. */
 const INFLUENCES = 4;
 /** A step whose shape keeps the shape drawn. */
@@ -560,31 +568,7 @@ export class Fighter {
    */
   lowest(feet: ReadonlySet<number>, leftOut: ReadonlySet<number>, out: { body: number; feet: number }): void {
     const { joints, weights, points } = this.data;
-    const f = this.matrices;
-    out.body = Infinity;
-    out.feet = Infinity;
-    vertices: for (let at = 0; at < weights.length; at += INFLUENCES) {
-      let y = 0;
-      let sum = 0;
-      let heaviest = 0;
-      let on = -1;
-      for (let k = at; k < at + INFLUENCES; k += 1) {
-        const w = weights[k]!;
-        if (w === 0) continue;
-        const joint = joints[k]!;
-        /* A kept point's joint stands for the joint it hangs on. */
-        const hung = joint < this.slots ? joint : this.worn!.hangs[joint - this.slots]!;
-        if (leftOut.has(hung)) continue vertices;
-        if (w > heaviest) [heaviest, on] = [w, hung];
-        const o = joint * 16;
-        y += w * (f[o + 1]! * points[k * 3]! + f[o + 5]! * points[k * 3 + 1]! + f[o + 9]! * points[k * 3 + 2]! + f[o + 13]!);
-        sum += w;
-      }
-      /* A vertex weighing nothing (a picture the face does not show) is drawn nowhere. */
-      if (sum === 0) continue;
-      if (y < out.body) out.body = y;
-      if (feet.has(on) && y < out.feet) out.feet = y;
-    }
+    lowestPoint(joints, weights, points, this.matrices, this.slots, this.worn?.hangs ?? null, flagsOf(feet), flagsOf(leftOut), out);
   }
 
   /**

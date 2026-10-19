@@ -2,7 +2,8 @@
  * An online fight seen from the other side of the stage (as the player whose side is the other one's
  * sees it): the game's camera turned half round the point it looks at, its focus, so it moves as the
  * game's camera moves, turning as it turns, and each fighter stands where the other stood; the game's
- * camera, for the scenery's layout, turned alike.
+ * camera, for the scenery's layout, turned alike. A round's closing (the winner's pose, the
+ * finishing shot) is shown as the game frames it, from its first cut to the next round's.
  */
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
@@ -10,7 +11,8 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { focusOf, otherSideCamera, otherSideView } from '../src/present/3d/other-side.ts';
+import { cameraCut, ClosingShots, focusOf, otherSideCamera, otherSideView } from '../src/present/3d/other-side.ts';
+import { Flow } from '../src/sim/fight/flow.ts';
 
 /** A view (world to camera, column-major) looking from `eye` at `at`, y up: the engine's axes, metres. */
 function lookAt(eye, at) {
@@ -103,4 +105,58 @@ test("on a fight from the imported data, the turned camera and the turned view a
   const eye = [0, 1, 2].map((i) => -(view[i * 4] * view[12] + view[i * 4 + 1] * view[13] + view[i * 4 + 2] * view[14]));
   const turnedEye = engine(turned.eye);
   near([eye[0], eye[2]], [turnedEye[0], turnedEye[2]], 0.05, "the view's eye the turned camera's");
+});
+
+test("the game's camera cut between two frames: its eye moved more than a metre, or it turned more than 20 degrees, either way round", () => {
+  const at = (eye, yaw) => ({ eye, yaw, pitch: 0 });
+  assert.equal(cameraCut(at([0, -1000, -5000], 0), at([999, -1000, -5000], 0)), false, 'a metre less a millimetre');
+  assert.equal(cameraCut(at([0, -1000, -5000], 0), at([0, -1000, -6001], 0)), true, 'a metre and a millimetre');
+  assert.equal(cameraCut(at([0, 0, 0], 100), at([0, 0, 0], 327)), false, '227ths of a 4096th turn: under 20 degrees');
+  assert.equal(cameraCut(at([0, 0, 0], 100), at([0, 0, 0], 329)), true, 'over 20 degrees');
+  assert.equal(cameraCut(at([0, 0, 0], 4090), at([0, 0, 0], 20)), false, 'across a whole turn, 26ths');
+  assert.equal(cameraCut(at([0, 0, 0], -7), at([0, 0, 0], 4000)), false, 'a yaw below zero against one near a turn');
+});
+
+test("a fight seen from the other side shows a round's closing as the game frames it from the closing's first cut, and turns again at the next cut outside it; a closing the camera never cuts in (a time up's) stays turned", () => {
+  const shots = new ClosingShots();
+  const at = (x, yaw = 0) => ({ eye: [x, -1000, -5000], yaw, pitch: 0 });
+  const seen = (steps) => steps.map(([camera, flow]) => shots.shows(camera, flow));
+  assert.deepEqual(seen([[at(0), Flow.FIGHTING], [at(40), Flow.FIGHTING], [at(80), Flow.KNOCKED_OUT]]), [false, false, false], 'the fight and its knockout, turned');
+  assert.deepEqual(seen([[at(120), Flow.CLOSING], [at(160), Flow.CLOSING]]), [false, false], 'a closing on the fight\'s own camera: turned still');
+  assert.deepEqual(seen([[at(4000, 900), Flow.CLOSING], [at(4050, 920), Flow.CLOSING], [at(4100, 940), Flow.OVER]]), [true, true, true], "from the closing's cut on, the game's own camera");
+  assert.deepEqual(seen([[at(4100, 940), Flow.OPENING], [at(0, 0), Flow.OPENING], [at(30, 0), Flow.FIGHTING]]), [true, false, false], "until the next round's opening cuts away");
+  assert.deepEqual(seen([[at(9000, 2000), Flow.FIGHTING]]), [false], 'a cut in the fight (a throw\'s shot) changes nothing');
+  assert.deepEqual(seen([[at(9000, 2000), Flow.CLOSING_START], [at(0, 0), Flow.CLOSING_START]]), [false, true], 'the closing\'s start is the closing');
+});
+
+test("on a match from the imported data, the closings after knockouts are shown as the game frames them, each from a cut, and never a field of the fight; the picture changes sides only where the game's camera cuts", { skip, timeout: 120_000 }, async () => {
+  const json = async (name) => JSON.parse(readFileSync(path.join(assets, name), 'utf8'));
+  const { loadFightTables, loadMoveset } = await import('../src/assets/load.ts');
+  const { fightDataFor, matchMovesets } = await import('../src/sim/fight/match.ts');
+  const { Fight } = await import('../src/sim/fight/fight.ts');
+  const { tables } = await loadFightTables(json);
+  /* The computer at its hardest against a player who stands: knockouts, each round. */
+  const setup = { stage: 8, difficulty: 2, entrants: [{ roster: 0, costume: 0, computer: true }, { roster: 4, costume: 0, computer: false }] };
+  const [first, second] = matchMovesets(tables, setup);
+  const two = (n) => String(n).padStart(2, '0');
+  const movesets = new Map([[first, await loadMoveset(json, two(first))], [second, await loadMoveset(json, two(second))]]);
+  const fight = Fight.quick(fightDataFor(tables, setup, (id) => movesets.get(id), await loadMoveset(json, 'common')), setup);
+  const state = fight.state;
+  const shots = new ClosingShots();
+  let last = null;
+  let own = false;
+  let closings = 0;
+  for (let field = 0; field < 9000 && state.round.flow !== Flow.OVER; field += 1) {
+    fight.field([0, 0]);
+    const camera = state.camera.drawn;
+    const shows = shots.shows(camera, state.round.flow);
+    if (shows !== own) {
+      assert.ok(last !== null && cameraCut(last, camera), `field ${field}: changed sides where the camera cut`);
+      if (shows) closings += 1;
+      own = shows;
+    }
+    if (state.round.flow === Flow.FIGHTING) assert.equal(shows, false, `field ${field}: the fight turned`);
+    last = { eye: [...camera.eye], yaw: camera.yaw, pitch: camera.pitch };
+  }
+  assert.ok(closings >= 1, `a knockout's closing shown as the game frames it (${closings})`);
 });
