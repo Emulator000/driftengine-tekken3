@@ -295,8 +295,10 @@ export class Fighter {
   readonly material: SurfaceMaterial<SurfaceTextureHandle>;
   /** Which object its draws are, frame to frame, for a reconstructing renderer. */
   readonly mover: Mover = createMover();
-  /** Light added over its own colours, linear: the hit flash (`light`). */
+  /** Light added over its own colours, linear: the stage's back colour and the hit flash (`light`). */
   private readonly glow: [number, number, number] = [0, 0, 0];
+  /** Each vertex's colour, the texture's times it: white, or as `recolour` lays it. */
+  private readonly colours: Float32Array;
   private readonly renderer: RendererApi;
   private readonly mesh: FighterMesh;
   private readonly texture: SurfaceTextureHandle;
@@ -345,18 +347,19 @@ export class Fighter {
     this.onPictures = Uint32Array.from(Array.from(mesh.pictureOf.keys()).filter((i) => mesh.pictureOf[i] !== 0));
     const normals = new Float32Array(n * 3);
     for (let i = 0; i < n; i += 1) normals[i * 3 + 1] = 1;
+    this.colours = new Float32Array(n * 3).fill(1);
     this.handle = renderer.createMesh(
       {
         positions: new Float32Array(n * 3),
         normals,
-        colors: new Float32Array(n * 3).fill(1),
+        colors: this.colours,
         emissive: new Float32Array(n).fill(1),
         specular: new Float32Array(n).fill(look === null ? 0 : 0.12),
         roughness: new Float32Array(n).fill(look === null ? 1 : 0.7),
         uvs: mesh.uv,
         indices: mesh.indices,
       },
-      { dynamic: true },
+      { dynamic: true, dynamicColors: true },
     );
     this.data = { joints: new Float32Array(n * INFLUENCES), weights: new Float32Array(n * INFLUENCES), points: new Float32Array(n * INFLUENCES * 3), normals: new Float32Array(n * 3) };
     for (let i = 0; i < n; i += 1) this.skinVertex(i);
@@ -377,6 +380,26 @@ export class Fighter {
     this.glow[0] = r;
     this.glow[1] = g;
     this.glow[2] = b;
+  }
+
+  /**
+   * Each vertex's colour as `colour` gives it for the vertex's normal as last posed (the player's
+   * axes, a unit), written from `at` of the array: a light of its own laid over the scene's.
+   */
+  recolour(colour: (x: number, y: number, z: number, out: Float32Array, at: number) => void): void {
+    const { joints, normals } = this.data;
+    const f = this.matrices;
+    for (let i = 0; i < this.mesh.vertexCount; i += 1) {
+      /* The normal turns on the vertex's first joint, as the skin turns it. */
+      const o = joints[i * INFLUENCES]! * 16;
+      const [nx, ny, nz] = [normals[i * 3]!, normals[i * 3 + 1]!, normals[i * 3 + 2]!];
+      const x = f[o]! * nx + f[o + 4]! * ny + f[o + 8]! * nz;
+      const y = f[o + 1]! * nx + f[o + 5]! * ny + f[o + 9]! * nz;
+      const z = f[o + 2]! * nx + f[o + 6]! * ny + f[o + 10]! * nz;
+      const l = Math.hypot(x, y, z) || 1;
+      colour(x / l, y / l, z / l, this.colours, i * 3);
+    }
+    this.renderer.updateMeshColors(this.handle, this.colours);
   }
 
   /** Its skin, mesh and texture let go, once the match no longer has it. */

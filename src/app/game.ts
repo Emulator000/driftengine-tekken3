@@ -15,6 +15,7 @@ import { MusicMode } from '../sim/sound/music.ts';
 import { FightStep, matchSetup } from '../sim/game/fight-scene.ts';
 import { MenuMode, startMode } from '../sim/game/menu.ts';
 import { OgreChangeShows } from '../sim/game/ogre-change.ts';
+import { OnlineStatus } from '../sim/game/online-page.ts';
 import { displayShift } from '../sim/game/options.ts';
 import { applySchedule, checkSurvivalRecord, checkTimeRecord, earnMode, recordStageTime } from '../sim/game/records.ts';
 import { survivorRank } from '../sim/game/arcade.ts';
@@ -28,7 +29,7 @@ import { PauseScreen } from '../present/hud/pause.ts';
 import { loadTypefaces } from '../present/2d/typefaces.ts';
 import { ScenePresenter } from '../present/scenes/scenes.ts';
 import { SCREEN } from '../present/scenes/screen.ts';
-import { applyBrightness, applyLook, assetImage, crtAsked, floorFade, canvas, controllers, dataUrl, json, pageRenderer, params, play, remasterMadeHere, remastered, status, two } from './page.ts';
+import { applyBrightness, applyLook, assetImage, crtAsked, fiftyHz, floorFade, canvas, controllers, dataUrl, json, pageRenderer, params, play, remasterMadeHere, remastered, status, touchStick, two } from './page.ts';
 import { CrtFilter } from './crt.ts';
 import { controlWords } from '../present/2d/controls.ts';
 import { drawingFiles, introFiles, withArcadeFighters } from './quick.ts';
@@ -63,6 +64,8 @@ const WARM_FRAME_MS = 24;
 const WARM_MOST_MS = 15000;
 /** The most fields the attract intro runs in one tick to catch up with its song. */
 const MOST_CATCH_UP = 8;
+/** The frames an online match's fight is drawn hidden before this side says it is ready: past the remaster's reflection, baked a few frames after its stage is laid. */
+const WARM_FRAMES = 8;
 
 export async function playGame(): Promise<void> {
   const { renderer, backend } = await pageRenderer();
@@ -152,7 +155,8 @@ export async function playGame(): Promise<void> {
   game.state.remake.remasterMade = remasterMadeHere();
   /*
    * REMAKE OPTION's settings: kept as they change, the frame rate shown or hidden at once (and `F`'s
-   * switch shown on the page), the remaster's look, brightness and floors changed at once, and on leaving the page with one
+   * switch shown on the page), the game's speed, the touch pad's directions and the remaster's look,
+   * brightness and floors changed at once, and on leaving the page with one
    * a restart applies changed, the progress saved where auto save keeps it, then the page started
    * again.
    */
@@ -164,6 +168,8 @@ export async function playGame(): Promise<void> {
   const crt = new CrtFilter();
   crt.on = crtAsked();
   let crtOn = settings.crt;
+  let speedOn = settings.speed;
+  let stickOn = settings.touchStick;
   let restarting = false;
   const settle = (): void => {
     const state = game.state;
@@ -180,6 +186,10 @@ export async function playGame(): Promise<void> {
     floorFadeOn = remake.floorFade;
     if (remake.crt !== crtOn) crt.on = remake.crt === 1;
     crtOn = remake.crt;
+    if (remake.speed !== speedOn) fiftyHz.on = remake.speed === 1;
+    speedOn = remake.speed;
+    if (remake.touchStick !== stickOn) touchStick.on = remake.touchStick === 1;
+    stickOn = remake.touchStick;
     if ((Object.keys(remake) as (keyof typeof remake)[]).some((key) => remake[key] !== keptSettings[key])) {
       keptSettings = { ...remake };
       writeSettings(keptSettings);
@@ -373,6 +383,8 @@ export async function playGame(): Promise<void> {
       hud.newMatch(data, state.world);
       hud.prepare(state.world, canvas.width, canvas.height);
       const ready = view.prepare(state.world);
+      /* An online match's fight drawn hidden its first few frames before this side says it is ready (`warmingFight`). */
+      if (state.step === FightStep.HOLD && online?.playing === true) return ready && warmed.key === warmKey() && WARM_FRAMES <= warmed.frames;
       return state.step === FightStep.WAIT || ready;
     }
     if (introSetUp(state)) return introView(state.attract.intro).prepare(state.world) && introWarmed(state.attract.intro);
@@ -382,6 +394,57 @@ export async function playGame(): Promise<void> {
   /* The fighters the HUD's names were set for; what the last frame drawn showed. */
   let named = '';
   let shown: string | null = null;
+  /*
+   * An online match's fight, on its last loading field, drawn its first few frames behind the versus
+   * screen (each frame the fight, then the versus screen's picture again over it) before this side
+   * says it is ready: a device slow to draw its first pictures of a fight (its pipelines, its
+   * shadows, the remaster's reflection) is slow behind its own versus screen, not in the fight while
+   * the other waits in it. The fight it was drawn for, by its stage and fighters, and how often.
+   */
+  const warmed = { key: '', frames: 0 };
+  const warmKey = (): string => {
+    const world = game.state.world;
+    return `${world.stage} ${world.fighters[0]!.rosterCode} ${world.fighters[0]!.costume} ${world.fighters[1]!.rosterCode} ${world.fighters[1]!.costume}`;
+  };
+  const warmingFight = (): boolean => {
+    const state = game.state;
+    if (online?.playing !== true || state.scene !== Scene.FIGHT || state.step !== FightStep.HOLD || game.fightData === null) return false;
+    if (!fightFor(game.fightData).view.prepare(state.world)) return false;
+    const key = warmKey();
+    if (warmed.key !== key) Object.assign(warmed, { key, frames: 0 });
+    return warmed.frames < WARM_FRAMES;
+  };
+  /** The fight's frame: its 3D, the HUD behind and over it, a mode's own 2D over it, a watched fight's menu, the pause menu and a dissolve. */
+  const drawFight = (width: number, height: number, now: number): void => {
+    const state = game.state;
+    const data = game.fightData!;
+    const aspect = height > 0 ? width / height : 1;
+    const { view, hud, pause } = fightFor(data);
+    const world = state.world;
+    const fighters = `${world.fighters[0]!.rosterCode} ${world.fighters[1]!.rosterCode}`;
+    if (named !== fighters) {
+      named = fighters;
+      hud.newMatch(data, world);
+    }
+    hud.players = online?.players ?? null;
+    hud.streaks = online?.streaks ?? null;
+    hud.prepare(world, width, height);
+    pause.prepare(world, width, height);
+    view.render(
+      world,
+      aspect,
+      () => hud.drawBack(),
+      () => {
+        hud.drawFront();
+        presenter.renderOverFight(state, width, height);
+        /* A watched fight's SPECTATING and its menu, over it. */
+        const menu = online?.watchOverlay() ?? null;
+        if (menu !== null) presenter.renderOverFight(menu, width, height);
+        pause.draw();
+        presenter.renderDissolve(width, height, now);
+      },
+    );
+  };
   /*
    * The stage's song waits for the fight to show: a fight's first round starts it while the
    * versus screen it loaded under still shows, or dissolves into the fight's first frame, and it
@@ -534,6 +597,14 @@ export async function playGame(): Promise<void> {
          */
         if (shows !== null) mirror.on = online?.mirroredSide === true && shows === 'fight';
         placeDisplay();
+        if (warmingFight()) {
+          mirror.on = online?.mirroredSide === true;
+          drawFight(width, height, now);
+          if (!presenter.redrawLast(width, height)) presenter.hold(width, height, now);
+          warmed.frames += 1;
+          online?.drawn(false);
+          return;
+        }
         if (shows === null) {
           online?.drawn(false);
           presenter.hold(width, height, now);
@@ -562,35 +633,12 @@ export async function playGame(): Promise<void> {
           presenter.render(state, width, height, false, now);
           return;
         }
-        const { view, hud, pause } = fightFor(data!);
-        const world = state.world;
-        const fighters = `${world.fighters[0]!.rosterCode} ${world.fighters[1]!.rosterCode}`;
-        if (named !== fighters) {
-          named = fighters;
-          hud.newMatch(data!, world);
-        }
-        hud.players = online?.players ?? null;
-        hud.streaks = online?.streaks ?? null;
-        hud.prepare(world, width, height);
-        pause.prepare(world, width, height);
-        view.render(
-          world,
-          aspect,
-          () => hud.drawBack(),
-          () => {
-            hud.drawFront();
-            presenter.renderOverFight(state, width, height);
-            /* A watched fight's SPECTATING and its menu, over it. */
-            const menu = online?.watchOverlay() ?? null;
-            if (menu !== null) presenter.renderOverFight(menu, width, height);
-            pause.draw();
-            presenter.renderDissolve(width, height, now);
-          },
-        );
+        drawFight(width, height, now);
       },
-      /* A watched fight's menu drawn while it is open, though no field plays under it. */
-      moving: () => presenter.moving || (introSetUp(game.state) && !introWarmed(game.state.attract.intro)) || online?.watchMenuOpen === true,
+      /* A watched fight's menu drawn while it is open, though no field plays under it; an online fight drawn hidden before it shows. */
+      moving: () => presenter.moving || (introSetUp(game.state) && !introWarmed(game.state.attract.intro)) || online?.watchMenuOpen === true || warmingFight(),
       fighting: () => shown === 'fight',
+      online: () => online?.playing === true || online?.watching === true || game.state.online.status !== OnlineStatus.OFF,
       probe: () => ({ scene: game.state.scene, sceneState: game.state.step, sound: sound?.probe() ?? null, song: songProbe(), movie: movie.probe(), online: online?.probe() ?? null }),
       about: () => {
         const state = game.state;

@@ -38,3 +38,27 @@ test('each Arcade clear with a new character earns the next one, in the game\'s 
   }
   assert.deepEqual(earned, ORDER);
 });
+
+test("an Arcade clear with a character the remake adds (Kazuya, 22) earns the next one as the game's own do, once, and is kept with the progress", { skip }, async () => {
+  const { tables, scenes } = await loadFightTables(json);
+  const game = new Game({ tables, scenes, fightData: () => null, introData: () => assert.fail('no intro plays') });
+  const state = game.state;
+  startMode(state, MenuMode.ARCADE, 1);
+  const KAZUYA = 22;
+  const before = state.records.earnedRoster;
+  recordEnding(state, scenes, KAZUYA, 0);
+  assert.equal(Math.log2((state.records.earnedRoster & ~before) >>> 0), ORDER[0], "his first clear earns the game's first");
+  const once = state.records.earnedRoster;
+  recordEnding(state, scenes, KAZUYA, 0);
+  assert.equal(state.records.earnedRoster, once, 'a second clear with him earns nothing');
+  recordEnding(state, scenes, 0, 0);
+  assert.equal(Math.log2((state.records.earnedRoster & ~once) >>> 0), ORDER[1], "and a clear with one of the game's own the next");
+  const { progressOf, restoreProgress } = await import('../src/sim/game/save.ts');
+  const kept = progressOf(state);
+  const fresh = new Game({ tables, scenes, fightData: () => null, introData: () => assert.fail('no intro plays') });
+  restoreProgress(fresh.state, kept);
+  startMode(fresh.state, MenuMode.ARCADE, 1);
+  const earned = fresh.state.records.earnedRoster;
+  recordEnding(fresh.state, scenes, KAZUYA, 0);
+  assert.equal(fresh.state.records.earnedRoster, earned, 'his ending kept with the progress: not counted again');
+});

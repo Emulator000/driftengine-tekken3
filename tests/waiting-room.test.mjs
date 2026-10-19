@@ -24,6 +24,34 @@ test("the waiting room's practice reset to the mode menu (Practice's RESET) leav
   assert.deepEqual([game.online.warming, game.online.ask, game.online.opens], [0, 'cancel', 1], 'nothing waited for any more, the search cancelled, the page to open');
 });
 
+test('the waiting room says why the last match ended before its fight did, over what is waited for', () => {
+  const game = blankGameState();
+  Object.assign(game.online, { warming: 2, status: OnlineStatus.QUEUED, lines: ['SEARCHING FOR AN OPPONENT', ''], why: 'THE CONNECTION WAS LOST' });
+  game.scene = Scene.FIGHT;
+  warmUpFrame(game, {}, 320, 'fight');
+  const why = game.printed.find((run) => run.text === 'THE CONNECTION WAS LOST');
+  const searching = game.printed.find((run) => run.text.startsWith('SEARCHING FOR AN OPPONENT'));
+  assert.ok(why !== undefined && searching !== undefined, 'both shown');
+  assert.ok(why.y < searching.y, 'the reason over the search');
+});
+
+test("an opponent found sounds the game's challenger as the offer's card first shows, once", () => {
+  const game = blankGameState();
+  Object.assign(game.online, { warming: 2, status: OnlineStatus.QUEUED, lines: ['SEARCHING FOR AN OPPONENT', ''] });
+  game.scene = Scene.FIGHT;
+  const data = { sound: { volumes: new Array(16).fill(0x7f) } };
+  /* The challenger's sound (0x49a1) as the sound driver is told it: on its voice, bank, program and tone. */
+  const challenger = () => game.world.sound.commands.filter((c) => c.key === 'on' && c.voice === 2 && c.bank === 0 && c.program === 2 && c.tone === 1).length;
+  warmUpFrame(game, data, 320, 'fight');
+  assert.equal(challenger(), 0, 'nothing while searching');
+  Object.assign(game.online, { status: OnlineStatus.OFFERED, lines: ['OPPONENT FOUND', 'GUEST'] });
+  for (let frame = 0; frame < 30; frame += 1) warmUpFrame(game, data, 320, 'fight');
+  assert.equal(challenger(), 1, 'as the card shows, once');
+  Object.assign(game.online, { status: OnlineStatus.GREETING });
+  warmUpFrame(game, data, 320, 'fight');
+  assert.equal(challenger(), 1, 'not again as the match starts');
+});
+
 test("a player in the waiting room's fight is available once that fight has been drawn on the screen a second running, not before: the versus screen, its dissolve, Practice's menu, a page out of sight", () => {
   const game = blankGameState();
   Object.assign(game.online, { warming: 2, status: OnlineStatus.QUEUED });

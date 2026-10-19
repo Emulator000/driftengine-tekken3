@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { loadFightTables, loadMoveset } from '../src/assets/load.ts';
-import { cameraInWalls, insideWalls, layScenery, newScenery } from '../src/present/3d/layout.ts';
+import { insideWalls, layScenery, newScenery } from '../src/present/3d/layout.ts';
 import { wallReach } from '../src/present/3d/stage/stage.ts';
 import { Fight } from '../src/sim/fight/fight.ts';
 import { fightDataFor, matchMovesets } from '../src/sim/fight/match.ts';
@@ -91,7 +91,7 @@ const GRID = { cellSize: 451, grid: 16 };
 const CELL = GRID.cellSize * 8;
 const RIGHT = 0x2000;
 
-test('the scenery laid fixed stands at the middle unturned wherever the fighters are, all drawn while the camera is inside the walls, and past them hides only what is between', { skip }, async () => {
+test('the scenery laid fixed stands at the middle unturned wherever the fighters are, all drawn while the camera is inside the walls, and past them hides only what is between it and them', { skip }, async () => {
   const { tables, arena } = await loadFightTables(json);
   const setup = { stage: 4, walls: 1, entrants: [{ roster: 0, costume: 0, computer: false }, { roster: 9, costume: 0, computer: false }] };
   const [first, second] = matchMovesets(tables, setup);
@@ -104,30 +104,75 @@ test('the scenery laid fixed stands at the middle unturned wherever the fighters
   for (let field = 0; field < 1500 && Math.abs(b.skeleton.base.translation[0]) < WALL_REACH - BODY - 50; field += 1) fight.field([RIGHT, RIGHT]);
   const scale = 1.2;
   const out = newScenery();
-  /* The camera as the fight draws it: kept inside the walls, never within 2.5 m of the fighters. */
+  /* A camera inside the walls, at the game's camera's height. */
   const mid = [(a.skeleton.base.translation[0] + b.skeleton.base.translation[0]) / 2, (a.skeleton.base.translation[2] + b.skeleton.base.translation[2]) / 2];
-  const eye = cameraInWalls(state.camera.drawn.eye, mid, WALL_REACH - 300, 2500);
-  layScenery(state, data, arena, GRID, { widening: 1, fixed: { scale, eye } }, out);
+  const eye = [mid[0] - 2500, state.camera.drawn.eye[1], mid[1] - 3000];
+  layScenery(state, data, arena, GRID, { widening: 1, fixed: { scale }, camera: { ...state.camera.drawn, eye } }, out);
   assert.deepEqual([out.x, out.z, out.yaw], [0, 0, 0], 'at the middle, unturned');
   /* A cell of a point of the world, in the scenery's own units (unturned, scaled). */
   const cellOf = (x, z) => Math.floor(x / scale / CELL + 8) + 16 * Math.floor(z / scale / CELL + 8);
   assert.ok(insideWalls(eye[0], eye[2], WALL_REACH), 'the camera inside the walls');
   assert.ok(out.cells.slice(0, 256).every((v) => v > 0), 'with the camera inside the walls, nothing stands between it and the fighters but the scenery is all drawn');
-  /* A camera past the wall behind it (as the free camera may be): the cells its lines to the fighters cross left out, not those by the fighters. */
-  const outside = [eye[0], eye[1], eye[2] - 6000];
-  layScenery(state, data, arena, GRID, { widening: 1, fixed: { scale, eye: outside } }, out);
+  /* A camera past a wall (where the game's camera stands for fighters along it, as drawn): the cells its lines to the fighters cross left out, not those by the fighters. */
+  const outside = [mid[0], eye[1], mid[1] - 13000];
+  layScenery(state, data, arena, GRID, { widening: 1, fixed: { scale }, camera: { ...state.camera.drawn, eye: outside } }, out);
   const crossed = new Set();
   for (const f of [a, b]) {
     for (let k = 0; k <= 64; k += 1) crossed.add(cellOf(outside[0] + ((f.skeleton.base.translation[0] - outside[0]) * k) / 64, outside[2] + ((f.skeleton.base.translation[2] - outside[2]) * k) / 64));
   }
+  /* Along the view to the fighters' midpoint, how far a point lies from the camera; a cell's middle in the world. */
+  const length = Math.hypot(mid[0] - outside[0], mid[1] - outside[2]);
+  const depth = (x, z) => ((x - outside[0]) * (mid[0] - outside[0]) + (z - outside[2]) * (mid[1] - outside[2])) / length;
+  const nearer = Math.min(...[a, b].map((f) => depth(f.skeleton.base.translation[0], f.skeleton.base.translation[2])));
   let hidden = 0;
   out.cells.forEach((v, cell) => {
     if (cell >= 256 || v > 0) return;
     hidden += 1;
-    assert.ok(crossed.has(cell), `cell ${cell} hidden off the lines`);
+    const [x, z] = [((cell % 16) - 8 + 0.5) * CELL * scale, (Math.floor(cell / 16) - 8 + 0.5) * CELL * scale];
+    assert.ok(crossed.has(cell) || depth(x, z) < nearer, `cell ${cell} hidden off the lines and past the fighters`);
   });
   assert.ok(hidden > 0, 'the wall between hidden');
   for (const f of [a, b]) assert.ok(out.cells[cellOf(f.skeleton.base.translation[0], f.skeleton.base.translation[2])] > 0, "each fighter's own cell drawn");
+});
+
+test('an arcade stage fixed in place, the camera past a wall: every cell nearer it than the fighters left out, beside its lines to them too, and those past the walls on its side of them, and what stands beyond them drawn', { skip }, async () => {
+  const { tables, arena } = await loadFightTables(json);
+  const setup = { stage: 4, walls: 1, entrants: [{ roster: 0, costume: 0, computer: false }, { roster: 9, costume: 0, computer: false }] };
+  const [first, second] = matchMovesets(tables, setup);
+  const movesets = new Map([[first, await loadMoveset(json, two(first))], [second, await loadMoveset(json, two(second))]]);
+  const data = fightDataFor(tables, setup, (id) => movesets.get(id), await loadMoveset(json, 'common'));
+  const fight = Fight.quick(data, setup);
+  const state = fight.state;
+  for (let field = 0; field < 400; field += 1) fight.field([0, 0]);
+  /* Both by the wall behind them as the camera sees them, the camera at the game's distance past it. */
+  const [a, b] = state.fighters;
+  [a, b].forEach((f, i) => {
+    f.skeleton.base.translation[0] = i === 0 ? -900 : 900;
+    f.skeleton.base.translation[2] = -8800;
+  });
+  const eye = [0, -1112, -14200];
+  const out = newScenery();
+  layScenery(state, data, arena, GRID, { widening: 1, fixed: { scale: 1 }, camera: { ...state.camera.drawn, eye } }, out);
+  const cellAt = (column, row) => out.cells[row * 16 + column];
+  /* The grid's columns and rows by the world's x and z (unturned, unscaled). */
+  const column = (x) => Math.floor(x / CELL + 8);
+  const row = (z) => Math.floor(z / CELL + 8);
+  /* Off to the side of the lines, a cell between the camera and the fighters, nearer the camera than they are by more than 1.5 m. */
+  assert.ok(cellAt(column(-4000), row(-12500)) <= 0, 'beside the lines, nearer the camera than the fighters: left out');
+  assert.ok(cellAt(column(4000), row(-12500)) <= 0, 'and on the other side');
+  /* Level with the fighters off to the side but past the wall, on the camera's side of it: left out. */
+  assert.ok(cellAt(column(-9000), row(-10000)) <= 0, 'past the wall, level with the fighters: left out');
+  /* Past the fighters, toward the stage's middle and its far wall: drawn. */
+  assert.ok(cellAt(column(0), row(-3000)) > 0, 'the stage past the fighters drawn');
+  assert.ok(cellAt(column(-5000), row(6000)) > 0, 'its far side drawn');
+  /* Drawn larger, the fighters' own cells reach past the wall, their middles beyond it: left out too, the fight's floor under them. */
+  const scale = 1.2;
+  layScenery(state, data, arena, GRID, { widening: 1, fixed: { scale }, camera: { ...state.camera.drawn, eye } }, out);
+  for (const f of [a, b]) {
+    const [x, z] = [f.skeleton.base.translation[0] / scale, f.skeleton.base.translation[2] / scale];
+    assert.ok(!insideWalls((Math.floor(z / CELL + 8) - 8 + 0.5) * CELL, 0, WALL_REACH / scale), "the fighter's cell's middle past the wall");
+    assert.ok(cellAt(column(x), row(z)) <= 0, "the fighter's own cell, past the wall, left out");
+  }
 });
 
 /** The disc's grid: 6 cells a side, 3200 mm each, its walls the panels of its border cells (its floor its own ground). */
@@ -150,36 +195,16 @@ test("a disc stage fixed in place: a camera past its walls has every cell its li
   const mid = [(roots[0][0] + roots[1][0]) / 2, (roots[0][1] + roots[1][1]) / 2];
   const out = newScenery();
   /* Past the wall the fighters stand by, level with them: the panel between left out, that is in the cell one of them stands in. */
-  layScenery(state, data, arena, DISC, { widening: 1, fixed: { scale: 1, eye: [WALL_REACH + 2100, -1200, mid[1]] } }, out);
+  layScenery(state, data, arena, DISC, { widening: 1, fixed: { scale: 1 }, camera: { ...state.camera.drawn, eye: [WALL_REACH + 2100, -1200, mid[1]] } }, out);
   assert.ok(out.cells[cellOf(roots[1])] <= 0, `the panel by the fighter at the wall left out (cell ${cellOf(roots[1])})`);
   assert.ok(out.cells[cellOf([-roots[1][0], roots[1][1]])] > 0, 'the far wall drawn');
   /* High over the fighters (the knockout's shot from above): the four cells about them left out, as the game leaves out its middle four. */
-  layScenery(state, data, arena, DISC, { widening: 1, fixed: { scale: 1, eye: [mid[0], -7853, mid[1]] } }, out);
+  layScenery(state, data, arena, DISC, { widening: 1, fixed: { scale: 1 }, camera: { ...state.camera.drawn, eye: [mid[0], -7853, mid[1]] } }, out);
   const about = [Math.min(5, Math.max(1, Math.round(mid[0] / DISC_CELL + 3))), Math.min(5, Math.max(1, Math.round(mid[1] / DISC_CELL + 3)))];
   const four = [[-1, -1], [-1, 0], [0, -1], [0, 0]].map(([dr, dc]) => (about[1] + dr) * 6 + about[0] + dc);
   assert.ok(four.includes(cellOf(roots[1])), 'the four about the fighters are where they stand');
   for (const cell of four) assert.ok(out.cells[cell] <= 0, `cell ${cell} over the fighters left out`);
   /* Low again, inside the walls: all of it drawn. */
-  layScenery(state, data, arena, DISC, { widening: 1, fixed: { scale: 1, eye: [mid[0] - 3000, -1200, mid[1] - 2000] } }, out);
+  layScenery(state, data, arena, DISC, { widening: 1, fixed: { scale: 1 }, camera: { ...state.camera.drawn, eye: [mid[0] - 3000, -1200, mid[1] - 2000] } }, out);
   assert.ok(out.cells.slice(0, 36).every((v) => v > 0), 'low and inside, every cell drawn');
-});
-
-test('a camera past a wall is moved along its line to the fighters until it is inside them, never nearer them than its least; one inside is left', () => {
-  const limit = 9300;
-  /* Past a corner's side as well as an axis's. */
-  const cornered = cameraInWalls([9000, -1200, 9000], [0, 0], limit);
-  assert.ok(Math.abs(cornered[0]) + Math.abs(cornered[2]) <= limit * Math.SQRT2 + 1, `inside the corner's side (${cornered})`);
-  /* Never nearer the fighters than its least, past the wall or not. */
-  const near = cameraInWalls([14672, -1200, 0], [9200, 0], limit, 2500);
-  assert.ok(Math.abs(near[0] - 9200) >= 2500 - 1, `kept 2.5 m off the fighters (${near})`);
-  assert.deepEqual(cameraInWalls([4000, -1200, -5000], [5000, 0], limit), [4000, -1200, -5000], 'inside: as it is');
-  const moved = cameraInWalls([9000, -1200, -14000], [6000, -6000], limit);
-  assert.ok(Math.abs(moved[2]) <= limit && Math.abs(moved[0]) <= limit, `inside (${moved})`);
-  assert.equal(moved[1], -1200, 'its height kept');
-  /* On the line from where it was to the fighters. */
-  const along = (moved[0] - 9000) * (-6000 - -14000) - (moved[2] - -14000) * (6000 - 9000);
-  assert.ok(Math.abs(along) < 1e-6 * 1e8, 'on its line to them');
-  assert.ok(Math.abs(Math.abs(moved[2]) - limit) < 2 || Math.abs(Math.abs(moved[0]) + Math.abs(moved[2]) - limit * Math.SQRT2) < 2, 'as far out as the walls let it');
-  const corner = cameraInWalls([12000, -1200, 12000], [0, 0], limit);
-  assert.ok(Math.abs(corner[0]) <= limit && Math.abs(corner[2]) <= limit, 'past a corner too');
 });

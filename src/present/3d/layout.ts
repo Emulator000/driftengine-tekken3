@@ -144,12 +144,11 @@ export const newGround = (): GroundLayout => ({
 
 /**
  * The view's width over the game's 4:3, at least 1; and, where the remake's walls stand, the stage
- * fixed in place at the middle, drawn `scale` times its size, seen from `eye` (the camera as drawn,
- * the game's millimetres; the game's own where it is not given).
+ * fixed in place at the middle, drawn `scale` times its size.
  */
 export interface View {
   readonly widening: number;
-  readonly fixed?: { readonly scale: number; readonly eye?: readonly [number, number, number] };
+  readonly fixed?: { readonly scale: number };
   /** The camera as drawn, where it is not the game's (an online fight seen from the other side, `other-side.ts`). */
   readonly camera?: DrawnCamera;
 }
@@ -159,30 +158,6 @@ const cameraOf = (state: FightState, view?: View): DrawnCamera => view?.camera ?
 
 /** Whether a point (the game's x and z) stands inside the remake's eight-sided walls, each side `reach` from the middle. */
 export const insideWalls = (x: number, z: number, reach: number): boolean => Math.abs(x) <= reach && Math.abs(z) <= reach && Math.abs(x) + Math.abs(z) <= reach * Math.SQRT2;
-
-/** Steps halving the way along the camera's line, finding where it comes inside the walls. */
-const CAMERA_STEPS = 24;
-
-/**
- * The camera kept inside the remake's walls: one past them moved along its line to `target` (the
- * fighters, the game's x and z) until it stands inside them, each side `limit` from the middle, but
- * never nearer the fighters than `nearest` across (where that leaves it past them); its height kept,
- * one inside left where it is. The game's millimetres.
- */
-export function cameraInWalls(eye: readonly [number, number, number], target: readonly [number, number], limit: number, nearest = 0): [number, number, number] {
-  const at = (t: number): [number, number, number] => [eye[0] + (target[0] - eye[0]) * t, eye[1], eye[2] + (target[1] - eye[2]) * t];
-  if (insideWalls(eye[0], eye[2], limit)) return [eye[0], eye[1], eye[2]];
-  let [outside, inside] = [0, 1];
-  for (let k = 0; k < CAMERA_STEPS; k += 1) {
-    const t = (outside + inside) / 2;
-    const [x, , z] = at(t);
-    if (insideWalls(x, z, limit)) inside = t;
-    else outside = t;
-  }
-  const across = Math.hypot(target[0] - eye[0], target[1] - eye[2]);
-  const most = across > nearest ? 1 - nearest / across : 0;
-  return at(Math.min(inside, most));
-}
 
 class Trig {
   private readonly sine: Int16Array;
@@ -296,11 +271,12 @@ function cullScenery(trig: Trig, arena: ArenaTables, fov: number, yaw: number, c
   hide();
 }
 
-/** The fighters' places in a fixed scenery's frame, how near them a line from the camera stops (what stands by them is never between), and whether the camera is inside the walls. */
+/** The fighters' places in a fixed scenery's frame, how near them a line from the camera stops (what stands by them is never between), whether the camera is inside the walls, and how far they stand from the middle in that frame. */
 interface FixedView {
   readonly fighters: readonly (readonly [number, number])[];
   readonly short: number;
   readonly inside: boolean;
+  readonly reach: number;
 }
 
 /** How far short of the fighters the lines from the camera stop (mm). */
@@ -314,11 +290,16 @@ const LINE_SAMPLES = 32;
  * props could stand between it and the fighters, and a cell is too coarse to tell a wall beside the
  * camera's line from one across it. With the camera past them, those the lines from the camera to
  * each fighter cross: on an arcade grid stopping `short` of either fighter and keeping the
- * fighters' own cells (`keepOwn`), whose floors they stand on, so the wall between goes and those
- * beside and behind the fighters stay; on the disc's every cell crossed, its walls the panels of its
- * border cells, just behind a fighter at the walls, and its floor its own ground.
+ * fighters' own cells (`keepOwn`), whose floors they stand on, and with them every cell whose
+ * middle lies nearer the camera, along its view to the fighters, than the nearer of them less
+ * `short`, and every one, theirs too, whose middle lies past the walls nearer than the farther (the
+ * fight's floor under them), so the wall between goes, and what of it and past it stands beside
+ * the lines at the picture's edge, while what stands beside and behind the fighters inside the
+ * walls stays; on the disc's every cell crossed, its
+ * walls the panels of its border cells, just behind a fighter at the walls, and its floor its own
+ * ground.
  */
-function hideBetween(out: Int8Array, n: number, cell: number, gridX: number, gridZ: number, cx: number, cz: number, { fighters, short, inside }: FixedView, keepOwn: boolean): void {
+function hideBetween(out: Int8Array, n: number, cell: number, gridX: number, gridZ: number, cx: number, cz: number, { fighters, short, inside, reach }: FixedView, keepOwn: boolean): void {
   if (inside) return;
   const cellAt = (x: number, z: number): number => {
     const column = Math.floor((x - gridX) / cell);
@@ -334,6 +315,21 @@ function hideBetween(out: Int8Array, n: number, cell: number, gridX: number, gri
       const at = cellAt(x, z);
       if (at < 0 || own.has(at)) continue;
       out[at] = 0;
+    }
+  }
+  if (!keepOwn) return;
+  /* Along the view from the camera to the fighters' midpoint: how far each fighter stands, and each cell's middle. */
+  const [mx, mz] = [(fighters[0]![0] + fighters[1]![0]) / 2, (fighters[0]![1] + fighters[1]![1]) / 2];
+  const length = Math.hypot(mx - cx, mz - cz) || 1;
+  const depth = (x: number, z: number): number => ((x - cx) * (mx - cx) + (z - cz) * (mz - cz)) / length;
+  const depths = fighters.map(([fx, fz]) => depth(fx, fz));
+  const [nearer, farther] = [Math.min(...depths) - short, Math.max(...depths)];
+  for (let row = 0; row < n; row += 1) {
+    for (let column = 0; column < n; column += 1) {
+      const at = row * n + column;
+      const [x, z] = [gridX + (column + 0.5) * cell, gridZ + (row + 0.5) * cell];
+      const d = depth(x, z);
+      if ((!own.has(at) && d < nearer) || (d < farther && !insideWalls(x, z, reach))) out[at] = 0;
     }
   }
 }
@@ -377,7 +373,7 @@ export function layScenery(state: FightState, data: FightData, arena: ArenaTable
   out.y = scenery.grid !== DISC_GRID ? ARCADE_DEPTH : (arena.stageHeights[state.stage] ?? 0);
   out.yaw = state.scenery.yaw;
   const camera = cameraOf(state, view);
-  const eye = view.fixed?.eye ?? camera.eye;
+  const eye = camera.eye;
   const [camX, camY, camZ] = [eye[0]!, eye[1]!, eye[2]!];
   /* Before a round starts (the fighters set at their places) and as it starts, the scenery stands where the game puts it. */
   if (held !== undefined && fixed === undefined) {
@@ -393,7 +389,7 @@ export function layScenery(state: FightState, data: FightData, arena: ArenaTable
   const scale = fixed?.scale ?? 1;
   const inFrame = (x: number, z: number): [number, number] => [Math.round(((trig.cos(turn) * x + trig.sin(turn) * z) >> 12) / scale), Math.round(((-trig.sin(turn) * x + trig.cos(turn) * z) >> 12) / scale)];
   const [rx, rz] = inFrame(offX, offZ);
-  const fixedView: FixedView | undefined = fixed === undefined ? undefined : { fighters: [inFrame(rootA[0]! - out.x, rootA[2]! - out.z), inFrame(rootB[0]! - out.x, rootB[2]! - out.z)], short: BY_FIGHTERS / scale, inside: insideWalls(camX, camZ, WALL_REACH) };
+  const fixedView: FixedView | undefined = fixed === undefined ? undefined : { fighters: [inFrame(rootA[0]! - out.x, rootA[2]! - out.z), inFrame(rootB[0]! - out.x, rootB[2]! - out.z)], short: BY_FIGHTERS / scale, inside: insideWalls(camX, camZ, WALL_REACH), reach: WALL_REACH / scale };
   const yaw = camera.yaw - out.yaw;
   const cells = out.cells;
   const disc = scenery.grid === DISC_GRID;

@@ -3,7 +3,7 @@
  * pick, left and right to change, wrapping; the default in its own colour; select or EXIT back to
  * the first page, which lists it before its own EXIT): how the fighters and stages are drawn (and
  * whether from the arcade's data), whether the cloth is kept clear of the legs, the picture's
- * quality, the frame rate shown, the touch pad, and the remaster (the fight drawn with the
+ * quality, the frame rate shown, the game's speed, the touch pad and its directions, and the remaster (the fight drawn with the
  * engine's lighting and the assets made on this machine) and, listed while it is on, its look, its
  * brightness and whether its floors fade; and the CRT filter over the picture. Where they are kept, and what they do,
  * is the page's: those that change what is loaded take effect on a restart, which the page makes
@@ -17,7 +17,7 @@ import type { GameState, RemakeSettings } from './state.ts';
 export const REMAKE_PAGE = 0x10;
 
 /** Each setting's values: 0 is the default, but for the look's and the brightness's, the middle of their three. */
-export const REMAKE_DEFAULTS: Readonly<RemakeSettings> = { textures: 0, models: 0, stages: 0, fighters: 0, cloth: 0, picture: 0, frameRate: 0, touchPad: 0, remaster: 0, look: 1, brightness: 1, floorFade: 0, walls: 0, crt: 0 };
+export const REMAKE_DEFAULTS: Readonly<RemakeSettings> = { textures: 0, models: 0, stages: 0, fighters: 0, cloth: 0, picture: 0, frameRate: 0, speed: 0, touchPad: 0, touchStick: 0, remaster: 0, look: 1, brightness: 1, floorFade: 0, walls: 0, crt: 0 };
 
 /** The settings a restart applies: all but the frame rate's, the remaster's look, brightness and floors, and the CRT filter's. */
 export const RESTARTED: readonly (keyof RemakeSettings)[] = ['textures', 'models', 'stages', 'fighters', 'cloth', 'picture', 'touchPad', 'remaster'];
@@ -33,8 +33,8 @@ export const REMAKE_OPTIONS: OptionsPage = {
   titleX: 100,
   titleY: 40,
   listX: 20,
-  listY: 84,
-  step: 22,
+  listY: 76,
+  step: 20,
   width: 324,
   cancel: 0,
   items: [
@@ -45,7 +45,9 @@ export const REMAKE_OPTIONS: OptionsPage = {
     setting('cloth', 'CLOTH', ['CLEAR OF LEGS', 'ORIGINAL']),
     setting('picture', 'PICTURE', ['AUTO', 'HIGH', 'LOW', 'VERY LOW']),
     setting('frameRate', 'FRAME RATE', ['OFF', 'ON']),
+    setting('speed', 'GAME SPEED', ['60 HZ', '50 HZ']),
     setting('touchPad', 'TOUCH PAD', ['AUTO', 'ON', 'OFF']),
+    setting('touchStick', 'TOUCH DIRECTIONS', ['D-PAD', 'STICK']),
     setting('remaster', 'REMASTER', ['OFF', 'ON']),
     setting('look', 'LOOK', ['LIGHT', 'NORMAL', 'STRONG'], 1),
     setting('brightness', 'BRIGHTNESS', ['LOW', 'NORMAL', 'HIGH'], 1),
@@ -60,7 +62,7 @@ export const REMAKE_OPTIONS: OptionsPage = {
 const REMASTER_ONLY: readonly string[] = ['look', 'brightness', 'floorFade'];
 
 /** The page while the remaster is off: its lines not listed, the rest spaced a little wider. */
-const WITHOUT_REMASTER: OptionsPage = { ...REMAKE_OPTIONS, listY: 100, step: 26, items: REMAKE_OPTIONS.items.filter((item) => !REMASTER_ONLY.includes(item.value)) };
+const WITHOUT_REMASTER: OptionsPage = { ...REMAKE_OPTIONS, listY: 88, step: 24, items: REMAKE_OPTIONS.items.filter((item) => !REMASTER_ONLY.includes(item.value)) };
 
 /** The page as it is listed: the remaster's lines only while it is on. */
 export const remakeOptions = (game: GameState): OptionsPage => (game.remake.settings.remaster === 1 ? REMAKE_OPTIONS : WITHOUT_REMASTER);

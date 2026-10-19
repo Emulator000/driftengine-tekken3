@@ -112,10 +112,12 @@ export interface OnlineState {
   card: number;
   /** The match under way on this pairing, from 1 (a rematch counts on), which its versus screen's FIGHT shows; 0 none. */
   fight: number;
+  /** Why the last match ended before its fight did, as the app words it, while the waiting room shows it (empty: none). */
+  why: string;
 }
 
 export function blankOnline(): OnlineState {
-  return { screen: OnlineScreen.LIST, cursor: 0, roomCursor: 0, caret: 0, anchor: 0, scroll: 0, editing: Editing.NONE, code: '', text: '', delay: DEFAULT_DELAY, listed: 0, side: 0, name: 'PLAYER', server: '', ask: '', typed: '', status: OnlineStatus.OFF, lines: [], players: '', wins: '', rooms: [], fights: [], fightCursor: 0, opens: 0, warming: 0, pending: '', offerLeft: 0, answer: 0, card: 0, fight: 0 };
+  return { screen: OnlineScreen.LIST, cursor: 0, roomCursor: 0, caret: 0, anchor: 0, scroll: 0, editing: Editing.NONE, code: '', text: '', delay: DEFAULT_DELAY, listed: 0, side: 0, name: 'PLAYER', server: '', ask: '', typed: '', status: OnlineStatus.OFF, lines: [], players: '', wins: '', rooms: [], fights: [], fightCursor: 0, opens: 0, warming: 0, pending: '', offerLeft: 0, answer: 0, card: 0, fight: 0, why: '' };
 }
 
 /** Whether a text is being entered: the keyboard types for the page then, not for the pads. */
@@ -131,7 +133,8 @@ const UP = 0x1000;
 const DOWN = 0x4000;
 const RIGHT = 0x2000;
 const LEFT = 0x8000;
-const Sound = { MOVE: 0x546c, BACK: 0x4ceb, DECIDE: 0x4d87 } as const;
+/** The page's sounds; and the challenger's, which an opponent found sounds as a challenger's arrival does. */
+const Sound = { MOVE: 0x546c, BACK: 0x4ceb, DECIDE: 0x4d87, CHALLENGER: 0x49a1 } as const;
 const ADVANCE = 9;
 const TITLE_ADVANCE = 13;
 const BARS = 4;
@@ -622,6 +625,7 @@ export function warmUpFrame(game: GameState, data: Data, centre: number, place: 
   if (online.wins !== '') right(Colour.VALUE, online.wins);
   if (hosting) right(Colour.VALUE, detail);
   right(Colour.PICKED, text);
+  if (online.why !== '') right(Colour.VALUE, online.why);
   return null;
 }
 
@@ -667,6 +671,7 @@ function offerCard(game: GameState, data: Data, centre: number): void {
   const result = online.status === OnlineStatus.RESULT;
   const asking = result || online.status === OnlineStatus.OFFERED;
   online.card = asking ? online.card + 1 : 0;
+  if (online.status === OnlineStatus.OFFERED && online.card === 1) sound(game, data, Sound.CHALLENGER);
   if (asking && online.answer === 0 && CARD_SETTLE < online.card) {
     const fresh = game.world.input.fresh[0]! | game.world.input.fresh[1]!;
     if ((fresh & START) !== 0) {

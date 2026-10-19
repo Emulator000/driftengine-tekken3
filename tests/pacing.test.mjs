@@ -1,8 +1,8 @@
-/** The loop's frame times: a 60 Hz or 120 Hz display's frames run the 60 Hz fields evenly. */
+/** The loop's frame times: a 60 Hz or 120 Hz display's frames run the 60 Hz fields evenly, and GAME SPEED's 50 Hz five fields in six of a 60 Hz display's frames. */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { evenTime } from '../src/app/pacing.ts';
+import { evenTime, FIFTY_HZ, pacedTime } from '../src/app/pacing.ts';
 
 const FIELD = 1 / 60;
 
@@ -46,4 +46,11 @@ test('frames at other rates keep their own times', () => {
   assert.equal(evenTime(1000 / 144), 1000 / 144);
   assert.ok(Math.abs(evenTime(8.4) - 1000 / 120) < 1e-5);
   assert.ok(Math.abs(evenTime(16.5) - 1000 / 60) < 1e-5);
+});
+
+test("at GAME SPEED's 50 Hz a 60 Hz display runs five fields in every six frames, never two in one", () => {
+  const counted = fieldsPerFrame(display(59.98, 6000, 0.08).map((ms) => pacedTime(ms, FIFTY_HZ)));
+  assert.ok(counted.every((n) => n <= 1), 'never two fields in a frame');
+  for (let i = 6; i + 6 <= counted.length; i += 6) assert.equal(counted.slice(i, i + 6).reduce((a, b) => a + b, 0), 5, `frames ${i} to ${i + 5}`);
+  assert.equal(pacedTime(1000 / 60, 1), evenTime(1000 / 60), 'at 60 Hz the frame times as they were');
 });

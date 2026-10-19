@@ -160,9 +160,11 @@ your machine the first time; HTTPS is what gives the page WebGPU there. The same
 over plain HTTP at the next port too (`http://<this machine's address>:5191`), drawn with WebGL2
 there and without full screen (nor, in some browsers, the gamepads).
 
-On a touch screen the game shows a pad over the picture: a stick where your left thumb lands, the
-four buttons on the right in a diamond as on the pad (2 above, 1 and 4 either side, 3 below; a
-thumb between two holds both), Select and Start between the thumbs. A phone draws the
+On a touch screen the game shows a pad over the picture: a d-pad at the bottom left, as a
+DualSense's (a thumb between two keys holds both; TOUCH DIRECTIONS in REMAKE OPTION gives a stick
+where your left thumb lands instead), the four buttons on the right in a diamond as on the pad (2
+above, 1 and 4 either side, 3 below; a thumb between two holds both), Select and Start between the
+thumbs. A phone draws the
 picture without the ambient occlusion and the bloom, at fewer pixels while its frames run slow; an
 entry-level phone (its GPU a small Mali, an older Adreno or a PowerVR) draws the very low
 picture: fewer pixels, thirty pictures a second while the game runs at sixty, and the console's
@@ -197,8 +199,12 @@ The original's stages follow the fighters, so nobody ever reaches a wall. With R
 REMAKE OPTION; online matches have them unless the host turns them off) the stage stands still and
 its walls can be reached: back a fighter into one and it is pinned there until it gets out (block,
 duck, sidestep, a throw that swaps sides); knock it into one hard and it splats against it, open to
-a short combo. Tekken Ball, Tekken Force and the attract demo keep the original's stages.
-`?quick&walls=on` tries it at once.
+a short combo. The camera stays as far back as without walls, and what of the stage stands between
+it and the fighters is left out. Tekken Ball, Tekken Force and the attract demo keep the original's
+stages. `?quick&walls=on` tries it at once.
+
+GAME SPEED in REMAKE OPTION plays the game at 50 fields a second, as a PAL console runs it, rather
+than 60 (`?hz=50`); online is always 60.
 
 ### Online
 
@@ -215,7 +221,8 @@ other and through the server where not. Both of you need versions that play a ma
 release that changes only how the game is drawn or sounds plays the one before it: 0.6.5, 0.6.6 and
 0.6.7 play each other; 0.7.0, whose walls change how a match plays, plays 0.7.0 to 0.7.5; 0.7.6,
 whose sidesteps go by the view of a player who sees the fight from the other side, plays 0.7.6 and
-later, and 0.7.0 to 0.7.5 as 0.7.0's matches; 0.7.1 and later play 0.6.5 to 0.6.7 too, without the
+later, and 0.7.0 to 0.7.5 as 0.7.0's matches; 0.7.7, whose REMAKE OPTION gained two settings, plays
+0.7.6 alike; 0.7.1 and later play 0.6.5 to 0.6.7 too, without the
 walls, on a server of 0.7.1 or later), and each the
 data of the fighter the other chose: a player with Kazuya is paired with one without him as long
 as neither of you plays him. The server counts each player's streak of wins (WINS:3 at the foot of
@@ -340,7 +347,7 @@ field. What is done and what is not yet:
 | Power-on: the logo, the opening movie, the title | Done | |
 | The attract cycle: the in-engine intros, the demo fights, the other movie | Done | |
 | The mode menu | Done | Every mode starts |
-| The character select | Done | Both its layouts: one row, and two once more characters are earned (`?unlock` earns them all); Kazuya in a cell of his own when his files are built |
+| The character select | Done | Both its layouts: one row, and two once more characters are earned (`?unlock` earns them all); Kazuya in a cell of his own when his files are built, Arcade cleared with him earning the next character as a clear with any new character does |
 | The versus select: both players at once, the handicaps, the record of wins and draws | Done | Also Arcade's, with start and both shoulders held as it is chosen; `?versus` starts Versus; Kazuya in a column of his own when his files are built |
 | The versus screen | Done | |
 | Arcade: its ten opponents, Ogre's change into True Ogre, the continue, game over | Done | `?arcade=ROSTER` starts it at Ogre's stage |
@@ -363,7 +370,7 @@ field. What is done and what is not yet:
 | Input, moves, throws, hits, the camera, the rounds, the replay | Done | The original's on every field, checked against it frame by frame |
 | The computer opponent | Done | |
 | The HUD, the round calls, the pause menu and the command lists | Done | |
-| The fighters | Done | Mokujin with a character's moves drawn each round |
+| The fighters | Done | Mokujin with a character's moves drawn each round; lit as the console lights them, by each stage's own light, its back colour and its light from below (remastered, under the stage's own sun) |
 | Hit sparks, dust, bursts, the charged glow, breath and fire | Done | |
 | Hair and accessories swinging | Done | On the original's springs, checked against it frame by frame |
 | Hands opening and clenching, eyes blinking | Done | Each hand's shapes from the model, rounded alike; the costume's closed eyes over its face. Gon's face colours not yet |
@@ -377,7 +384,7 @@ field. What is done and what is not yet:
 | **Around the game** | | |
 | Keyboard and gamepads | Done | The buttons shown are the controller's you play on: PlayStation, Xbox, Nintendo, keyboard, touch |
 | The pads' vibration | Done | The original's patterns on a gamepad's two motors, where the browser drives them (Chromium, the desktop app); on to start, VIBRATION in the key configuration turns it off and on |
-| Touch controls | Done | A stick where the left thumb lands, the four buttons, Select and Start |
+| Touch controls | Done | A d-pad as a DualSense's (or a stick where the left thumb lands), the four buttons, Select and Start |
 | Phones and tablets, in the browser | Done | Over your home network, `npm run dev:lan` |
 | An app for Windows, macOS or Linux built from your disc | Done | `npm run desktop`; the Linux app is the one played so far |
 | An Android app built from your disc | Done | `npm run android`, for your own phone |
@@ -386,7 +393,7 @@ field. What is done and what is not yet:
 | Kazuya from Tekken 4 | Done | Optional, from your own Tekken 4 disc |
 | The arcade release's stages | Done | Optional, from a dump of your own arcade board: the 14 stages it has, their backgrounds as the board lays them, their floors as far as the board's and drawn under the stage as it draws them, darkening toward their edges as the disc's do, the carousel, the helicopter and the torches; `?stages=psx` draws the disc's |
 | The arcade release's fighters | Done | Optional, from the same dump: the 31 models it has (where it has a stand-in, Julia's second costume, the disc's is drawn), their seams' own weights, their accessories each on its own joint and swung on the board's own springs; `?fighters=psx` draws the disc's. Their coats' panels and the tails they hang from the hips are kept clear of the legs, as are the tails the disc's models hang from the hips (Hwoarang's belt, in the attract intros too) (`?cloth=original` draws them as the board and the console do). They do not close their eyes, as the board has no closed eyes to draw |
-| The remake's settings in the game | Done | REMAKE OPTION in the Options: the textures, the models, the arcade's stages and fighters, the cloth, the picture, the frame rate, the touch pad, reachable walls (online only unless chosen) and a CRT filter (off unless chosen), kept on the device |
+| The remake's settings in the game | Done | REMAKE OPTION in the Options: the textures, the models, the arcade's stages and fighters, the cloth, the picture, the frame rate, the game's speed (60 or 50 Hz), the touch pad and its directions, reachable walls (online only unless chosen) and a CRT filter (off unless chosen), kept on the device |
 | Reachable walls | Done | The stage fixed in place with walls 9.6 m from its middle, the stage drawn larger to meet them; fighters pinned at a wall, a push into it moving the pusher, wall splats (a crumple against it on the ground, a drop down it in the air), once a combo, the third hit after making the fighter fall; the camera kept inside them, and the stage between left out where it stands past one (the fighters along it) or high over them (a knockout's shot from above). In online matches unless the host turns them off; offline where chosen |
 | A stop shown as the game's own | Done | A window with what went wrong and what was playing, its details to copy into an issue |
 | A free camera and a frame-rate meter | Done | `P` holds a fight and flies a camera through it; `F` shows the frame rate |

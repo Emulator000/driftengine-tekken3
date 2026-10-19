@@ -150,6 +150,13 @@ const mixed = (from: Vec3, to: Vec3, t: number): Vec3 => [from[0] + (to[0] - fro
 const along = (p: Vec3, d: Vec3, k: number): Vec3 => [p[0] + d[0] * k, p[1] + d[1] * k, p[2] + d[2] * k];
 const WHITE: Vec3 = [1, 1, 1];
 
+/**
+ * A sprite's frame naming a sheet cell: the cell's middle, as the batch floors the frame it carries
+ * across the quad, which some GPUs carry a hair short of a whole number, so a frame of the cell
+ * itself drew pixels of the cell before it.
+ */
+const cellFrame = (cell: number): number => cell + 0.5;
+
 /** The frame of the effect's life it is on, for flicker and re-striking. */
 const frameOf = (p: EffectPiece): number => Math.floor(p.age * p.frames);
 /** A twinkle: a brightness from 0.35 to 1, new each `every` frames. */
@@ -197,7 +204,7 @@ function shape(out: EffectBuffers, cell: number, at: Vec3, size: number, colour:
   const i = put(out.shapes, at, [0, 0, 0], size, colour, 1, age, seed);
   if (i < 0) return;
   out.shapes.spins[i] = spin;
-  out.shapes.frames[i] = cell;
+  out.shapes.frames[i] = cellFrame(cell);
 }
 
 /** A point across the view from `centre`, at an angle and a radius. */
@@ -538,7 +545,7 @@ function energy(out: EffectBuffers, p: EffectPiece, colour: Vec3, count: number,
  * A spray, the generic hit and guards: a soft lump swelling at the point, sheared off along the
  * blow into a fan of fine droplets that drift on and thin out; translucent, added.
  */
-function spray(out: EffectBuffers, p: EffectPiece, view: ViewBasis, colour: Vec3, heat: number): void {
+function spray(out: EffectBuffers, p: EffectPiece, view: ViewBasis, colour: Vec3, heat: number, drops = 36): void {
   const t = p.age;
   const angle = blowAngle(view, p);
   const early = within(t, 0, 0.45);
@@ -548,7 +555,7 @@ function spray(out: EffectBuffers, p: EffectPiece, view: ViewBasis, colour: Vec3
   if (t > 0.08 && fan < 1) shape(out, Shape.FAN, along(p.position, forward, (0.05 + 0.06 * easeOut(fan)) * SCALE), (0.13 + 0.07 * easeOut(fan)) * SCALE, scaled(colour, heat * 0.9 * (1 - fan) ** 1.1), angle, t, p.seed + 1);
   const seconds = (t * p.frames) / 60;
   const blow = unitOf(p.velocity);
-  for (let i = 0; i < 36; i += 1) {
+  for (let i = 0; i < drops; i += 1) {
     const d = direction(p.seed, 700 + i, blow, 1.6);
     const v0 = (1.2 + 2.2 * unit(p.seed, 740 + i)) * SCALE;
     const travelled = (v0 * (1 - Math.exp(-4 * seconds))) / 4;
@@ -821,7 +828,7 @@ function smoke(out: EffectBuffers, p: EffectPiece, size: number, from: number): 
   const i = put(out.puffs, along(p.position, [0, 1, 0], size * (0.4 + 0.8 * t)), [0, 0, 0], size * (0.6 + 0.6 * t), SMOKE, 0.45 * Math.sin(Math.PI * t), t, p.seed + 7);
   if (i < 0) return;
   out.puffs.spins[i] = unit(p.seed, 7) * Math.PI * 2 + t;
-  out.puffs.frames[i] = Shape.BLOB;
+  out.puffs.frames[i] = cellFrame(Shape.BLOB);
 }
 
 /**
@@ -862,12 +869,14 @@ function puff(out: EffectBuffers, p: EffectPiece, colour: Vec3, from: number, to
     const i = put(out.puffs, along(p.position, [0, 1, 0], (0.04 + 0.08 * t) * (1 + k * 0.4)), [0, 0, 0], (from + (to - from) * easeOut(t)) * (1 - k * 0.25), colour, opacity * (1 - t) ** 1.2, t, p.seed + k);
     if (i < 0) return;
     out.puffs.spins[i] = unit(p.seed, 30 + k) * Math.PI * 2 + t * (k === 0 ? 0.6 : -0.8);
-    out.puffs.frames[i] = Shape.BLOB;
+    out.puffs.frames[i] = cellFrame(Shape.BLOB);
   }
 }
 
 /** The generic sprays' colours: a hit's red, the guards' pink and blue-grey. */
 const HIT: Vec3 = [1, 0.06, 0.04];
+/** A clean hit's blood against a guard's spray: how much larger, how much brighter, and its drops. */
+const BLOOD = { size: 1.35, heat: 1.9, drops: 54 } as const;
 const GUARD: Vec3 = [1, 0.3, 0.95];
 const GUARD_TWO: Vec3 = [0.45, 0.62, 0.95];
 
@@ -884,7 +893,8 @@ export function fillEffects(pieces: readonly EffectPiece[], view: ViewBasis, out
         heavy(out, p, view);
         break;
       case 'hit':
-        spray(out, p, view, HIT, 1.6);
+        SCALE *= BLOOD.size;
+        spray(out, p, view, HIT, BLOOD.heat, BLOOD.drops);
         light(out, p, HIT, 1.5, 1.2, 0.5);
         break;
       case 'guard':

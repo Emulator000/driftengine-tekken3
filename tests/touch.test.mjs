@@ -1,9 +1,9 @@
-/** The touch pad's stick: eight ways around where the thumb landed, none within the dead zone; and where the pad shows, by TOUCH PAD, the device and the gamepads. */
+/** The touch pad's stick: eight ways around where the thumb landed, none within the dead zone; its d-pad's eight ways about its own middle; and where the pad shows, by TOUCH PAD, the device and the gamepads. */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { DOWN, LEFT, RIGHT, UP } from '../src/app/input.ts';
-import { stickWord, touchShown } from '../src/app/touch.ts';
+import { DPAD, dpadWord, stickWord, touchShown } from '../src/app/touch.ts';
 
 const RADIUS = 64;
 
@@ -37,6 +37,28 @@ test('each way spans 45 degrees around its direction', () => {
   assert.equal(at(-179), LEFT);
   assert.equal(at(-112), DOWN);
   assert.equal(at(-113), DOWN | LEFT);
+});
+
+test("the d-pad holds one of eight ways about its own middle, nothing at its very middle, and steers a thumb slid past its edge", () => {
+  assert.equal(dpadWord(0, 0), 0);
+  assert.equal(dpadWord(DPAD * 0.1, 0), 0, 'the middle holds nothing');
+  assert.equal(dpadWord(DPAD * 0.25, 0), RIGHT, 'a thumb a quarter of the way out already steers');
+  assert.equal(dpadWord(0, DPAD * 0.6), DOWN);
+  assert.equal(dpadWord(-DPAD * 0.5, DPAD * 0.5), DOWN | LEFT);
+  assert.equal(dpadWord(DPAD * 3, -DPAD * 3), UP | RIGHT, 'past its edge');
+  assert.equal(dpadWord(-DPAD * 4, 0), LEFT, 'past its edge');
+});
+
+test("the d-pad's diagonals span 50 degrees between its arms, wider than each arm's 40, so a thumb between two holds both", () => {
+  const at = (degrees) => dpadWord(DPAD * 0.6 * Math.cos((degrees * Math.PI) / 180), -DPAD * 0.6 * Math.sin((degrees * Math.PI) / 180));
+  assert.equal(at(19), RIGHT);
+  assert.equal(at(21), UP | RIGHT);
+  assert.equal(at(69), UP | RIGHT);
+  assert.equal(at(71), UP);
+  assert.equal(at(-21), DOWN | RIGHT, 'down and forward');
+  assert.equal(at(-135), DOWN | LEFT, 'down and back');
+  assert.equal(at(-115), DOWN | LEFT);
+  assert.equal(at(-109), DOWN);
 });
 
 /** TOUCH PAD's choices, as the address and REMAKE OPTION give them. */

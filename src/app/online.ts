@@ -8,7 +8,7 @@
  * the keyboard and the mouse edit it as a text field (`text-field.ts`), the clipboard with them;
  * while a match is played, a line over the picture says how its connection goes.
  */
-import { ALSO_PLAYS, Online, PLAYS_AS, REMATCH_MS, playedWith, type Start } from '../net/online.ts';
+import { ALSO_PLAYS, Online, PLAYS_AS, REMATCH_MS, playedWith, whyLine, type Start } from '../net/online.ts';
 import { serverAddresses } from '../net/address.ts';
 import { StateSnapshotter } from '../net/snapshot.ts';
 import { ROLLBACK_DEPTH } from '../net/session.ts';
@@ -45,6 +45,9 @@ const PAST_FIELDS = ROLLBACK_DEPTH + 4;
 const LAST_STAGE_ROSTER = 0x15;
 /** The fields of a match's presses the page's probe keeps. */
 const PRESSES_KEPT = 600;
+/** The ends of a match that are its fight's or this player's own, which the waiting room says nothing of; and how long it shows why another ended (milliseconds). */
+const OWN_ENDS = new Set(['over', 'quit', 'watched']);
+const WHY_SHOWN_MS = 10_000;
 /** The state's fields that are this machine's own, never the match's: left out of the fingerprint. */
 const OWN = ['remake', 'online'];
 /** A watched fight: how far behind its players' presses it plays (fields), how far behind it catches up at once, and the most fields it plays in a frame doing so. */
@@ -131,6 +134,9 @@ export class OnlinePlay {
   private pastFields = 0;
   /** What the waiting room waits for again once a match is over (a quick match, a room), or null (ONLINE MODE's page then). */
   private resume: string | null = null;
+  /** Why the last match ended before its fight did, and until when the waiting room shows it. */
+  private why = '';
+  private whyUntil = 0;
   private readonly available = new Available();
   /** The last match's result as the card says it, and the matches this player and the other have won since they were paired. */
   private result: readonly [string, string] = ['', ''];
@@ -173,7 +179,8 @@ export class OnlinePlay {
       },
     });
     this.readout = document.createElement('div');
-    Object.assign(this.readout.style, { position: 'fixed', top: '6px', left: '50%', transform: 'translateX(-50%)', font: "12px 'Russo One', sans-serif", color: '#fff', textShadow: '0 1px 2px #000, 0 0 4px #000', whiteSpace: 'pre', textAlign: 'center', pointerEvents: 'none', opacity: '0.85', display: 'none' });
+    /* At the foot of the screen, over the touch pad's Select and Start where it shows (`--touch-foot`). */
+    Object.assign(this.readout.style, { position: 'fixed', bottom: 'calc(max(6px, env(safe-area-inset-bottom)) + var(--touch-foot, 0px))', left: '50%', transform: 'translateX(-50%)', font: "12px 'Russo One', sans-serif", color: '#fff', textShadow: '0 1px 2px #000, 0 0 4px #000', whiteSpace: 'pre', textAlign: 'center', pointerEvents: 'none', opacity: '0.85', display: 'none' });
     document.body.append(this.readout);
     const { phone, touchScreen } = touchDevice();
     this.touchTyping =
@@ -226,12 +233,13 @@ export class OnlinePlay {
 
   /**
    * Whether the picture holds as it is: the newest field has a fighter knocked out in a knockout
-   * not final yet, which a word of the other side's still to come may take back. Once final the
-   * fight is drawn on, the knockout in it; taken back, it was never seen.
+   * not final yet, which a word of the other side's still to come may take back (once final the
+   * fight is drawn on, the knockout in it; taken back, it was never seen); or the fight just gone
+   * into, the other side not yet playing it (`meeting`), the versus screen held over it.
    */
   get holding(): boolean {
     const session = this.online.session;
-    return session !== null && this.local !== null && this.journal.holding(session.final);
+    return session !== null && this.local !== null && (this.online.meeting || this.journal.holding(session.final));
   }
 
   /** The match's newest presses, for the page's probe: each field's pads' words and the game's buttons newly down for them, by field (a field played again in a rollback put right). */
@@ -371,6 +379,12 @@ export class OnlinePlay {
       case 'leave':
         this.online.disconnect();
         break;
+      case 'name':
+        /* The server knows a player by the name its hello gave: called again, its hello the new one. */
+        if (online.name === this.kept.name) break;
+        this.online.disconnect();
+        this.called = false;
+        break;
       case 'server':
         this.online.disconnect();
         this.called = false;
@@ -455,6 +469,7 @@ export class OnlinePlay {
         online.lines = o.ended !== '' ? [first, o.ended] : [first];
       }
     }
+    online.why = (o.state === 'queued' || o.state === 'hosting') && performance.now() < this.whyUntil ? this.why : '';
     /* How many are about, while the server is heard from (its pongs carry it). */
     const heard = o.state !== 'off' && o.state !== 'connecting' && 0 <= o.players;
     online.players = heard ? `${o.players} ${o.players === 1 ? 'PLAYER' : 'PLAYERS'} ONLINE${0 <= o.queued ? `  ${o.queued} SEARCHING` : ''}` : '';
@@ -606,6 +621,11 @@ export class OnlinePlay {
   private end(why: string): void {
     const local = this.local;
     if (local === null) return;
+    /* Ended before its fight did, not by this player: why, shown a while in the waiting room. */
+    if (!OWN_ENDS.has(why)) {
+      this.why = whyLine(why);
+      this.whyUntil = performance.now() + WHY_SHOWN_MS;
+    }
     this.local = null;
     this.match = null;
     local.snapshotter.restore(local.slot);

@@ -154,15 +154,16 @@ export interface OnlineOptions<S> {
  * players and those of every release back to that one play each other; one that changes any of
  * them sets it to its own version.
  */
-export const PLAYS_AS = '0.7.6';
+export const PLAYS_AS = '0.7.7';
 
 /**
  * The older versions this release also plays a match as, each with the fields of the state its own
  * matches have and that version's has not: a match as one is played without what those fields
  * hold (the remake's walls; the moves into the screen of a player who sees the fight from the
- * other side going by that view), and those fields (all at rest) left out of its fingerprint.
+ * other side going by that view), and those fields (all at rest) left out of its fingerprint. A
+ * version whose matches differ from this one's in nothing but the code, as 0.7.6's, leaves none out.
  */
-export const ALSO_PLAYS: Readonly<Record<string, readonly string[]>> = { '0.7.0': ['depthTurned'], '0.6.5': ['wallHit', 'carried', 'splatted', 'splatHits', 'walls', 'depthTurned'] };
+export const ALSO_PLAYS: Readonly<Record<string, readonly string[]>> = { '0.7.6': [], '0.7.0': ['depthTurned'], '0.6.5': ['wallHit', 'carried', 'splatted', 'splatHits', 'walls', 'depthTurned'] };
 
 /** Whether a match played as version `as` has `field` of the state: every one but those that version lacks. */
 export function playedWith(as: string, field: string): boolean {
@@ -179,10 +180,17 @@ const PING_WINDOW = 8;
 const WAIT_EVERY = 15;
 /** Milliseconds at most between those heartbeats, however slowly a loading side's frames come. */
 const WAIT_MS = 250;
-/** Frames a side holding for the other may hear nothing from it before the other is taken for gone: five seconds. */
-const HOLD_SILENCE = 300;
+/**
+ * Frames a side holding for the other, on the fight's last loading field or gone into the fight
+ * before the other plays it (`meeting`), may hear nothing from it before the other is taken for
+ * gone: thirty seconds, as a device busy loading the fight or drawing its first pictures says
+ * nothing meanwhile, and one that has gone is told by the server at once.
+ */
+const HOLD_SILENCE = 1800;
 /** Frames a side holds for the other's word that it is ready while the other says nothing of loading: three seconds, past which the other went into the fight without saying so. */
 const READY_WAIT = 180;
+/** Fields of the fight past its first, and the input delay's, the other side's words must be in for before this side shows the fight: they are sent only as it plays them. */
+const MEET = 10;
 /** Frames between asking the server for its room list, while it is shown. */
 const ROOMS_EVERY = 180;
 /** Milliseconds the host waits, both hellos in, before it starts the match: the opponent found shown a moment on both sides. */
@@ -315,6 +323,13 @@ export class Online<S> {
   theyWait = false;
   /** Whether this side held on the fight's last loading field this frame, ready, for the other to be. */
   holding = false;
+  /**
+   * The fight's first field, this side gone into it, while the other has not played into it too
+   * (`meeting`): null once it has, or before a fight is gone into.
+   */
+  private inFrom: number | null = null;
+  /** The frame this side went into the fight on. */
+  private inAt = 0;
   session: MatchSession<unknown> | null = null;
 
   private readonly options: OnlineOptions<S>;
@@ -628,7 +643,14 @@ export class Online<S> {
         }
       }
     }
+    /* Gone into the fight, the other not yet playing it: its silence is not a lost connection until `HOLD_SILENCE`. */
+    if (this.inFrom !== null && this.frames - this.inAt < HOLD_SILENCE) session.heard();
     const played = session.advance(word);
+    if (atStart && played) {
+      this.inFrom = session.tick;
+      this.inAt = this.frames;
+    }
+    if (this.inFrom !== null && session.final >= this.inFrom + session.inputDelay + MEET) this.inFrom = null;
     this.sendTaped(false);
     const state: SessionState = session.state;
     /* A wait this long over the direct channel: it may carry nothing any more, while the server's pings still come. */
@@ -642,6 +664,15 @@ export class Online<S> {
       this.finish(why, why === 'desynced' ? 'desynced' : 'left');
     }
     return played;
+  }
+
+  /**
+   * Whether this side, gone into the fight, holds its picture for the other to have played into it
+   * too: a device slow to draw its fight's first pictures plays nothing meanwhile, and the fight
+   * here would stand still waiting for its words; both show it once both play on.
+   */
+  get meeting(): boolean {
+    return this.inFrom !== null && this.session !== null;
   }
 
   /** The match's connection as a player is shown it, while one is played. */
@@ -868,6 +899,7 @@ export class Online<S> {
   private begin(start: Start): void {
     this.lastStart = start;
     this.tail = null;
+    this.inFrom = null;
     this.heardAt = this.frames;
     /* What the last match left in the transport is no word of this one's. */
     this.transport?.drain(() => {});

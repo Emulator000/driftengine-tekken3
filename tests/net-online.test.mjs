@@ -266,6 +266,38 @@ test("a side ready for the fight holds on its last loading field for as long as 
   }
 });
 
+test("a side gone into the fight holds its picture while the other, gone in too, has not played into it (a slow device's first frames), however long a first picture takes: neither shows a fight standing still, nor calls the other gone; both show it once each has played on", async () => {
+  const { relay, url } = await server();
+  const [a, b] = await playing(url);
+  try {
+    const line = a.online.session.tick + 40;
+    /* Both go in off the line; the guest then plays no frame for a second and a half, as a device drawing its fight's first picture. */
+    await toTheFight(a, b, line, () => true, () => a.online.session.tick > line && b.online.session.tick > line, 600);
+    assert.ok(a.online.session.tick > line && b.online.session.tick > line, 'both went in');
+    for (let frame = 0; frame < 90; frame += 1) {
+      a.online.frame(0, true, false);
+      await sleep(16);
+    }
+    assert.equal(a.online.state, 'playing');
+    assert.ok(a.online.meeting, "the host's picture held while the guest has not played into the fight");
+    /* Past the five seconds a stall mid-fight takes for a lost connection: the guest is still busy with its first picture, not gone. */
+    for (let frame = 0; frame < 420; frame += 1) {
+      a.online.frame(0, true, false);
+      await sleep(16);
+    }
+    assert.equal(a.online.state, 'playing', `the host still waits for the guest's first picture (${a.online.ended})`);
+    assert.ok(a.online.meeting, 'its picture held still');
+    const done = await toTheFight(a, b, line, () => true, () => !a.online.meeting && !b.online.meeting, 600);
+    assert.ok(done < 600, `both show the fight once both play on (${a.online.session.tick} ${b.online.session.tick})`);
+    assert.ok(b.online.session.tick > line + 10, 'the guest played into the fight before the host showed it');
+    assert.equal(a.online.session.desync, null);
+  } finally {
+    a.online.disconnect();
+    b.online.disconnect();
+    await relay.close();
+  }
+});
+
 test("where both players ask to be seen on the same side, the start says which of them sees the fight from the other side; both seen as they asked, neither; with a game that says nothing of its side (one before 0.7.6), no word of it", async () => {
   const { relay, url } = await server();
   const sides = [];

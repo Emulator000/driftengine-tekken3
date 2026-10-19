@@ -22,9 +22,10 @@ import { floorLookOf, floorTint, type RedrawnFloor } from './stage/floor-look.ts
 import { Grass, type Caster } from './stage/grass.ts';
 import { Puddles } from './stage/puddles.ts';
 import { lookOfStage, pixelsOf } from './stage/looks.ts';
+import { backLight, fighterLight, lightOn, lightRecord, type FighterLight } from './fighter/fighter-light.ts';
 import { Backdrop, type Ridge } from './stage/backdrop.ts';
 import { createStage, stageAtlasSize, type Stage } from './stage/stage.ts';
-import { ACCESSORIES, cameraInWalls, fadeScenery, FEET, GROUND_TILE, layGround, layScenery, liftOnto, newGround, newHeldScenery, newScenery, newSceneryFade } from './layout.ts';
+import { ACCESSORIES, fadeScenery, FEET, GROUND_TILE, layGround, layScenery, liftOnto, newGround, newHeldScenery, newScenery, newSceneryFade } from './layout.ts';
 import { Effects } from './effects/effects.ts';
 import { BallView } from './ball.ts';
 import { Beach, BEACH_STAGE, beachClear } from './stage/beach.ts';
@@ -131,9 +132,6 @@ const ALL_SHOWN = new Float32Array(256).fill(1);
 const HELD = { arcade: { radius: 3000, slack: 0x155 }, disc: { radius: 1500, slack: 0xaa } } as const;
 /** How much larger a stage is drawn where the remake's walls stand: as puts its own nearest walls (`reach`, metres) on them, from 1 to `WALL_SCALE` times; as it is where none stands near. */
 const WALL_SCALE = 1.5;
-/** How far inside the walls the camera is kept, and the nearest it comes to the fighters doing so, across (mm). */
-const CAMERA_INSIDE = 300;
-const CAMERA_NEAREST = 2500;
 export const wallScale = (reach: number | null): number => (reach === null ? 1 : Math.min(WALL_SCALE, Math.max(1, WALL_REACH / 1000 / reach)));
 
 /** The arcade stages whose floor ends at their own edge (the helipad's, a square this far from its middle, model units), where the fight's floor is cut off. */
@@ -173,9 +171,10 @@ const TEKKEN_FORCE = 8;
 /** Tekken Force's final stage, past its four. */
 const FINAL_STAGE = 4;
 const FLASH_FRAMES = 0x30;
-/** Practice's mode, and how strongly its colour lights a fighter. */
+/** Practice's mode. */
 const PRACTICE = 5;
-const TINT = 0.9;
+/** Remastered, the least of the scene's light a fighter's vertex is coloured over, so one turned from it all is not lit past the console's light. */
+const SCENE_LEAST = 0.05;
 const SHADOW_STRENGTH = 1;
 /**
  * How far a fighter's shadow caster is pushed away from the light: `OFFSET` metres, and `SHEAR`
@@ -239,6 +238,8 @@ export class FightView {
   });
   /** The floor's tint, undoing what the light adds where nothing shades it, so it keeps the game's colours. */
   private readonly groundTint: [number, number, number];
+  /** The fighters' light by the record of the stage that lights them, made once each. */
+  private readonly fighterLights = new Map<number, FighterLight>();
   private readonly white: SurfaceTextureHandle;
   /** Per side, its models by pack: the one it shows, and in Tekken Force those it may change to. */
   private readonly sides: Map<number, { fighter: Fighter | null }>[] = [new Map(), new Map(), new Map()];
@@ -571,38 +572,27 @@ export class FightView {
     return otherSideCamera(state.camera.drawn, focus);
   }
 
-  /**
-   * Where the remake's walls stand, the camera drawn kept inside them (`cameraInWalls`): one the
-   * game puts past a wall, as it does with the fighters along it, moved along its line to them, its
-   * view's turn kept, but never nearer them than `CAMERA_NEAREST` (past the wall then, the scenery
-   * hides what stands between); where it stands, the game's millimetres.
-   */
-  private keepCameraInWalls(state: FightState): [number, number, number] {
-    const p = this.camera.position;
-    const eye: [number, number, number] = [p[0]! * 1000, -p[1]! * 1000, -p[2]! * 1000];
-    const [a, b] = state.fighters;
-    const roots = [a.skeleton.base.translation, b.skeleton.base.translation];
-    const kept = cameraInWalls(eye, [(roots[0]![0]! + roots[1]![0]!) / 2, (roots[0]![2]! + roots[1]![2]!) / 2], WALL_REACH - CAMERA_INSIDE, CAMERA_NEAREST);
-    if (kept[0] === eye[0] && kept[2] === eye[2]) return eye;
-    const e = [kept[0] / 1000, -kept[1] / 1000, -kept[2] / 1000];
-    for (let i = 0; i < 3; i += 1) this.view[12 + i] = -(this.view[i]! * e[0]! + this.view[4 + i]! * e[1]! + this.view[8 + i]! * e[2]!);
-    this.camera.adoptView(this.view, this.camera.projection);
-    eyeOf(this.view, this.camera.position);
-    return kept;
-  }
-
   /** The flash's glow on a fighter: its colour at the strength left, by how much of the blow's side the camera sees. */
   private light(state: FightState, fighter: Fighter, f: FighterState): void {
-    /* Practice's HIT ANALYSIS colours a fighter wholly in place of its light. */
+    /*
+     * The stage's back colour, as the console lights every face; Practice's HIT ANALYSIS lights a
+     * fighter by its colour in its place. Remastered, under the stage's own light, each vertex is
+     * coloured by the console's light over the scene's where it is turned (`relight`).
+     */
+    const record = lightRecord(state);
     const tint = state.mode === PRACTICE ? state.practice.colours[f.movesetSlot] : undefined;
-    if (tint !== undefined && tint[0] !== 0) {
-      fighter.light((tint[1]! / 0xff) * TINT, (tint[2]! / 0xff) * TINT, (tint[3]! / 0xff) * TINT);
-      return;
+    const coloured = tint !== undefined && tint[0] !== 0;
+    const lit = this.stageLight(state);
+    let back: readonly number[] = coloured ? backLight(this.arena.fighterLights[record]!, [tint[1]!, tint[2]!, tint[3]!]) : lit.emission;
+    if (this.files.remaster === true) {
+      const own = this.arena.fighterLights[record]!.back;
+      this.relight(state, fighter, lit, coloured ? [tint[1]! / 256, tint[2]! / 256, tint[3]! / 256] : [own / 256, own / 256, own / 256]);
+      back = [0, 0, 0];
     }
     const flash = state.flash;
-    const strength = 0 < flash.left ? flash.left / FLASH_FRAMES / 0x1000 : 0;
+    const strength = 0 < flash.left && !coloured ? flash.left / FLASH_FRAMES / 0x1000 : 0;
     if (strength === 0) {
-      fighter.light(0, 0, 0);
+      fighter.light(back[0]!, back[1]!, back[2]!);
       return;
     }
     const root = f.skeleton.base.translation;
@@ -611,8 +601,34 @@ export class FightView {
     const [cx, cy, cz] = [0, 1, 2].map((i) => eye[i]! - root[i]!);
     const cos = (bx! * cx! + by! * cy! + bz! * cz!) / (Math.hypot(bx!, by!, bz!) * Math.hypot(cx!, cy!, cz!) || 1);
     const facing = (1 + cos) / 3;
-    const glow = (c: number): number => (1 + flash.colour[c]! * strength * facing) ** 2.2 - 1;
+    const glow = (c: number): number => back[c]! + (1 + flash.colour[c]! * strength * facing) ** 2.2 - 1;
     fighter.light(glow(0), glow(1), glow(2));
+  }
+
+  /**
+   * Remastered, a fighter's vertices coloured so the stage's own light comes to the console's on
+   * each: the console's light where a vertex is turned (`back` its back colour, shares of the
+   * light's scale) over the scene's there, its sky and ground as the engine mixes them by how far
+   * the vertex is turned up and its sun by how full it is turned to it.
+   */
+  private relight(state: FightState, fighter: Fighter, lit: FighterLight, back: readonly [number, number, number]): void {
+    const look = lookOfStage(state.stage);
+    const l = Math.hypot(...look.sun);
+    const [sx, sy, sz] = [look.sun[0]! / l, look.sun[1]! / l, look.sun[2]! / l];
+    fighter.recolour((x, y, z, out, at) => {
+      lightOn(lit, back, x, y, z, out, at);
+      const up = y * 0.5 + 0.5;
+      const sun = Math.max(0, x * sx + y * sy + z * sz);
+      for (let c = 0; c < 3; c += 1) out[at + c] = out[at + c]! / Math.max(SCENE_LEAST, look.ambientGround[c]! + (look.ambient[c]! - look.ambientGround[c]!) * up + look.sunColour[c]! * sun);
+    });
+  }
+
+  /** The light the fight's fighters take, by the stage's record (`fighter-light.ts`). */
+  private stageLight(state: FightState): FighterLight {
+    const record = lightRecord(state);
+    let lit = this.fighterLights.get(record);
+    if (lit === undefined) this.fighterLights.set(record, (lit = fighterLight(this.arena.fighterLights[record]!, record)));
+    return lit;
   }
 
   /**
@@ -729,7 +745,6 @@ export class FightView {
     this.adoptCamera(state, aspect);
     this.drawnCamera = !freeView.active && mirror.on ? this.lookFromOtherSide(state) : null;
     if (freeView.active) freeView.apply(this.camera, 0.6 * aspect);
-    const eyeInWalls = !freeView.active && wallsOn(state) ? this.keepCameraInWalls(state) : null;
     if (this.files.remaster === true) this.cutIfJumped();
     this.casting.length = 0;
     const posed: FighterState[] = [];
@@ -773,6 +788,19 @@ export class FightView {
       this.env.fogDensity = haze === undefined ? 0 : HAZE.density;
       this.env.fogHeightFalloff = HAZE.falloff;
       this.env.fogBaseY = HAZE.baseY;
+    } else {
+      /*
+       * The stage's light as the console lights the fighters: its light and the light from below
+       * (their back colour their emission, `light`), the floor's tint undoing what it adds there.
+       */
+      const lit = this.stageLight(state);
+      for (let k = 0; k < 3; k += 1) {
+        this.env.directionalDir[k] = lit.toward[k]!;
+        this.env.directionalColor[k] = lit.sun[k]!;
+        this.env.ambient[k] = 0;
+        this.env.ambientGround![k] = lit.ground[k]!;
+        this.groundTint[k] = 1 / Math.max(1e-3, lit.sun[k]! * Math.max(0, lit.toward[1]!));
+      }
     }
     this.castShadows(state, posed);
     if (this.files.remaster === true) this.bakeProbe(state);
@@ -786,7 +814,7 @@ export class FightView {
     const layout = this.arena.stages[state.stage];
     const scenery = drawn !== null && layout != null && only.scenery && state.match.trueOgres === 0 && layout.cellSize !== 0;
     /* Where the remake's walls stand, the stage fixed in place, drawn as large as puts its own walls on them. */
-    const fixed = drawn !== null && wallsOn(state) ? { scale: wallScale(drawn.stage.reach), ...(eyeInWalls === null ? {} : { eye: eyeInWalls }) } : undefined;
+    const fixed = drawn !== null && wallsOn(state) ? { scale: wallScale(drawn.stage.reach) } : undefined;
     const camera = this.drawnCamera === null ? {} : { camera: this.drawnCamera };
     const view = fixed === undefined ? { widening, ...camera } : { widening, fixed, ...camera };
     this.sceneryScale = fixed?.scale ?? 1;

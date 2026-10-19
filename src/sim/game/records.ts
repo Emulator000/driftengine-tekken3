@@ -13,6 +13,13 @@ import type { GameState } from './state.ts';
 /** The costumes the schedule and plays can give. */
 const COSTUME_MASK = 0x50382;
 const EVERYONE = 0x1fffff;
+/**
+ * The endings of the characters the remake adds past the game's (Kazuya's, roster 22), which the
+ * game's own mask would let go: kept beside theirs and counted as theirs are, so a clear with one
+ * earns as any other character's does.
+ */
+const ADDED_ENDINGS = 0xffc00000;
+const COUNTED = (EVERYONE | ADDED_ENDINGS) >>> 0;
 /** The newest character earned when none is. */
 const NONE = 0x16;
 /** The hidden character met in Arcade, earned by beating him (or by the name entry's secret name). */
@@ -193,7 +200,7 @@ export function earnOnDefeat(game: GameState, roster: number): void {
   records.earnedRoster = (records.earnedRoster | 0x20000) >>> 0;
 }
 
-/** An Arcade ending seen, by costume for the characters that have two; the schedule moved to the endings' count. */
+/** An Arcade ending seen, by costume for the characters that have two (an added character's kept too); the schedule moved to the endings' count. */
 export function recordEnding(game: GameState, scenes: SceneTables, roster: number, costume: number): void {
   if (game.world.mode !== MenuMode.ARCADE) return;
   const records = game.records;
@@ -205,8 +212,8 @@ export function recordEnding(game: GameState, scenes: SceneTables, roster: numbe
     if ((endings[0]! & 0x10000) === 0) endings[0] = (endings[0]! | 0x10000) >>> 0;
     else endings[1] = (endings[1]! | 0x10000) >>> 0;
   } else endings[0] = (endings[0]! | (1 << (roster & 0x1f))) >>> 0;
-  const seen = popcount((endings[0]! | endings[1]!) & EVERYONE);
-  endings[0] = endings[0]! & EVERYONE;
+  const seen = popcount((endings[0]! | endings[1]!) & COUNTED);
+  endings[0] = (endings[0]! & COUNTED) >>> 0;
   endings[1] = endings[1]! & EVERYONE;
   let steps = 0;
   for (let bit = 0; bit < seen; bit += 1) if ((scenes.endingSteps & (1 << bit)) !== 0) steps += 1;

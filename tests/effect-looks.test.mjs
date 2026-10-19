@@ -39,6 +39,39 @@ test("every fighter's design draws over its life, and lights the world as it sta
   }
 });
 
+test("a sprite names its sheet's cell by the cell's middle, so a frame a GPU carries a hair short or long across the quad still floors to it", () => {
+  const out = effectBuffers();
+  let named = 0;
+  for (const design of DESIGNS) {
+    for (const look of ['heavy', 'hit', 'burst', 'dust']) {
+      for (const age of [0.02, 0.3, 0.6]) {
+        fillEffects([piece(look, design, age)], VIEW, out);
+        for (const set of [out.shapes, out.puffs]) {
+          for (let i = 0; i < set.count; i += 1) {
+            const frame = set.frames[i];
+            for (const drift of [-1e-4, 1e-4]) assert.equal(Math.floor(frame + drift), Math.floor(frame), `${look} ${design} at ${age}: frame ${frame}`);
+            named += 1;
+          }
+        }
+      }
+    }
+  }
+  assert.ok(named > 0, 'some sprites were laid');
+});
+
+test("a clean hit's blood sprays larger and fuller than a guard's spark", () => {
+  const laid = (look, age) => {
+    const out = effectBuffers();
+    fillEffects([piece(look, 'fire ring', age)], VIEW, out);
+    return { lump: Math.max(...out.shapes.sizes.slice(0, out.shapes.count)), drops: out.glows.count };
+  };
+  for (const age of [0.05, 0.3]) {
+    const [hit, guard] = [laid('hit', age), laid('guard', age)];
+    assert.ok(hit.lump >= guard.lump * 1.3, `at ${age} the blood's lump is ${hit.lump}, the guard's ${guard.lump}`);
+    assert.ok(hit.drops >= guard.drops * 1.4, `at ${age} the blood throws ${hit.drops} drops, the guard ${guard.drops}`);
+  }
+});
+
 test("the Mishimas' lightning lays its sheet's strokes over the sprite's square, centred on the blow, mirrored as the slot is", () => {
   const out = effectBuffers();
   const ends = (mirrored) => {

@@ -439,7 +439,11 @@ export interface RemakeSettings {
   cloth: number;
   picture: number;
   frameRate: number;
+  /** The game's speed away from ONLINE MODE: 60 Hz (the default) or 50 Hz, a PAL console's fields. */
+  speed: number;
   touchPad: number;
+  /** The touch pad's directions: a d-pad (the default) or a stick where the thumb lands. */
+  touchStick: number;
   remaster: number;
   /** The remaster's look: light, normal (the default) or strong. */
   look: number;

@@ -13,7 +13,7 @@ import { FreeCamera } from './free-camera.ts';
 import { freeView } from '../present/3d/free-view.ts';
 import { gamepadConnected, PadInput } from './input.ts';
 import { CONSOLE_PADS, type Controllers } from '../present/2d/controls.ts';
-import { evenFrames } from './pacing.ts';
+import { evenFrames, FIFTY_HZ } from './pacing.ts';
 import { tellWith } from './remote-log.ts';
 import { asked, settings } from './settings.ts';
 import { onPhone, TouchPad, touchChoice, touchDevice, touchShown } from './touch.ts';
@@ -160,6 +160,12 @@ export function applyBrightness(renderer: RendererApi, brightness: number): void
 /** Remastered, whether the floors fade into the dark as the game's do: FLOOR FADE in REMAKE OPTION, or the address's (`?floorfade=on` or `off`); changed as the setting is. */
 export const floorFade = { on: asked(params, 'floorfade', settings.floorFade, ['on', 'off']) !== 'off' };
 
+/** Whether the game runs at 50 Hz away from ONLINE MODE: GAME SPEED in REMAKE OPTION, or the address's (`?hz=60` or `50`); changed as the setting is. */
+export const fiftyHz = { on: asked(params, 'hz', settings.speed, ['60', '50']) === '50' };
+
+/** Whether the touch pad steers with a stick where the thumb lands rather than its d-pad: TOUCH DIRECTIONS in REMAKE OPTION, or the address's (`?stick=on` or `off`); changed as the setting is. */
+export const touchStick = { on: asked(params, 'stick', settings.touchStick, ['off', 'on']) === 'on' };
+
 /** Whether the CRT filter is laid over the picture: CRT FILTER in REMAKE OPTION, or the address's (`?crt=on` or `off`). */
 export const crtAsked = (): boolean => asked(params, 'crt', settings.crt, ['off', 'on']) === 'on';
 
@@ -180,6 +186,8 @@ export interface Player {
   moving?(): boolean;
   /** Whether a fight is on screen: its frames alone move the picture's density. */
   fighting(): boolean;
+  /** Whether the game is online (ONLINE MODE's server reached, a match played or one watched), where it runs at 60 Hz whatever GAME SPEED says. */
+  online?(): boolean;
   /** What the page's probe tells about the game. */
   probe(): Record<string, unknown>;
   /** What was playing, by name, for the game's stop (`crash.ts`). */
@@ -194,8 +202,9 @@ const LEAST_SCALE = 0.5;
 const VERY_LOW_FRAME_MS = 1000 / 30 - 4;
 
 /**
- * The game played at 60 fields a second from the pads, drawn each frame, until `stop` fields (the
- * address's, for comparing pictures) or a failure; `__tekken3()` tells what the page plays.
+ * The game played at 60 fields a second from the pads (50 at GAME SPEED's 50 Hz, but online),
+ * drawn each frame, until `stop` fields (the address's, for comparing pictures) or a failure;
+ * `__tekken3()` tells what the page plays.
  *
  * The picture's density is held to the frame budget by the engine's governor: while most of a
  * fight's frames come longer than `BUDGET_MS` after the one before (`?budget` sets it, `0` holds
@@ -268,6 +277,7 @@ export function play(player: Player, renderer: RendererApi, backend: string): vo
         if (failure !== null || stopAt <= fields || freeView.active) return;
         try {
           const start = performance.now();
+          touch?.steer(touchStick.on);
           if (touch?.show(touchShown(choice, device, gamepadConnected())) === true) input.uses(0, 'touch');
           const touched = touch?.word() ?? 0;
           if (touched !== 0) input.uses(0, 'touch');
@@ -312,7 +322,7 @@ export function play(player: Player, renderer: RendererApi, backend: string): vo
         meter.frame(now);
       },
     },
-    { fixedDt: 1 / 60, maxFrameTime: MOST_FIELDS / 60, frameSource: evenFrames() },
+    { fixedDt: 1 / 60, maxFrameTime: MOST_FIELDS / 60, frameSource: evenFrames(() => (fiftyHz.on && player.online?.() !== true ? FIFTY_HZ : 1)) },
   );
   crashDetails(() => ({ ...(player.about?.() ?? player.probe()), Field: fields, Renderer: backend, Quality: quality }));
   Object.assign(globalThis, {

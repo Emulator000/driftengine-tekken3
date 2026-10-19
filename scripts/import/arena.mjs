@@ -10,6 +10,10 @@
  * - The shade a ground corner takes by its depth past the fighters (0x8001df6c, 1024 bytes).
  * - Each stage's height (0x80025138, a halfword every four bytes) and the scenery grid's cell
  *   order (0x80025804, 36 halfwords).
+ * - Per stage, how its fighters are lit (0x80096c78, 0x1c bytes a stage): its back colour (the
+ *   halfword at 0, sixteenths), the colour the light comes to is multiplied by (red, green and
+ *   blue at 4 to 6), the light's colour (red at 10, green at 9, blue at 8) and its elevation and
+ *   azimuth (the halfwords at 12 and 14).
  * - Per stage, from its files: the ground map's kind (`+0x324`) and shade strength (`+0x326`),
  *   and the scenery model's cell size (the model's word at 20; 0 for Tekken Ball's beach, 19,
  *   which has none, nor Tekken Force's stages, 15 to 18).
@@ -22,6 +26,8 @@ const FORCE_TEMPLATE = 0x8001e6c4;
 const SHADES = 0x8001df6c;
 const STAGE_HEIGHTS = 0x80025138;
 const GRID_CELLS = 0x80025804;
+const FIGHTER_LIGHTS = 0x80096c78;
+const FIGHTER_LIGHT = 0x1c;
 const STAGES = 20;
 const VERTICES = 121;
 const QUADS = 100;
@@ -82,5 +88,14 @@ export function arenaTables(exe, root) {
     stageHeights: Array.from({ length: STAGES }, (_, stage) => exe.s16(STAGE_HEIGHTS + stage * 4)),
     gridCells: Array.from({ length: 36 }, (_, i) => exe.s16(GRID_CELLS + i * 2)),
     stages,
+    fighterLights: Array.from({ length: STAGES }, (_, stage) => {
+      const at = FIGHTER_LIGHTS + stage * FIGHTER_LIGHT;
+      return {
+        back: exe.u16(at) >> 4,
+        base: [exe.u8(at + 4), exe.u8(at + 5), exe.u8(at + 6)],
+        light: [exe.u8(at + 10), exe.u8(at + 9), exe.u8(at + 8)],
+        angles: [exe.u16(at + 12) & 0xfff, exe.u16(at + 14) & 0xfff],
+      };
+    }),
   };
 }

@@ -3,7 +3,8 @@
  * (121 vertices as x and z, 100 quads of four vertex numbers) and Tekken Force's (44 and 30), the shade a ground corner takes by
  * its depth past the fighters, each stage's height, the scenery grid's cell order, and per stage
  * its ground's kind and shade strength and its scenery's cell size (0 for a stage with no scenery,
- * Tekken Ball's beach; null for a stage not extracted), for the twenty stage numbers.
+ * Tekken Ball's beach; null for a stage not extracted), for the twenty stage numbers; and per stage
+ * how its fighters are lit.
  */
 import { AssetError, expectArray, expectInts, expectObject } from './validate.ts';
 
@@ -15,6 +16,18 @@ export interface StageLayout {
   readonly groundKind: number;
   readonly shadeStrength: number;
   readonly cellSize: number;
+}
+
+/**
+ * How a stage's fighters are lit: the back colour every face takes (0 to 255, the light's scale),
+ * the colour the light comes to is multiplied by (red, green, blue; 0x80 the texture's own), the
+ * light's colour (red, green, blue, 0 to 255), and its elevation and azimuth (4096ths of a turn).
+ */
+export interface FighterLightRecord {
+  readonly back: number;
+  readonly base: readonly [number, number, number];
+  readonly light: readonly [number, number, number];
+  readonly angles: readonly [number, number];
 }
 
 export interface GroundTemplate {
@@ -30,6 +43,7 @@ export interface ArenaTables {
   readonly stageHeights: readonly number[];
   readonly gridCells: readonly number[];
   readonly stages: readonly (StageLayout | null)[];
+  readonly fighterLights: readonly FighterLightRecord[];
 }
 
 function groundTemplate(value: unknown, where: string, vertexCount: number, quadCount: number): GroundTemplate {
@@ -58,6 +72,14 @@ export function parseArenaTables(json: unknown, where = 'tables/arena.json'): Ar
       const [cellSize] = expectInts([stage.cellSize], `${where} stages[${i}].cellSize`, 1, (n) => new Int32Array(n), 0, 0x7fffffff);
       if (!(groundKind! >= 0 && groundKind! <= 3)) throw new AssetError(`${where} stages[${i}].groundKind`, `is ${groundKind}, not a floor shaded by depth (0) or lit (1 to 3)`);
       return { groundKind: groundKind!, shadeStrength: shadeStrength!, cellSize: cellSize! };
+    }),
+    fighterLights: expectArray(o.fighterLights, `${where} fighterLights`, STAGES).map((l, i) => {
+      const light = expectObject(l, `${where} fighterLights[${i}]`);
+      const [back] = expectInts([light.back], `${where} fighterLights[${i}].back`, 1, (n) => new Uint8Array(n), 0, 0xff);
+      const base = expectInts(light.base, `${where} fighterLights[${i}].base`, 3, (n) => new Uint8Array(n), 0, 0xff);
+      const colour = expectInts(light.light, `${where} fighterLights[${i}].light`, 3, (n) => new Uint8Array(n), 0, 0xff);
+      const angles = expectInts(light.angles, `${where} fighterLights[${i}].angles`, 2, (n) => new Uint16Array(n), 0, 0xfff);
+      return { back: back!, base: [base[0]!, base[1]!, base[2]!], light: [colour[0]!, colour[1]!, colour[2]!], angles: [angles[0]!, angles[1]!] };
     }),
   };
 }

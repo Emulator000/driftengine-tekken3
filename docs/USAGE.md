@@ -69,6 +69,8 @@ address's.
 | `quality=verylow` | The picture for an entry-level phone: the scene drawn straight to the screen with no pass after it, one pixel to the CSS pixel and no more pixels than a 640 by 480 picture, thirty pictures a second (the game still runs sixty fields), and the fighters with the console's meshes. It is the default on a phone whose GPU the browser names as an entry-level part (a Mali-G31, G51, G52 or G57, an Adreno 5xx or 600s to 610s, or a PowerVR) |
 | `budget=N` | The frame time, in milliseconds, the picture's density is held to (20 by default): while most of a fight's frames take longer, the picture steps down toward half its pixels each way, and back up as the frames allow; `0` holds it still |
 | `touch=1`, `touch=0` | The touch pad over the picture anywhere and always, or hidden (as TOUCH PAD in REMAKE OPTION; by default on a touch screen or a phone while no gamepad is connected). A phone shows it while no gamepad is connected even with `touch=0` |
+| `stick=on`, `stick=off` | The touch pad steering with a stick where the thumb lands, or its d-pad (as TOUCH DIRECTIONS in REMAKE OPTION) |
+| `hz=60`, `hz=50` | The game at 60 fields a second, or at a PAL console's 50 (as GAME SPEED in REMAKE OPTION; online always 60) |
 | `remaster=on`, `remaster=off` | The fight remastered or not (as REMASTER in REMAKE OPTION), once `npm run remaster` has made its assets |
 | `look=light`, `look=normal`, `look=strong` | The remaster's look (as LOOK in REMAKE OPTION) |
 | `brightness=low`, `brightness=normal`, `brightness=high` | The remaster's brightness (as BRIGHTNESS in REMAKE OPTION) |
@@ -153,15 +155,17 @@ or the app) for every start after.
 | CLOTH | CLEAR OF LEGS (a board's fighter's coat panels and the tails a fighter hangs from the hips, a board's model's or the disc's, kept clear of the legs: a panel carried over a raised thigh, a tail put out where a leg swings into it), ORIGINAL (as the board and the console draw them, as `cloth=original`) |
 | PICTURE | AUTO (by the device), HIGH, LOW, VERY LOW (as `quality=`) |
 | FRAME RATE | OFF, ON (as `F`) |
+| GAME SPEED | 60 HZ (the default: the game's 60 fields a second, as an American or Japanese console runs it), 50 HZ (50 a second, as a PAL console runs it: five sixths of the speed, the music as it is). ONLINE MODE always plays at 60 HZ, its waiting room, its matches and the fights watched; changed at once |
 | TOUCH PAD | AUTO (on a touch screen or a phone, hidden while a gamepad is connected), ON (always), OFF (hidden; a phone still shows it while no gamepad is connected, so it can always be played) |
+| TOUCH DIRECTIONS | D-PAD (the default: a d-pad at the bottom left, as a DualSense's), STICK (a stick where the left thumb lands); changed at once |
 | REMASTER | OFF, ON (the fight drawn with the engine's lighting, the stage's own sky, light and 3D floor, and the assets `npm run remaster` made; until it has, the page says RUN NPM RUN REMASTER FIRST; off at the lowest picture quality) |
 | LOOK | LIGHT, NORMAL, STRONG (listed while REMASTER is on: how strongly the remastered picture is graded, its shadows toward teal and its lights toward magenta, its corners darkened and its edges fringed; changed at once) |
 | BRIGHTNESS | LOW, NORMAL, HIGH (listed while REMASTER is on: how brightly the remastered picture is exposed, LOW as it was first drawn; changed at once) |
 | FLOOR FADE | ON, OFF (listed while REMASTER is on: the floors darkened by depth, or away from the stage's lights, as the game darkens its own, an arcade stage's own floors with them; or lit evenly; changed at once) |
-| REACHABLE WALLS | ONLINE ONLY (the default: walls in online matches and the waiting room, none offline), ON (in every ordinary mode offline too: Arcade, Versus, Team Battle, Time Attack, Survival, Practice), OFF (none offline; online, a match you host has none). With walls, the stage stands still, unturned, its walls 9.6 m from its middle, the stage drawn up to half as large again so its own nearest walls meet them; where a stage is open or its walls stand farther, the walls there are unseen. Nobody walks or is knocked through a wall: backed against one, a fighter is pinned there, and a push into it moves the one pushing. A hit that would knock a fighter a long way back, caught by the wall, splats it: on its feet it crumples against the wall, then slides to the ground; in the air it drops straight down the wall. Once a combo; the third clean hit after a splat makes the fighter fall. The camera, where the game would put it past a wall, comes in along its line to the fighters; where that would bring it too near them (the fighters along the wall), or where it looks down from high over them, the stage between is left out. Never in Tekken Ball, Tekken Force or the attract demo; taken at the next match |
+| REACHABLE WALLS | ONLINE ONLY (the default: walls in online matches and the waiting room, none offline), ON (in every ordinary mode offline too: Arcade, Versus, Team Battle, Time Attack, Survival, Practice), OFF (none offline; online, a match you host has none). With walls, the stage stands still, unturned, its walls 9.6 m from its middle, the stage drawn up to half as large again so its own nearest walls meet them; where a stage is open or its walls stand farther, the walls there are unseen. Nobody walks or is knocked through a wall: backed against one, a fighter is pinned there, and a push into it moves the one pushing. A hit that would knock a fighter a long way back, caught by the wall, splats it: on its feet it crumples against the wall, then slides to the ground; in the air it drops straight down the wall. Once a combo; the third clean hit after a splat makes the fighter fall. The camera stays where the game puts it, as far from the fighters as without walls: where that is past a wall, the stage between it and the fighters is left out (on an arcade stage, all of it nearer the camera than the fighters, and what stands past the walls on its side), and where it looks down from high over them, the stage under it. Never in Tekken Ball, Tekken Force or the attract demo; taken at the next match |
 | CRT FILTER | OFF (the default), ON: the picture as a tape played on a television showed it. It is softened, a little across, and its colour much more, smeared to the right of the edges it belongs to. Over it lie soft scanlines (240 down the picture), a faint aperture grille of red, green and blue columns and darkened corners, the picture under them a little brighter. A fine grain crawls over it, a faint band rolls slowly down and the picture flickers a little; all three hold still where the system asks for less motion. Laid over the picture, so the same with any renderer and quality; changed at once |
 
-The frame rate and the CRT filter show or hide at once, and REACHABLE WALLS is taken at the next match. The others change what the game loads: while one differs
+The frame rate, the game's speed, the touch pad's directions and the CRT filter change at once, and REACHABLE WALLS is taken at the next match. The others change what the game loads: while one differs
 from the start's, the page says LEAVING RESTARTS THE GAME, and leaving it starts the game again
 (with auto save on, the progress is saved first).
 
@@ -217,7 +221,7 @@ its select, not paused, the page in sight (with a server from 0.7.2; a player of
 is asked whenever they wait), and from 0.7.6 with the fight on your screen a second already, never
 while the versus screen before it, or the dissolve from it, still shows, however long your device
 takes to show the fight. The fight holds under a card with their name and a bar running down the
-seconds the server gives (10 by default): start says yes, select no, the two buttons the waiting
+seconds the server gives (10 by default), the game's own challenger sounding as it shows: start says yes, select no, the two buttons the waiting
 fight does not fight with (a press counts once the card has settled, half a second, as the two
 answers show). Both yes, a card names the other player a moment and the match starts. In the
 quick match a no puts both of you back in the queue, kept apart from each other 30 seconds, then
@@ -248,7 +252,15 @@ the other, or that it IS LOADING. Between two games of 0.7.6 or later it waits h
 takes to load, so long as it hears from it (a game loading says so a few times a second, however
 slowly its frames come); with a 0.6.5 or 0.6.6 game, which does not say when it is ready, the one
 ready first goes on as before, and with one of 0.6.7 to 0.7.5 that says nothing of loading or of
-being ready for three seconds, it goes in after it. A round's end (its replay, the win poses) is cut short only
+being ready for three seconds, it goes in after it. Before a game says it is ready it draws the
+fight's first few pictures hidden, the versus screen (or the black after it) drawn again over each,
+so a device slow to draw a fight's first pictures is slow behind its own loading screen; gone into
+the fight, each of you still sees the loading screen until the other has played a moment into it,
+so neither sees the fight stand still, and the other is waited for up to thirty seconds
+there (a game that has gone is told by the server at once); a match ended before its fight did
+(the connection lost, the games differing, the other player leaving) says why in the waiting room
+a few seconds, over what it waits for. A name changed on ONLINE MODE's page is the one the server
+knows at once (the page calls it again). A round's end (its replay, the win poses) is cut short only
 once both of you have pressed to skip it; until then it plays on, for both.
 
 What the other player presses is guessed until it arrives, and a guess put right rolls the game
@@ -277,9 +289,10 @@ has no streak counted, and the player it plays is counted on their own game's wo
 Each side plays its own pad at once and the other's as it arrives, guessing it held until then; a
 press that comes late rolls the game back to its field and plays on again within the frame (eight
 fields at most: one later waits for it, and five seconds of waiting ends the match, the other's
-page answering or not, unless the other side is loading). A press made while a side waits is played with its next field. Both sides compare a
+page answering or not, unless the other side is loading, or the fight has just started and the
+other is not yet playing it, which it waits for thirty seconds). A press made while a side waits is played with its next field. Both sides compare a
 fingerprint of the game's state every eight fields; a difference ends the match and the console
-names the field. The line over the picture shows the opponent, the round trip, the input delay,
+names the field. The line at the foot of the picture (over the touch pad's Select and Start where it shows) shows the opponent, the round trip, the input delay,
 the rollbacks and whether the presses go straight between the two machines (DIRECT) or through the
 server; and says so while the other side loads or is waited for. Should the direct connection
 close, or a wait over it last half a second, the presses go through the server as well for the rest
@@ -438,9 +451,11 @@ its memory where the browser tells it, to the machine serving it, which keeps th
 
 ### On a touch screen
 
-The touch pad drives the first player: a stick where the left thumb lands (eight ways), the four
-buttons on the right in a diamond as on the pad (2 above, 1 and 4 either side, 3 below; a thumb
-between two holds both), Select and Start between the thumbs. Start pauses the fight, as on the
+The touch pad drives the first player: a d-pad at the bottom left, as a DualSense's (four keys, and a
+thumb between two of them holds both, its diagonal's tiny arrow lit; a thumb run past the keys
+still steers by the d-pad's middle), or with TOUCH DIRECTIONS at STICK a stick where the left thumb
+lands (eight ways); the four buttons on the right in a diamond as on the pad (2 above, 1 and 4
+either side, 3 below; a thumb between two holds both), Select and Start between the thumbs. Start pauses the fight, as on the
 pad. The first touch takes the page to full screen in landscape where the browser lets it; the
 Android app is full screen already.
 

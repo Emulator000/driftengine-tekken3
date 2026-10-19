@@ -350,7 +350,12 @@ test('two Versus games with the walls over a bad link reach the wall and stay th
  * paths) on the imported data, its snapshotter leaving out each machine's own parts and `left`.
  */
 async function versusGameOf(load, left = []) {
-  const json = async (name) => JSON.parse(readFileSync(path.join(assets, name), 'utf8'));
+  /* An older release's code reads the assets this one imported, which hold all its own, as the format it wrote. */
+  const { ASSET_FORMAT } = await load('src/assets/manifest.ts');
+  const json = async (name) => {
+    const read = JSON.parse(readFileSync(path.join(assets, name), 'utf8'));
+    return name === 'manifest.json' ? { ...read, format: ASSET_FORMAT } : read;
+  };
   const { loadFightTables, loadMoveset } = await load('src/assets/load.ts');
   const { fightDataFor, matchMovesets } = await load('src/sim/fight/match.ts');
   const { Game } = await load('src/sim/game/game.ts');
@@ -393,7 +398,7 @@ async function besideRelease(t, version, check = () => {}) {
     check(games);
     /* As they start: the same fingerprint with those fields left out, another with them in. */
     assert.equal(games[1].snapshotter.digestNow(), games[0].snapshotter.digestNow(), 'the same game as they start');
-    assert.notEqual(new StateSnapshotter(games[1].state, ['remake', 'online']).digestNow(), games[0].snapshotter.digestNow(), "the fields it lacks in, they differ");
+    if (left.length > 0) assert.notEqual(new StateSnapshotter(games[1].state, ['remake', 'online']).digestNow(), games[0].snapshotter.digestNow(), "the fields it lacks in, they differ");
     const match = pair(games, { latencyMs: 45, jitterMs: 20, loss: 0.05, reorder: 0.05, reorderMs: 20 });
     run(match, 2400, versusScript);
     const [a, b] = match.sides;
@@ -415,3 +420,5 @@ test("a Versus game of this release with the walls off and one of 0.6.5 pick the
   besideRelease(t, '0.6.5', (games) => assert.equal(games[1].state.world.options.walls, 0, "no walls on this release's side")));
 
 test("a Versus game of this release and one of 0.7.0 pick their characters, fight and stay the same game over a bad link, the field of the players who see the fight from the other side left out of this one's fingerprint", { skip, timeout: 300_000 }, (t) => besideRelease(t, '0.7.0'));
+
+test('a Versus game of this release and one of 0.7.6 pick their characters, fight and stay the same game over a bad link, nothing left out of either fingerprint', { skip, timeout: 300_000 }, (t) => besideRelease(t, '0.7.6'));

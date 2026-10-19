@@ -174,6 +174,25 @@ export class ScenePresenter {
     this.end();
   }
 
+  /**
+   * The last frame the scenes drew, drawn again whole over a frame drawn to be hidden (an online
+   * fight drawn before it shows, so a device slow to draw its first pictures is slow behind its
+   * versus screen); false where there is none to draw again (it lay over a 3D picture or a movie),
+   * the frame then black.
+   */
+  redrawLast(width: number, height: number): boolean {
+    const last = this.last;
+    this.renderer.beginFrame([0, 0, 0]);
+    this.renderer.endFrame();
+    if (last === null || this.begin(width, height, true)) return false;
+    this.art.redraw(last.art, 1);
+    this.light.redraw(last.light, 1);
+    this.layer.redraw(last.layer, 1);
+    this.over.redraw(last.over, 1);
+    this.end();
+    return true;
+  }
+
   /** Whether the picture moves between fields: a dissolve under way, or a movie's frames drawn. */
   get moving(): boolean {
     return this.dissolve !== null || this.movieDrawn;
@@ -193,11 +212,10 @@ export class ScenePresenter {
 
   /**
    * The layers begun, their atlases keeping every picture while a dissolve still draws the frame
-   * before; true when any atlas was emptied (a new height), the dissolve and the last frame then
-   * dropped with their pictures.
+   * before (or the last frame is drawn again, `keep`); true when any atlas was emptied (a new
+   * height), the dissolve and the last frame then dropped with their pictures.
    */
-  private begin(width: number, height: number): boolean {
-    const keep = this.dissolve !== null;
+  private begin(width: number, height: number, keep = this.dissolve !== null): boolean {
     const art = this.art.begin(width, height, keep);
     const layer = this.layer.begin(width, height, keep);
     const light = this.light.begin(width, height, keep);
