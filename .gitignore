@@ -16,6 +16,7 @@ out/
 # game's content, whatever its format.
 public/data/
 public/assets/
+local-remaster/
 
 # Local configuration.
 .env
