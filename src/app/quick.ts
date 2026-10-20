@@ -20,7 +20,6 @@ import { asked, settings } from './settings.ts';
 import { startSound } from './sound.ts';
 import { rosterWord } from '../net/online.ts';
 import { StateSnapshotter } from '../net/snapshot.ts';
-import { yoshimitsuOverride } from './yoshimitsu.ts';
 
 /** Optional local True Ogre import fitted to the existing gameplay skeleton. */
 const trueOgreOverride = async (pack: number, load: (path: string) => Promise<ArrayBuffer>): Promise<ArrayBuffer | null> => {
@@ -181,12 +180,6 @@ export const drawingFiles: DrawingFiles = {
     if (trueOgre !== null) {
       const texture = await assetImage(`overrides/true-ogre/${pack}.png`);
       return { mesh: trueOgre, texture, maps: null };
-    }
-    const refined = await yoshimitsuOverride(pack, params.get('yoshimitsu'), assetBytes);
-    if (refined !== null) {
-      const folder = params.get('yoshimitsu') === 'tag' ? 'yoshimitsu-tag' : 'yoshimitsu';
-      const texture = await assetImage(`overrides/${folder}/08.png`).catch(() => atlas('fighters', two(pack)));
-      return { mesh: refined, texture, maps: null };
     }
     const kind = boardFighters.on && (await arcadeStagesOf()).fighters.has(pack) ? 'arcade/fighters' : 'fighters';
     const [mesh, texture, maps] = await Promise.all([fighterMesh(kind, two(pack)), atlas(kind, two(pack)), mapsOf(kind, two(pack))]);
