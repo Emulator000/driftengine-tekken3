@@ -22,21 +22,6 @@ import { rosterWord } from '../net/online.ts';
 import { StateSnapshotter } from '../net/snapshot.ts';
 import { yoshimitsuOverride } from './yoshimitsu.ts';
 
-/** Optional local True Ogre import fitted to the existing gameplay skeleton. */
-const trueOgreOverride = async (pack: number, load: (path: string) => Promise<ArrayBuffer>): Promise<ArrayBuffer | null> => {
-  if (pack !== 32 && pack !== 33) return null;
-  try {
-    const bytes = await load(`overrides/true-ogre/${pack}.ftr`);
-    const header = new DataView(bytes);
-    const vertices = header.getUint32(8, true), indices = header.getUint32(12, true);
-    if (vertices < 1000 || vertices > 65535 || indices < 3000 || indices > 15000 * 3 || indices % 3) throw new Error('incompatible True Ogre mesh counts');
-    return bytes;
-  } catch (error) {
-    console.warn('True Ogre import unavailable; using the selected original model.', error);
-    return null;
-  }
-};
-
 /** Roster ids the remake cannot set up yet: Mokujin's draw. */
 const NOT_YET = new Set([15]);
 const KAZUYA = 22;
@@ -177,11 +162,6 @@ const stage = async (id: number): Promise<{ mesh: ArrayBuffer; ground: ArrayBuff
 /** The fighters' and stages' drawing data, by pack and stage. */
 export const drawingFiles: DrawingFiles = {
   fighter: async (pack) => {
-    const trueOgre = await trueOgreOverride(pack, assetBytes);
-    if (trueOgre !== null) {
-      const texture = await assetImage(`overrides/true-ogre/${pack}.png`);
-      return { mesh: trueOgre, texture, maps: null };
-    }
     const refined = await yoshimitsuOverride(pack, params.get('yoshimitsu'), assetBytes);
     if (refined !== null) {
       const folder = params.get('yoshimitsu') === 'tag' ? 'yoshimitsu-tag' : 'yoshimitsu';
