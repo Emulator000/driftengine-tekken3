@@ -20,6 +20,7 @@ import { asked, settings } from './settings.ts';
 import { startSound } from './sound.ts';
 import { rosterWord } from '../net/online.ts';
 import { StateSnapshotter } from '../net/snapshot.ts';
+import { yoshimitsuOverride } from './yoshimitsu.ts';
 
 /** Roster ids the remake cannot set up yet: Mokujin's draw. */
 const NOT_YET = new Set([15]);
@@ -91,6 +92,7 @@ export async function boardWord(): Promise<string> {
  */
 export const boardFighters = { on: true };
 const optional = (path: string): Promise<ImageBitmap | null> => assetImage(path).catch(() => null);
+
 /** A fighter's, an intro model's or a stage's texture atlas by its file's name: remastered, the one made for it; the enlarged one, or the original. */
 const atlas = async (kind: string, name: string): Promise<ImageBitmap> =>
   (remastered() ? await optional(`remaster/${kind}/${name}.png`) : null) ?? (smooth ? assetImage(`textures/${kind}/${name}.png`) : image(`${kind}/${name}.png`));
@@ -160,6 +162,12 @@ const stage = async (id: number): Promise<{ mesh: ArrayBuffer; ground: ArrayBuff
 /** The fighters' and stages' drawing data, by pack and stage. */
 export const drawingFiles: DrawingFiles = {
   fighter: async (pack) => {
+    const refined = await yoshimitsuOverride(pack, params.get('yoshimitsu'), assetBytes);
+    if (refined !== null) {
+      const folder = params.get('yoshimitsu') === 'tag' ? 'yoshimitsu-tag' : 'yoshimitsu';
+      const texture = await assetImage(`overrides/${folder}/08.png`).catch(() => atlas('fighters', two(pack)));
+      return { mesh: refined, texture, maps: null };
+    }
     const kind = boardFighters.on && (await arcadeStagesOf()).fighters.has(pack) ? 'arcade/fighters' : 'fighters';
     const [mesh, texture, maps] = await Promise.all([fighterMesh(kind, two(pack)), atlas(kind, two(pack)), mapsOf(kind, two(pack))]);
     return { mesh, texture, maps };
