@@ -1,0 +1,10 @@
+import {readFileSync,writeFileSync,copyFileSync} from 'node:fs';
+import {fighterGlb} from './lib/fighter-glb.mjs';
+import {readFtr,writeFtr5} from './lib/ftr.mjs';
+const dir='local-remaster/true-ogre/06b-parts';
+const s=JSON.parse(readFileSync(`${dir}/true_ogre.source.json`));
+const png=readFileSync(`${dir}/true_ogre_diffuse_4k.png`);
+const ftr=writeFtr5(s.mesh);
+const {glb}=fighterGlb(s.mesh,s.skeleton,png,s.frames,{exactSkin:true,clips:s.clips});
+writeFileSync(`${dir}/true_ogre.ftr`,ftr); writeFileSync(`${dir}/true_ogre.glb`,glb);
+console.log({triangles:s.mesh.indices.length/3,vertices:s.mesh.vertices.length,frames:s.frames.length,clips:s.clips.length,bytes:glb.length});
