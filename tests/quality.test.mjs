@@ -2,7 +2,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { entryLevelGpu, fightQuality } from '../src/present/3d/quality.ts';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { entryLevelGpu, FIGHTERS_BRIGHTEST, fightQuality, REMASTER_BLOOM } from '../src/present/3d/quality.ts';
+import { fighterLight } from '../src/present/3d/fighter/fighter-light.ts';
 
 test('the smallest Malis, any Mali of one or two cores, the Adreno 5xx and 600s to 610s, and PowerVR are entry-level parts', () => {
   for (const name of ['ANGLE (ARM, Mali-G57 MC1, OpenGL ES 3.2)', 'Mali-G57', 'Mali-G52 MC2', 'Mali-G31 MP2', 'Mali-G68 MP2', 'ANGLE (ARM, Mali-G68 MC2, OpenGL ES 3.2)', 'Mali-G76 MP1', 'Adreno (TM) 619', 'Adreno (TM) 610', 'Adreno (TM) 506', 'ANGLE (Qualcomm, Adreno (TM) 618, OpenGL ES 3.2)', 'PowerVR Rogue GE8320']) {
@@ -34,4 +39,29 @@ test("a phone's low picture has a smaller shadow map, filtered less, than a comp
   assert.equal(low.shadowFilterTaps, 8);
   assert.equal(high.directionalShadowMapSize, undefined, "the engine's own");
   assert.equal(high.shadowFilterTaps, undefined);
+});
+
+test("the bloom starts past the brightest a fighter is ever lit (a white texel at twice the texture, as the console holds it), so a fighter never blooms and only what is brighter, the sparks and flashes, does", () => {
+  assert.ok(Math.abs(FIGHTERS_BRIGHTEST - (255 / 128) ** 2.2) < 1e-12);
+  assert.equal(fightQuality('high').bloomThreshold, FIGHTERS_BRIGHTEST);
+  assert.equal(REMASTER_BLOOM.bloomThreshold, FIGHTERS_BRIGHTEST);
+});
+
+const assets = path.join(path.dirname(fileURLToPath(import.meta.url)), '../public/assets');
+const arena = path.join(assets, 'tables/arena.json');
+
+test("under every stage's light, a white texel on a face turned any way comes to less than the bloom's start: the back colour, the light by how far the face turns to it, the light from below by how far it turns down", { skip: !existsSync(arena) && 'no imported data' }, () => {
+  const { fighterLights } = JSON.parse(readFileSync(arena, 'utf8'));
+  fighterLights.forEach((record, i) => {
+    const lit = fighterLight(record, i);
+    for (let a = 0; a < 64; a += 1) {
+      for (let b = 0; b <= 32; b += 1) {
+        const [turn, tilt] = [(a / 64) * 2 * Math.PI, (b / 32) * Math.PI];
+        const n = [Math.sin(tilt) * Math.cos(turn), Math.cos(tilt), Math.sin(tilt) * Math.sin(turn)];
+        const to = Math.max(0, n[0] * lit.toward[0] + n[1] * lit.toward[1] + n[2] * lit.toward[2]);
+        const down = (1 - n[1]) / 2;
+        for (let c = 0; c < 3; c += 1) assert.ok(lit.emission[c] + lit.sun[c] * to + lit.ground[c] * down <= FIGHTERS_BRIGHTEST, `stage light ${i}`);
+      }
+    }
+  });
 });

@@ -5,7 +5,7 @@
  */
 import { createRenderer, describeGpu, ResolutionGovernor, startLoop, type RenderQualityOptions, type RendererApi } from '@driftengine/core';
 import { remasterGrade } from '../present/3d/grade.ts';
-import { entryLevelGpu, fightQuality, isQuality, type Quality } from '../present/3d/quality.ts';
+import { entryLevelGpu, fightQuality, isQuality, REMASTER_BLOOM, type Quality } from '../present/3d/quality.ts';
 import { crashDetails, showCrash } from './crash.ts';
 import { FpsMeter } from './fps-meter.ts';
 import { FrameStats } from './frame-stats.ts';
@@ -101,7 +101,7 @@ export async function pageRenderer(): Promise<{ renderer: RendererApi; backend: 
   /*
    * Remastered, the picture goes through a filmic curve steeper than the default through the mid
    * tones with a short toe, so the shade the stages are painted with stays readable, with a
-   * reflection probe, its bloom only on what is well past white, and screen-space reflections at each
+   * reflection probe, its bloom only on what is brighter than a fighter is ever lit, and screen-space reflections at each
    * surface's roughness, resolved with the edges over frames (one sample a pixel, which the
    * reflections march through); and a look of its own: its colour graded (`grade.ts`), the lens's
    * corners a little darker, a faint colour fringe toward the picture's edges, and its lights
@@ -115,7 +115,7 @@ export async function pageRenderer(): Promise<{ renderer: RendererApi; backend: 
     outputTransform: 'filmic',
     outputExposure: 1,
     reflectionProbeSize: 256,
-    ...(chosen.bloom === undefined ? {} : { bloom: 0.26, bloomThreshold: 1.6 }),
+    ...(chosen.bloom === undefined ? {} : REMASTER_BLOOM),
     screenSpaceReflections: { reachM: 20, maxRoughness: 0.6, blur: 0.05 },
     sceneSamples: 1,
     temporalAa: true,
