@@ -1,0 +1,15 @@
+import assert from 'node:assert/strict';
+import {readFileSync, writeFileSync} from 'node:fs';
+import {fighterGlb} from './lib/fighter-glb.mjs';
+import {readFtr, writeFtr5} from './lib/ftr.mjs';
+const dir='local-remaster/yoshimitsu/08-30k-pass2';
+const s=JSON.parse(readFileSync(`${dir}/yoshimitsu_enhanced.source.json`));
+const original=JSON.parse(readFileSync('local-remaster/yoshimitsu/08-ready/yoshimitsu_rounded.source.json'));
+assert.deepEqual(s.skeleton,original.skeleton); assert.deepEqual(s.clips,original.clips);
+assert.ok(s.mesh.indices.length/3<=30000);
+const ftr=writeFtr5(s.mesh); assert.deepEqual(readFtr(ftr),s.mesh);
+const png=readFileSync(`${dir}/yoshimitsu_diffuse_4k.png`);
+const {glb}=fighterGlb(s.mesh,s.skeleton,png,s.frames,{exactSkin:true,clips:s.clips});
+writeFileSync(`${dir}/yoshimitsu_enhanced.ftr`,ftr); writeFileSync(`${dir}/yoshimitsu_enhanced.glb`,glb);
+writeFileSync('public/assets/overrides/yoshimitsu/08.ftr',ftr); writeFileSync('public/assets/overrides/yoshimitsu/08.png',png);
+console.log({triangles:s.mesh.indices.length/3,vertices:s.mesh.vertices.length,bytes:glb.length});
