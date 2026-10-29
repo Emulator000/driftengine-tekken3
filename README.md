@@ -350,13 +350,13 @@ field. What is done and what is not yet:
 | Power-on: the logo, the opening movie, the title | Done | |
 | The attract cycle: the in-engine intros, the demo fights, the other movie | Done | |
 | The mode menu | Done | Every mode starts |
-| The character select | Done | Both its layouts: one row, and two once more characters are earned (`?unlock` earns them all); Kazuya in a cell of his own when his files are built, Arcade cleared with him earning the next character as a clear with any new character does |
+| The character select | Done | Both its layouts: one row, and two once more characters are earned (`?unlock`, or 0 pressed five times on the title, earns them all); Kazuya in a cell of his own when his files are built, Arcade cleared with him earning the next character as a clear with any new character does |
 | The versus select: both players at once, the handicaps, the record of wins and draws | Done | Also Arcade's, with start and both shoulders held as it is chosen; `?versus` starts Versus; Kazuya in a column of his own when his files are built |
 | The versus screen | Done | |
 | Arcade: its ten opponents, Ogre's change into True Ogre, the continue, game over | Done | `?arcade=ROSTER` starts it at Ogre's stage |
 | The endings: each character's movie and captions, the credits | Done | |
 | The records screens and the name entry | Done | A new record's name comes from Time Attack and Survival; `?record` enters one |
-| The progress kept between plays: characters and costumes earned, the unlocks, the plays, the records, the options | Done | Saved on your device: the Options' SAVE DATA page (the memory card's), and the auto save |
+| The progress kept between plays: characters and costumes earned, the unlocks, the plays, the records, the options | Done | Saved on your device: the Options' SAVE DATA page (the memory card's), and the auto save, also as soon as a play changes the records |
 | A quick match without the menus (`?quick`) | Done | |
 | **The modes** | | |
 | Versus (two players) | Done | |

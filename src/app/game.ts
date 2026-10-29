@@ -33,7 +33,8 @@ import { applyBrightness, applyLook, assetImage, crtAsked, fiftyHz, floorFade, c
 import { CrtFilter } from './crt.ts';
 import { controlWords } from '../present/2d/controls.ts';
 import { boardFighters, boardWord, drawingFiles, introFiles, withArcadeFighters } from './quick.ts';
-import { readProgress, writeProgress } from './save.ts';
+import { readProgress, SaveAsItGoes, writeProgress } from './save.ts';
+import { isUnlockKey, UnlockCode, unlockByCode, UNLOCK_STEPS } from './unlock-code.ts';
 import { holdSongs } from './hold-song.ts';
 import { settings, writeSettings } from './settings.ts';
 import { frameRateShown, showFrameRate } from './fps-meter.ts';
@@ -51,8 +52,6 @@ const RECORD_STAGE_FRAMES = 30 * 60;
 const FORCE_RECORD = { score: 1234560, kills: 42, flags: 1 } as const;
 /** The page's shortcuts: a page started with one never saves the progress. */
 const SHORTCUTS = ['arcade', 'versus', 'ball', 'force', 'ending', 'record', 'unlock'] as const;
-/** The unlock schedule's steps, its last earning everything. */
-const UNLOCK_STEPS = 14;
 /** Arcade's stages; the last roster id `?arcade` takes, Kazuya's with his files. */
 const ARCADE_STAGES = 10;
 /** Tekken Force's stages, the final one the fifth. */
@@ -157,6 +156,25 @@ export async function playGame(): Promise<void> {
     }
   }
   const saves = !SHORTCUTS.some((key) => params.has(key));
+  const asItGoes = new SaveAsItGoes();
+  /*
+   * The title's code: 0 pressed five times, or the title tapped five times, earns everything the
+   * game unlocks on the next field, saved at once; any other key starts the count over.
+   */
+  const unlockCode = new UnlockCode();
+  let unlockAsked = false;
+  const onTitle = (): boolean => game.state.scene === Scene.TITLE && online?.playing !== true && online?.watching !== true;
+  window.addEventListener('keydown', (e) => {
+    if (!isUnlockKey(e)) unlockCode.reset();
+    else if (onTitle() && unlockCode.press(performance.now())) unlockAsked = true;
+  });
+  window.addEventListener(
+    'pointerdown',
+    (e) => {
+      if (e.pointerType !== 'mouse' && onTitle() && unlockCode.press(performance.now())) unlockAsked = true;
+    },
+    { capture: true },
+  );
   /* REMAKE OPTION's settings as the page started with them. */
   Object.assign(game.state.remake.settings, settings);
   Object.assign(game.state.remake.started, settings);
@@ -537,6 +555,13 @@ export async function playGame(): Promise<void> {
   /** A field of the local game, its saving, sound, motors and movie, and ONLINE MODE's page after it. */
   const localField = (pads: readonly [number, number]): void => {
     game.field(pads);
+    if (game.state.scene !== Scene.TITLE) unlockCode.reset();
+    else if (unlockAsked) {
+      unlockByCode(game.state, game.data);
+      if (saves) saveProgress(game.state);
+    }
+    unlockAsked = false;
+    if (saves) asItGoes.field(game.state);
     if (saves && game.state.saving !== 0 && game.state.kept !== null) writeProgress(game.state.kept);
     settle();
     rumble.field(game.state.rumble.out, performance.now());

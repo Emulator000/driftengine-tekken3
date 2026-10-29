@@ -55,7 +55,7 @@ address's.
 | `ball` | Starts Tekken Ball at once, the first pad in, on its character select (where the first to choose a character chooses the ball) |
 | `force`, `force=ROSTER`, `force=ROSTER,COSTUME` or `force=ROSTER,COSTUME,STAGE` | Starts Tekken Force at once, the first pad in: on its character select, or with that character chosen at that stage (1 to 4, 5 the final stage; by default the first) |
 | `ending=ROSTER` or `ending=ROSTER,COSTUME` | Plays that character's ending at once |
-| `unlock` | Earns everything the game unlocks, as its last unlock does: every character (the character select then shows its two rows), the costumes, Tekken Ball and the Theater |
+| `unlock` | Earns everything the game unlocks, as its last unlock does: every character (the character select then shows its two rows), the costumes, Tekken Ball and the Theater (the title's code earns the same and keeps it, in the apps too: [below](#unlocking-everything)) |
 | `unlock=ball` or `unlock=theater` | Earns Tekken Ball alone, or the Theater alone, as the game's own unlock does (the mode menu lists it, new) |
 | `record=time,ROSTER` or `record=survival,ROSTER,WINS` | Goes to the records with a new best time for that character (ten stages of 30 seconds, through Time Attack's results) or a survival record of that many wins (more than the tenth best has, through Survival's results), its name to enter, on the first pad |
 | `record=force,ROSTER` or `record=force,ROSTER,FLAGS` | Goes to Tekken Force's results for that character on the first side, a run cleared with a new best score, then the records; `FLAGS` 1 a copper key (the default), 8 Dr. B saved, 0x10 the bosses beaten shown |
@@ -107,11 +107,20 @@ configuration, the music, the display's place). Here it keeps them on the device
 the browser's storage for the page's address, or in the app's own. The Options' SAVE DATA page
 (the console's memory card page) saves them (SAVE), brings back what was last saved (LOAD), and
 turns the auto save on or off. With AUTO SAVE on, the game saves where the console saves on its
-own (on the way back to the title, and before the records) whenever the records changed; options
-changed in the Options are kept by a SAVE, or by the next of those. A device with nothing saved yet
-starts with AUTO SAVE and both pads' VIBRATION on. A page started with `arcade`, `versus`, `ball`,
+own (on the way back to the title, and before the records) whenever the records changed, and also
+as soon as it moves on after they change (a match's result, an ending, a record), so a game closed
+after a fight keeps it; options changed in the Options are kept by a SAVE, or by the next of
+those. A device with nothing saved yet starts with AUTO SAVE and both pads' VIBRATION on. A page started with `arcade`, `versus`, `ball`,
 `force`, `ending`, `record` or `unlock` reads the progress but never saves it, so those shortcuts
 leave it as it was. Clearing the site's data in the browser (or the app's) starts the game afresh.
+
+### Unlocking everything
+
+On the title (PRESS START BUTTON), press 0 five times within three seconds, or tap the screen
+five times on a phone: the game earns everything it unlocks, as `?unlock` does (every character,
+the costumes, Tekken Ball and the Theater), with a challenger's sound, and saves it at once, so it
+stays earned. It is for the apps, which have no address to add `?unlock` to, and works in a
+browser too. Any other key starts the count over.
 
 ## Controllers
 
