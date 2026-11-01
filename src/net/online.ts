@@ -168,24 +168,34 @@ export interface OnlineOptions<S> {
  * players and those of every release back to that one play each other; one that changes any of
  * them sets it to its own version.
  */
-export const PLAYS_AS = '0.7.12';
+export const PLAYS_AS = '0.7.13';
 
 /**
  * The older versions this release also plays a match as, each with the fields of the state its own
  * matches have and that version's has not: a match as one is played without what those fields
  * hold (the remake's walls; the moves into the screen of a player who sees the fight from the
  * other side going by that view), and those fields (all at rest) left out of its fingerprint. A
- * version whose matches differ from this one's in nothing but the code, as 0.7.6's to 0.7.8's,
- * leaves none out; a costume this one adds is played there as its character's second
- * (`playedFighter`).
+ * version whose matches differ from this one's in nothing but the code, as 0.7.6's to 0.7.8's and 0.7.12's,
+ * leaves none out; a costume the remake added after it is played there as its character's
+ * second (`playedFighter`).
  */
-export const ALSO_PLAYS: Readonly<Record<string, readonly string[]>> = { '0.7.8': [], '0.7.7': [], '0.7.6': [], '0.7.0': ['depthTurned'], '0.6.5': ['wallHit', 'carried', 'splatted', 'splatHits', 'walls', 'depthTurned'] };
+export const ALSO_PLAYS: Readonly<Record<string, readonly string[]>> = { '0.7.12': [], '0.7.8': [], '0.7.7': [], '0.7.6': [], '0.7.0': ['depthTurned'], '0.6.5': ['wallHit', 'carried', 'splatted', 'splatHits', 'walls', 'depthTurned'] };
 
-/** The costumes this version adds, by roster id: Ogre's third, which a board's form gives (`thirdCostume`). */
-const ADDED_COSTUMES: Readonly<Record<number, number>> = { 14: 2 };
+/** The costumes the remake adds, by roster id, and the version that added each: Ogre's third, which a board's form gives (`thirdCostume`). */
+const ADDED_COSTUMES: Readonly<Record<number, { readonly costume: number; readonly since: string }>> = { 14: { costume: 2, since: '0.7.12' } };
 
-/** A fighter as a match played as version `as` has it: a costume this version adds is its character's second in a match played as an older one. */
-export const playedFighter = (f: Fighter, as: string): Fighter => (as !== PLAYS_AS && ADDED_COSTUMES[f.roster] === f.costume ? { roster: f.roster, costume: 1 } : f);
+/** Whether version `a` is older than version `b`, each part compared as a number. */
+const olderThan = (a: string, b: string): boolean => {
+  const [x, y] = [a, b].map((v) => v.split('.').map(Number));
+  for (let k = 0; k < Math.max(x!.length, y!.length); k += 1) if ((x![k] ?? 0) !== (y![k] ?? 0)) return (x![k] ?? 0) < (y![k] ?? 0);
+  return false;
+};
+
+/** A fighter as a match played as version `as` has it: a costume the remake added after that version is its character's second. */
+export function playedFighter(f: Fighter, as: string): Fighter {
+  const added = ADDED_COSTUMES[f.roster];
+  return added !== undefined && added.costume === f.costume && olderThan(as, added.since) ? { roster: f.roster, costume: 1 } : f;
+}
 
 /**
  * Whether a match keeps the arcade board's fighters' own accessories: only where both sides draw

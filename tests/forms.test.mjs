@@ -46,10 +46,12 @@ test("a costume the disc has no model of is fought on its character's second cos
   assert.equal(f.sound, tables.roster.codes[20 * 4].sound, "True Ogre's voice");
 });
 
-test("Ogre's third costume is played as his second in a match played as a version before it, as itself from it on", () => {
+test("Ogre's third costume is played as his second in a match played as a version before it (0.7.12's), as itself from it on", () => {
   assert.deepEqual(playedFighter({ roster: OGRE, costume: 2 }, '0.7.8'), { roster: OGRE, costume: 1 });
   assert.deepEqual(playedFighter({ roster: OGRE, costume: 2 }, '0.6.5'), { roster: OGRE, costume: 1 });
-  assert.deepEqual(playedFighter({ roster: OGRE, costume: 2 }, '0.7.12'), { roster: OGRE, costume: 2 });
+  assert.deepEqual(playedFighter({ roster: OGRE, costume: 2 }, '0.7.12'), { roster: OGRE, costume: 2 }, 'the version that added it');
+  assert.deepEqual(playedFighter({ roster: OGRE, costume: 2 }, '0.7.13'), { roster: OGRE, costume: 2 });
+  assert.deepEqual(playedFighter({ roster: OGRE, costume: 2 }, '0.10.0'), { roster: OGRE, costume: 2 }, 'versions compared by number');
   assert.deepEqual(playedFighter({ roster: JIN, costume: 2 }, '0.7.8'), { roster: JIN, costume: 2 }, "another's third costume as it is");
   assert.deepEqual(playedFighter({ roster: OGRE, costume: 1 }, '0.7.8'), { roster: OGRE, costume: 1 });
 });

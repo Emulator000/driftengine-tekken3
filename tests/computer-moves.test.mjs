@@ -1,8 +1,10 @@
 /**
  * Moves that are not there, on the data `npm run extract` and `npm run import` build: a cancel's
  * target id neither side's moveset has a move for (nor the default move it falls back to), which
- * the computer passes over as the fight does, as True Ogre's computer meets Nina's; and a knockout
- * that gave no reaction and opened no cancel, with no move chosen next to fall into.
+ * the computer passes over as the fight does, as True Ogre's computer meets Nina's; a knockout
+ * that gave no reaction and opened no cancel, with no move chosen next to fall into; and a computer's
+ * last move going on to the default move (which no moveset has), its stance settled at the round's
+ * end from what the console reads there.
  */
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
@@ -13,6 +15,8 @@ import { fileURLToPath } from 'node:url';
 import { loadFightTables, loadMoveset } from '../src/assets/load.ts';
 import { chooseMoves } from '../src/sim/fight/cancel.ts';
 import { Fight } from '../src/sim/fight/fight.ts';
+import { settleStance } from '../src/sim/fight/flow.ts';
+import { DEFAULT_MOVE_ID } from '../src/sim/data/moveset.ts';
 import { fightDataFor, matchMovesets } from '../src/sim/fight/match.ts';
 import { FightStep } from '../src/sim/game/fight-scene.ts';
 import { Game } from '../src/sim/game/game.ts';
@@ -27,6 +31,8 @@ const json = async (name) => JSON.parse(readFileSync(path.join(assets, name), 'u
 const two = (n) => String(n).padStart(2, '0');
 
 const PAUL = 0;
+const LAW = 1;
+const LEI = 2;
 const NINA = 5;
 const JIN = 9;
 const TRUE_OGRE = 20;
@@ -95,4 +101,22 @@ test('a knockout that gave no reaction and opened no cancel has no move to fall 
     if (jin.next.move === null) none += 1;
   }
   assert.ok(0 < none, 'frames with no move chosen next');
+});
+
+test("a computer's last move going on to the default move, which neither moveset has, settles its stance from the flags the console reads there", { skip }, async () => {
+  const { fightData } = await loadAll();
+  const setup = { stage: 5, entrants: [{ roster: LEI, costume: 0, computer: true }, { roster: LAW, costume: 0, computer: true }] };
+  const data = fightData(setup);
+  const fight = Fight.quick(data, setup);
+  fight.field([0, 0]);
+  const lei = fight.state.fighters[0];
+  const own = data.sets[lei.movesetSlot] ?? data.sets[0];
+  const index = own.moveset.moves.findIndex((m) => m.next === DEFAULT_MOVE_ID);
+  assert.ok(0 <= index, 'Lei has moves going on to the default move');
+  assert.equal(data.moveIds[lei.movesetSlot][DEFAULT_MOVE_ID], null, 'which neither moveset has');
+  assert.ok(Number.isInteger(own.moveset.noMoveFlags) && 0 <= own.moveset.noMoveFlags && own.moveset.noMoveFlags <= 0xffff, 'the flags read where there is no move');
+  lei.move = { set: lei.movesetSlot === 1 && data.sets[1] !== null ? 1 : 0, index };
+  lei.next.move = null;
+  settleStance(fight.state, data, lei);
+  assert.equal(lei.input.replayHeld, (own.moveset.noMoveFlags & 0x204) !== 0 ? 0x1000 : 0);
 });

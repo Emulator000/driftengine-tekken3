@@ -172,5 +172,7 @@ export function importMoveset(file, motions, files, exe) {
     }
   }
   const camera = file.common ? { shots: [], scripts: [] } : movesetCamera(v, section(0x20), section(0x24));
-  return { moves, cancels, moveIds, missing, sounds, events, hitTables, ...camera };
+  /* An id with no move reads the record just before the first move (the cancel lists' end): its flags. */
+  const noMoveFlags = file.common ? 0 : v.getUint16(section(8) - MOVE_BYTES + 4, true);
+  return { moves, cancels, moveIds, missing, noMoveFlags, sounds, events, hitTables, ...camera };
 }
