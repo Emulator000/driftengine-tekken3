@@ -59,12 +59,17 @@ const FORCE_FINAL_STAGE = 4;
 /** Stages whose ground fades from the fighters at once, by the stage. */
 export const groundFadeOf = (stage: number): number => (stage < 1 || (2 < stage && stage !== 7) ? 10000 : 0x1964);
 
-/** A roster code's record: past the table, the game reads the fallback's. */
+/**
+ * A roster code's record: past the table, the game reads the fallback's. A costume the disc has no
+ * model of (one a board's form gives, `thirdCostume`) is fought on its character's second
+ * costume's model, which the form is drawn over.
+ */
 function codeOf(tables: FightTables, roster: number, costume: number): { code: number; sound: number; moveset: number; pack: number } {
   const code = roster * 4 + (costume & 3);
   if (code === ROSTER_CODES) throw new Error(`roster code ${code} reads past the roster's records`);
   const entry = tables.roster.codes[ROSTER_CODES < code ? FALLBACK_CODE : code]!;
-  return { code, sound: entry.sound, moveset: Math.min(entry.moveset, LAST_MOVESET), pack: code < ROSTER_CODES ? entry.pack : -1 };
+  const pack = code < ROSTER_CODES ? (entry.pack >= 0 ? entry.pack : (tables.roster.codes[(code & ~3) | 1]?.pack ?? -1)) : -1;
+  return { code, sound: entry.sound, moveset: Math.min(entry.moveset, LAST_MOVESET), pack };
 }
 
 /** The movesets a match loads: each side's, the second none (-1) when both play the same. */

@@ -432,6 +432,32 @@ function handShapes(model, handParts, accessories) {
 /** Whether the board's archive holds a stand-in for a costume it has no model of: a texture chain of one image. */
 export const standIn = ({ textures }) => readTimChain(textures).filter((t) => t.image).length <= 1;
 
+/** How far apart two models' bodies may reach on a joint, either way, and still be the one fighter. */
+const ALIKE = 1.5;
+
+/**
+ * How far a mesh's points reach on each body joint (`readFtr`'s vertices): the 95th percentile of
+ * their distances from the joint, over the points weighing at least half on it; 0 where none does.
+ */
+export function bodyReach(vertices) {
+  const reaches = Array.from({ length: BODY }, () => []);
+  for (const { influences } of vertices) {
+    for (const { joint, weight, point } of influences) if (joint < BODY && weight >= 0.5) reaches[joint].push(Math.hypot(...point));
+  }
+  return reaches.map((d) => (d.length === 0 ? 0 : d.sort((a, b) => a - b)[Math.floor(d.length * 0.95)]));
+}
+
+/**
+ * Whether a board's model (`board`, `readFtr`'s vertices) is the fighter the disc's pack draws
+ * (`disc`): on every body joint both have points on, it reaches within half again of the disc's,
+ * either way. A board keeps another fighter in a pack's place where it has no such costume (True
+ * Ogre in Ogre's second), whose body reaches far past it.
+ */
+export function sameBody(board, disc) {
+  const [a, b] = [bodyReach(board), bodyReach(disc)];
+  return a.every((reach, joint) => reach === 0 || b[joint] === 0 || (reach <= b[joint] * ALIKE && b[joint] <= reach * ALIKE));
+}
+
 /**
  * The fighter's mesh and atlas from the board (`model` and `textures`, its archive's two members;
  * `board`, its accessories as the board's tables give them), each accessory on its own joint; and

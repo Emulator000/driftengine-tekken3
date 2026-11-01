@@ -7,7 +7,7 @@
 import { loadFightTables, loadMoveset } from '../assets/load.ts';
 import { Fight, type QuickMatch } from '../sim/fight/fight.ts';
 import { fightDataFor, matchMovesets } from '../sim/fight/match.ts';
-import { FightView, type ArcadeStageFiles, type DrawingFiles, type FloorFiles, type MaterialMaps, type SkyFiles } from '../present/3d/fight-view.ts';
+import { FightView, FORMS, type ArcadeStageFiles, type DrawingFiles, type FloorFiles, type MaterialMaps, type SkyFiles } from '../present/3d/fight-view.ts';
 import { parseManifest, type ArcadeObject, type ArcadePanorama } from '../assets/manifest.ts';
 import { parseArcadeFighters, withOwnAccessories } from '../assets/models.ts';
 import type { FightTables } from '../sim/fight/match.ts';
@@ -43,6 +43,7 @@ interface ArcadeList {
   readonly panoramas: readonly ArcadePanorama[];
   readonly objects: readonly ArcadeObject[];
   readonly fighters: ReadonlySet<number>;
+  readonly forms: ReadonlySet<number>;
 }
 let arcadeLists: Promise<ArcadeList> | null = null;
 /** The stages drawn with the arcade's scenery, their panoramas and their moving pieces; the packs drawn with the board's fighters. */
@@ -56,9 +57,15 @@ const arcadeStagesOf = (): Promise<ArcadeList> =>
             panoramas: manifest.arcadePanoramas,
             objects: manifest.arcadeObjects,
             fighters: new Set(arcadeModels ? manifest.arcadeFighters : []),
+            forms: new Set(arcadeModels ? manifest.arcadeForms : []),
           };
         })
-      : Promise.resolve({ stages: new Set(), panoramas: [], objects: [], fighters: new Set() }));
+      : Promise.resolve({ stages: new Set(), panoramas: [], objects: [], fighters: new Set(), forms: new Set() }));
+const NO_FORMS: ReadonlySet<number> = new Set();
+/** The roster codes drawn with the board's forms, as the manifest gives them once read; none before. */
+let formCodes: ReadonlySet<number> = new Set();
+/** The roster codes drawn with the board's forms (Ogre's third costume), read from the manifest. */
+export const arcadeForms = async (): Promise<ReadonlySet<number>> => (formCodes = (await arcadeStagesOf()).forms);
 let boardOwn: Promise<ReturnType<typeof parseArcadeFighters>> | null = null;
 /** The arcade board's fighters' own accessories, by pack, for the packs drawn with the board's models (none without them). */
 const boardAccessories = (): Promise<ReturnType<typeof parseArcadeFighters>> =>
@@ -160,9 +167,17 @@ const stage = async (id: number): Promise<{ mesh: ArrayBuffer; ground: ArrayBuff
 /** The fighters' and stages' drawing data, by pack and stage. */
 export const drawingFiles: DrawingFiles = {
   fighter: async (pack) => {
+    if (pack >= FORMS) {
+      const [mesh, texture] = await Promise.all([fighterMesh('arcade/forms', String(pack - FORMS)), atlas('arcade/forms', String(pack - FORMS))]);
+      return { mesh, texture, maps: null };
+    }
     const kind = boardFighters.on && (await arcadeStagesOf()).fighters.has(pack) ? 'arcade/fighters' : 'fighters';
     const [mesh, texture, maps] = await Promise.all([fighterMesh(kind, two(pack)), atlas(kind, two(pack)), mapsOf(kind, two(pack))]);
     return { mesh, texture, maps };
+  },
+  /* The board's forms, while the board's fighters are drawn (an online match against a game that draws them otherwise shows the pack's). */
+  get forms() {
+    return boardFighters.on ? formCodes : NO_FORMS;
   },
   stage,
   picture: (name) => assetImage(`pictures/${name}.png`),

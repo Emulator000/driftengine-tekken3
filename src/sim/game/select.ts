@@ -17,6 +17,7 @@ import { softReset } from './fight-scene.ts';
 import { joinWithStart } from './join.ts';
 import { MenuMode, NO_CHOICE } from './menu.ts';
 import { print } from './printer.ts';
+import { thirdCostume } from './records.ts';
 import type { GameState, SelectCell, SelectSide } from './state.ts';
 
 /** No neighbouring cell; no character (the game's 0x16, here apart from an added character's roster id). */
@@ -288,7 +289,7 @@ export function keepApart(a: SelectSide['apart'], b: SelectSide['apart']): void 
 function choose(game: GameState, data: Pick<FightData, 'sound'>, scenes: SceneTables, n: number, buttons: number): boolean {
   const select = game.select;
   const side = select.sides[n]!;
-  const third = (game.records.extraCostumes & (1 << (side.roster & 0x1f))) !== 0 ? THIRD : 0;
+  const third = thirdCostume(game, side.roster) ? THIRD : 0;
   if (((third | BUTTONS) & buttons) === 0 && select.countdown !== 0) return true;
   const costume = (third & buttons) !== 0 ? 2 : (buttons & KICKS) !== 0 ? 1 : 0;
   const none = side.roster === NO_ONE;

@@ -553,7 +553,7 @@ export class OnlinePlay {
     /* A rematch counts on; a new opponent from nothing. */
     if (this.online.state !== 'result') this.score.fill(0);
     const state = game.state;
-    const own = { settings: { ...state.remake.settings }, started: { ...state.remake.started }, made: state.remake.remasterMade };
+    const own = { settings: { ...state.remake.settings }, started: { ...state.remake.started }, made: state.remake.remasterMade, forms: state.remake.forms };
     const page = { ...state.online, lines: [...state.online.lines], rooms: [...state.online.rooms] };
     const snapshotter = new StateSnapshotter(state);
     this.shareData(snapshotter);
@@ -595,6 +595,7 @@ export class OnlinePlay {
     Object.assign(state.remake.settings, own.settings);
     Object.assign(state.remake.started, own.started);
     state.remake.remasterMade = own.made;
+    state.remake.forms = own.forms;
     Object.assign(state.online, page, { warming: 0, ask: '', typed: '', card: 0, fight: Number.isInteger(start.match) && start.match > 0 ? start.match : 1 });
     this.pastFields = 0;
     /* Against an older version, the fields of the state it lacks left out of the fingerprint. */

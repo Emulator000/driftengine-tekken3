@@ -37,7 +37,7 @@
 import { createMover, type MeshHandle, type Mover, type PointSkinData, type PointSkinHandle, type RendererApi, type SurfaceMaterial, type SurfaceTextureHandle } from '@driftengine/core';
 import type { Rotation } from '../../../motion/motion.ts';
 import { HelperRig, type Frame, type RigNode } from '../../../mod/kazuya/tekken4.ts';
-import { hingesOf, HIPS, keepClothOff, LEGS, newLimb, placeLimb, profileOf, unturn, type LimbNow } from './garment.ts';
+import { hingesOf, HIPS, keepClothOff, LEGS, newLimb, placeLimb, profileOf, reachOf, unturn, type LimbNow } from './garment.ts';
 import { jointFlags, lowestPoint } from './lowest.ts';
 
 const FTR_MAGIC = 0x31525446;
@@ -546,7 +546,7 @@ export class Fighter {
         const [a, b] = [worn.edges[e]! * 3, worn.edges[e + 1]! * 3];
         worn.lengths[e >> 1] = Math.hypot(placed[a]! - placed[b]!, placed[a + 1]! - placed[b + 1]!, placed[a + 2]! - placed[b + 2]!);
       }
-      const tops = limbs.filter((l) => l.length > 0).map((l) => l.top);
+      const tops = limbs.filter((l) => l.length > 0).map((l) => l.top - l.reach);
       hingesOf(placed, worn.turning, tops.length === 0 ? Infinity : Math.min(...tops), hinges);
     }
     keepClothOff(placed, worn.turning, hinges, worn.edges, worn.lengths, limbs, worn.turns, kept);
@@ -696,7 +696,10 @@ function wornOf(mesh: FighterMesh, slots: number, tails: readonly number[]): Wor
     turning: Uint8Array.from(hangs!, (j) => (j === mesh.garment ? 1 : 0)),
     edges: Uint32Array.from([...edges.values()].flat()),
     lengths: null,
-    limbs: LEGS.flatMap((leg) => [0, 1].map((k) => newLimb(profileOf(leg[k]!, mesh.joints, mesh.weights, mesh.points)))),
+    limbs: LEGS.flatMap((leg) => {
+      const thigh = profileOf(leg[0], mesh.joints, mesh.weights, mesh.points);
+      return [newLimb(thigh, reachOf(thigh)), newLimb(profileOf(leg[1], mesh.joints, mesh.weights, mesh.points), reachOf(thigh))];
+    }),
     placed: new Float32Array(count * 3),
     hinges: new Float32Array(count * 3),
     turns: new Float32Array(count),

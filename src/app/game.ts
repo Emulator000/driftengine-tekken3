@@ -15,24 +15,27 @@ import { MusicMode } from '../sim/sound/music.ts';
 import { FightStep, matchSetup } from '../sim/game/fight-scene.ts';
 import { MenuMode, startMode } from '../sim/game/menu.ts';
 import { OgreChangeShows } from '../sim/game/ogre-change.ts';
-import { OnlineStatus } from '../sim/game/online-page.ts';
+import { ONLINE_PAGE, OnlineStatus } from '../sim/game/online-page.ts';
+import { musicRows } from '../sim/game/music-page.ts';
+import { parseMusicLibrary, shownName } from '../assets/music.ts';
+import { chosenFrom, keptFrom, OwnMusic, readKeptMusic, writeKeptMusic } from './own-music.ts';
 import { displayShift } from '../sim/game/options.ts';
 import { applySchedule, checkSurvivalRecord, checkTimeRecord, earnMode, recordStageTime } from '../sim/game/records.ts';
 import { survivorRank } from '../sim/game/arcade.ts';
 import { bossCode } from '../sim/fight/force-stage.ts';
 import { lookOf } from '../sim/game/select.ts';
 import { progressOf, restoreProgress, saveProgress } from '../sim/game/save.ts';
-import { REMAKE_PAGE, restartWanted } from '../sim/game/remake-options.ts';
+import { inRemakeOptions, restartWanted } from '../sim/game/remake-options.ts';
 import { FightView } from '../present/3d/fight-view.ts';
 import { Hud } from '../present/hud/hud.ts';
 import { PauseScreen } from '../present/hud/pause.ts';
 import { loadTypefaces } from '../present/2d/typefaces.ts';
 import { ScenePresenter } from '../present/scenes/scenes.ts';
 import { SCREEN } from '../present/scenes/screen.ts';
-import { applyBrightness, applyLook, assetImage, crtAsked, fiftyHz, floorFade, canvas, controllers, dataUrl, json, pageRenderer, params, play, remasterMadeHere, remastered, status, touchStick, two } from './page.ts';
+import { applyBrightness, applyLook, assetImage, crtAsked, fiftyHz, floorFade, canvas, controllers, dataBytes, dataUrl, json, pageRenderer, params, play, remasterMadeHere, remastered, status, touchStick, two } from './page.ts';
 import { CrtFilter } from './crt.ts';
 import { controlWords } from '../present/2d/controls.ts';
-import { boardFighters, boardWord, drawingFiles, introFiles, withArcadeFighters } from './quick.ts';
+import { arcadeForms, boardFighters, boardWord, drawingFiles, introFiles, withArcadeFighters } from './quick.ts';
 import { readProgress, SaveAsItGoes, writeProgress } from './save.ts';
 import { isUnlockKey, UnlockCode, unlockByCode, UNLOCK_STEPS } from './unlock-code.ts';
 import { holdSongs } from './hold-song.ts';
@@ -180,6 +183,33 @@ export async function playGame(): Promise<void> {
   Object.assign(game.state.remake.started, settings);
   game.state.remake.remasterMade = remasterMadeHere();
   /*
+   * The player's own songs (`npm run music`), where they have made a library: REMAKE OPTION's
+   * MUSIC page lists them, each entry's choice as kept on this device, and they play on the
+   * sound's CD input in place of the game's music, as the page follows the game field by field.
+   */
+  const library = parseMusicLibrary(await dataBytes('music/custom/library.json').then((bytes) => JSON.parse(new TextDecoder().decode(bytes)) as unknown).catch(() => null));
+  const ownMusic = game.state.remake.music;
+  ownMusic.rows = musicRows(tables);
+  ownMusic.library = library.map((song) => ({ title: shownName(song.title), artist: shownName(song.artist) }));
+  ownMusic.chosen = chosenFrom(ownMusic.rows, library, readKeptMusic());
+  let keptMusic = ownMusic.chosen.join();
+  const own = sound !== null && library.length > 0 ? new OwnMusic(sound, library, (id) => dataBytes(`music/custom/${id}.mp3`)) : null;
+  /** A field of the player's own songs: the element following the game's music, the choices kept as they change; `online`, only the game's music. */
+  const ownField = (online: boolean): void => {
+    const state = game.state;
+    if (ownMusic.chosen.join() !== keptMusic) {
+      keptMusic = ownMusic.chosen.join();
+      writeKeptMusic(keptFrom(ownMusic.rows, library, ownMusic.chosen));
+    }
+    if (own === null) return;
+    const m = state.world.sound.music;
+    const page = state.optionsScreen.page;
+    const inOnline = online || state.run.online !== 0 || state.world.practice.waitingRoom !== 0 || (state.scene === Scene.OPTIONS && page === ONLINE_PAGE);
+    own.field({ scene: state.scene, page, row: ownMusic.row, song: m.song, xa: m.xa, starts: m.starts, movie: 0 <= m.movieFrom, track: m.track, online: inOnline }, ownMusic.rows, ownMusic.chosen);
+  };
+  /* The characters whose third costume a board's form gives here, chosen with start whatever is earned. */
+  for (const code of await arcadeForms()) game.state.remake.forms |= 1 << (code >> 2);
+  /*
    * REMAKE OPTION's settings: kept as they change, the frame rate shown or hidden at once (and `F`'s
    * switch shown on the page), the game's speed, the touch pad's directions and the remaster's look,
    * brightness and floors changed at once, and on leaving the page with one
@@ -220,7 +250,7 @@ export async function playGame(): Promise<void> {
       keptSettings = { ...remake };
       writeSettings(keptSettings);
     }
-    const onPage = state.scene === Scene.OPTIONS && state.optionsScreen.page === REMAKE_PAGE;
+    const onPage = state.scene === Scene.OPTIONS && inRemakeOptions(state.optionsScreen.page);
     if (restarting || onPage || !restartWanted(state)) return;
     restarting = true;
     if (saves && state.options.autoSave !== 0) {
@@ -521,6 +551,7 @@ export async function playGame(): Promise<void> {
     rumble.field(play.ownRumble(game.state.rumble.out), performance.now());
     /* The sound of each field once it is final, the other side's words for it in: what a rollback puts right is never heard wrong. */
     for (const final of play.finalSounds()) sound?.field(final, final.vblank, play.ending ? [] : holdSong(final.sound.commands));
+    ownField(true);
     movie.audible = sound?.running ?? false;
     movie.field(game.state);
     return true;
@@ -567,6 +598,7 @@ export async function playGame(): Promise<void> {
     rumble.field(game.state.rumble.out, performance.now());
     const played = holdSong();
     sound?.field(game.state.world, game.state.vblanks, played);
+    ownField(false);
     movie.audible = sound?.running ?? false;
     movie.field(game.state);
     online?.afterField();
@@ -583,6 +615,7 @@ export async function playGame(): Promise<void> {
     const ready = !game.blocked() && drawingReady();
     return play.watchField(pads[0] | pads[1], ready, (songs) => {
       sound?.field(game.state.world, game.state.vblanks, holdSong([...songs, ...game.state.world.sound.commands]));
+      ownField(true);
       movie.audible = sound?.running ?? false;
       movie.field(game.state);
     });
@@ -672,7 +705,7 @@ export async function playGame(): Promise<void> {
       moving: () => presenter.moving || (introSetUp(game.state) && !introWarmed(game.state.attract.intro)) || online?.watchMenuOpen === true || warmingFight(),
       fighting: () => shown === 'fight',
       online: () => online?.playing === true || online?.watching === true || game.state.online.status !== OnlineStatus.OFF,
-      probe: () => ({ scene: game.state.scene, sceneState: game.state.step, sound: sound?.probe() ?? null, song: songProbe(), movie: movie.probe(), online: online?.probe() ?? null }),
+      probe: () => ({ scene: game.state.scene, sceneState: game.state.step, sound: sound?.probe() ?? null, song: songProbe(), own: own?.probe() ?? null, movie: movie.probe(), online: online?.probe() ?? null }),
       about: () => {
         const state = game.state;
         const world = state.world;

@@ -60,6 +60,29 @@ class Room {
   }
 }
 
+/**
+ * The player's own songs (REMAKE OPTION's MUSIC page), which come in on the CD input: the game's
+ * songs played by one of them, and whether one plays in the menus' silence.
+ */
+export interface OwnSongs {
+  readonly songs: ReadonlySet<number>;
+  readonly menu: boolean;
+}
+
+/** The gains a song of the player's plays at in the menus: a song of the game's at its usual volume (100 of 128), in stereo. */
+const MENU_GAIN = 100 / 0x80;
+
+/**
+ * Whether the CD input plays now in place of what the driver plays: in place of a song of the
+ * game's the player chose another for, while the driver plays it ('song', at its gains); or in the
+ * menus' silence, the driver playing nothing ('menu'); never over a movie's sound or an audio track.
+ */
+export function ownMusic(own: OwnSongs, driver: { readonly song: number; readonly xa: number; readonly track: number; readonly readingMovie: boolean }): 'song' | 'menu' | null {
+  if (driver.readingMovie || driver.track !== 0) return null;
+  if (0 <= driver.xa) return own.songs.has(driver.song) ? 'song' : null;
+  return own.menu ? 'menu' : null;
+}
+
 /** Full scale past the knee bent toward 1 and never past it. */
 function limit(x: number): number {
   const m = Math.abs(x);
@@ -140,6 +163,8 @@ export class Mixer {
   private playing = { xa: -1, start: -1 };
   /** The samples of the song playing put out since its player started. */
   private songSamples = 0;
+  /** The player's own songs, as the page last said. */
+  private own: OwnSongs = { songs: new Set(), menu: false };
   /** The music's gains as heard, eased toward the driver's each sample so a field's step does not click. */
   private same = 0;
   private across = 0;
@@ -162,6 +187,11 @@ export class Mixer {
   /** An audio track's samples, to play when the driver asks for it. */
   track(track: number, samples: Int16Array): void {
     this.tracks.set(track, samples);
+  }
+
+  /** The player's own songs: the game's songs they play in place of, and whether one plays in the menus' silence. */
+  ownSongs(songs: readonly number[], menu: boolean): void {
+    this.own = { songs: new Set(songs), menu };
   }
 
   /**
@@ -191,7 +221,9 @@ export class Mixer {
   /** The next samples into `left` and `right`; `cd` the movie's sound, left and right, when the drive reads a movie (the CD input then, at the music's gains). */
   render(left: Float32Array, right: Float32Array, cd?: readonly [Float32Array, Float32Array]): void {
     this.followSong();
-    const { same, across } = this.music.gains();
+    const own = ownMusic(this.own, this.music);
+    const { same, across } = own === 'menu' ? { same: MENU_GAIN, across: 0 } : this.music.gains();
+    const ours = own !== null ? (cd ?? null) : null;
     const movie = cd !== undefined && this.music.readingMovie ? cd : null;
     if (this.music.track !== this.trackPlaying) {
       this.trackPlaying = this.music.track;
@@ -219,7 +251,15 @@ export class Mixer {
       }
       this.same += (same - this.same) * 0.002;
       this.across += (across - this.across) * 0.002;
-      if (this.player !== null) {
+      if (own !== null) {
+        /* The player's own song on the CD input, at the song's gains (the menus' own), in place of the game's. */
+        if (ours !== null) {
+          const ol = ours[0][n] ?? 0;
+          const or = ours[1][n] ?? 0;
+          l += ol * this.same + or * this.across;
+          r += or * this.same + ol * this.across;
+        }
+      } else if (this.player !== null) {
         const music = this.player.next();
         if (music === null) this.player = null;
         else {

@@ -22,6 +22,7 @@ import { joinWithStart } from './join.ts';
 import { holdPicture } from './logo.ts';
 import { MenuMode, NO_CHOICE } from './menu.ts';
 import { print } from './printer.ts';
+import { thirdCostume } from './records.ts';
 import { isCharacter, keepApart, printCoinLine, standing } from './select.ts';
 import type { GameState, VsSelectSide } from './state.ts';
 import { fade } from './title.ts';
@@ -210,7 +211,7 @@ function choose(game: GameState, tables: FightTables, scenes: SceneTables, n: nu
   const vs = game.vsSelect;
   const side = vs.sides[n]!;
   const code = codeUnder(game, scenes, side);
-  const third = (game.records.extraCostumes & (1 << ((code >> 2) & 0x1f))) !== 0 ? THIRD : 0;
+  const third = thirdCostume(game, code >> 2) ? THIRD : 0;
   if (((third | BUTTONS) & buttons) === 0) return true;
   const costume = (third & buttons) !== 0 ? 2 : (buttons & KICKS) !== 0 ? 1 : 0;
   if (code < NO_CHOICE) {

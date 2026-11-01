@@ -9,6 +9,7 @@
 | `npm run import` | Writes the game's typed assets, under `public/assets/` |
 | `npm run t4 -- "<image>"` | Reads your Tekken 4 disc image (`.iso`, or a `.7z` holding one) for Kazuya; then run `npm run extract` again |
 | `npm run arcade -- "<folder>"` | Reads the dump of your own Tekken 3 arcade board (its chips' files, in one folder) for the arcade's stages, into `.cache/arcade/`; then run `npm run extract` again ([Tekken 3 Arcade assets](../README.md#tekken-3-arcade-assets-optional)) |
+| `npm run music -- "<folder>"` | Makes a library of your own songs from a folder of them (any format FFmpeg reads, its subfolders too), each brought to the game's own songs' loudness, into `public/data/music/custom/`; again with no folder, it follows the folder imported last (new songs added, songs gone dropped); `-- --clear` empties it. REMAKE OPTION's MUSIC page plays them ([REMAKE OPTION](#remake-option)) |
 | `npm run remaster` | Makes the remaster's assets on this machine (an x64 PC with Linux or Windows, or a Mac with Apple silicon on macOS 26 or later), on its GPU where it has one (`-- --cpu`, `-- --rocm`, `-- --cuda`, `-- --mps` to choose; job names after it make those parts alone), into `public/assets/remaster/`; then REMASTER in REMAKE OPTION draws with them ([The remaster](../README.md#the-remaster-optional)) |
 | `npm run dev` | Serves the game on `localhost:5190` (or the next free port), running `extract` and `import` first when their output is missing |
 | `npm run dev:lan` | Serves the game to your own devices on your home network, over HTTPS and over plain HTTP at the next port ([Over your home network](#over-your-home-network)) |
@@ -151,16 +152,20 @@ their mean time and the longest of them. Whether it shows is kept with REMAKE OP
 
 ## REMAKE OPTION
 
-The Options' first page lists REMAKE OPTION before its EXIT: the remake's own settings, changed as
-GAME OPTION's are (up and down to pick, left and right to change), kept on the device (the browser,
-or the app) for every start after.
+The Options' first page lists REMAKE OPTION before its EXIT: the remake's own settings, in four
+sections, each a page of its own (select or EXIT goes back to the list): DISPLAY (textures, models,
+stages, fighters, cloth, picture, frame rate, CRT filter), REMASTER (the remaster, and while it is
+on its look, brightness and floor fade), GAME (game speed, reachable walls, touch pad, touch
+directions) and MUSIC (your own songs, below). Each setting is changed as GAME OPTION's are (up and
+down to pick, left and right to change) and kept on the device (the browser, or the app) for every
+start after.
 
 | Setting | Values |
 | --- | --- |
 | TEXTURES | SMOOTH (enlarged and smoothed), ORIGINAL (each texel sharp, as `textures=psx`) |
 | MODELS | AUTO (rounded, but on an entry-level phone), ROUNDED, ORIGINAL (the console's meshes) |
 | STAGES | ARCADE (the arcade board's, where `npm run arcade` has read them), CONSOLE |
-| FIGHTERS | ARCADE (the arcade board's models, where it has read them), CONSOLE |
+| FIGHTERS | ARCADE (the arcade board's models, where it has read them, and Ogre's third costume, start at the character select: the board's True Ogre, TRUE OGRE on Ogre's moves), CONSOLE |
 | CLOTH | CLEAR OF LEGS (a board's fighter's coat panels and the tails a fighter hangs from the hips, a board's model's or the disc's, kept clear of the legs: a panel carried over a raised thigh, a tail put out where a leg swings into it), ORIGINAL (as the board and the console draw them, as `cloth=original`) |
 | PICTURE | AUTO (by the device), HIGH, LOW, VERY LOW (as `quality=`) |
 | FRAME RATE | OFF, ON (as `F`) |
@@ -175,8 +180,22 @@ or the app) for every start after.
 | CRT FILTER | OFF (the default), ON: the picture as a tape played on a television showed it. It is softened, a little across, and its colour much more, smeared to the right of the edges it belongs to. Over it lie soft scanlines (240 down the picture), a faint aperture grille of red, green and blue columns and darkened corners, the picture under them a little brighter. A fine grain crawls over it, a faint band rolls slowly down and the picture flickers a little; all three hold still where the system asks for less motion. Laid over the picture, so the same with any renderer and quality; changed at once |
 
 The frame rate, the game's speed, the touch pad's directions and the CRT filter change at once, and REACHABLE WALLS is taken at the next match. The others change what the game loads: while one differs
-from the start's, the page says LEAVING RESTARTS THE GAME, and leaving it starts the game again
-(with auto save on, the progress is saved first).
+from the start's, its page says LEAVING RESTARTS THE GAME, and leaving REMAKE OPTION starts the
+game again (with auto save on, the progress is saved first).
+
+### MUSIC
+
+Your own songs in place of the game's music, once `npm run music` has made a library of them
+(until then the page says RUN NPM RUN MUSIC FIRST). SONG picks an entry: MENU (the title and the
+mode menu, the Options, where the console plays no music), SELECT (the character select's song),
+then each character's theme, as the game picks a fight's song by its character (Kuma's plays for
+Panda, Heihachi's for Kazuya). PLAYS picks what it plays: ORIGINAL (the game's own; for MENU,
+silence), RANDOM (a song of your library, another each time the entry's song starts), or one of
+your songs, its whole title and artist under the list. A song plays in the game's song's place,
+from its start each time the game's starts, looping for as long as the game's plays, at its volume
+and through its fades; on this page, the entry's song plays as you pick it. The choices are kept
+on the device and take effect at once. ONLINE MODE plays the game's own music: its waiting room,
+its matches and the fights watched.
 
 ## Online
 
@@ -324,7 +343,9 @@ stages); should it make the two games play differently, the match ends as they p
 DIFFERED). The arcade board's fighters swing their own hair, tails and belts, which the fight
 plays: two games keep them only where both draw the same fighters from the same board; otherwise
 both swing the disc's, and a game with the board's fighters shows that match with the console's
-models.
+models. Ogre's third costume (the board's True Ogre) is fought as his second costume's body, so
+either may play it; a game without the board's model shows his second costume, and against a
+game older than 0.7.12 he is played in his second costume.
 
 **A server to play over.** `npm run dev` runs one beside the page for players on the same machine,
 `npm run dev:lan` for players on the same home network. Over the internet, one of you runs

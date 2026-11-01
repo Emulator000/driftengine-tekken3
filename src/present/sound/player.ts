@@ -100,9 +100,14 @@ export class SoundPlayer {
     return Math.max(0, seconds) / FIELD_SECONDS;
   }
 
-  /** A movie's video, its sound into the CD input (once for each element: the browser routes it here alone after). */
-  connectMovie(video: HTMLVideoElement): void {
-    this.context.createMediaElementSource(video).connect(this.node);
+  /** A movie's video, or the element playing the player's own songs, its sound into the CD input (once for each element: the browser routes it here alone after). */
+  connectMovie(media: HTMLMediaElement): void {
+    this.context.createMediaElementSource(media).connect(this.node);
+  }
+
+  /** The player's own songs: the game's songs they play in place of (their numbers), and whether one plays in the menus' silence. */
+  ownSongs(songs: readonly number[], menu: boolean): void {
+    this.send({ kind: 'own', songs, menu });
   }
 
   /** A field's sound (vertical blank `vblank`): its commands (the field's, or `played` as the page passes them on; only the music's before the audio runs) and the banks in its slots. */

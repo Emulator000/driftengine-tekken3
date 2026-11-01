@@ -168,17 +168,24 @@ export interface OnlineOptions<S> {
  * players and those of every release back to that one play each other; one that changes any of
  * them sets it to its own version.
  */
-export const PLAYS_AS = '0.7.8';
+export const PLAYS_AS = '0.7.12';
 
 /**
  * The older versions this release also plays a match as, each with the fields of the state its own
  * matches have and that version's has not: a match as one is played without what those fields
  * hold (the remake's walls; the moves into the screen of a player who sees the fight from the
  * other side going by that view), and those fields (all at rest) left out of its fingerprint. A
- * version whose matches differ from this one's in nothing but the code, as 0.7.6's and 0.7.7's,
- * leaves none out.
+ * version whose matches differ from this one's in nothing but the code, as 0.7.6's to 0.7.8's,
+ * leaves none out; a costume this one adds is played there as its character's second
+ * (`playedFighter`).
  */
-export const ALSO_PLAYS: Readonly<Record<string, readonly string[]>> = { '0.7.7': [], '0.7.6': [], '0.7.0': ['depthTurned'], '0.6.5': ['wallHit', 'carried', 'splatted', 'splatHits', 'walls', 'depthTurned'] };
+export const ALSO_PLAYS: Readonly<Record<string, readonly string[]>> = { '0.7.8': [], '0.7.7': [], '0.7.6': [], '0.7.0': ['depthTurned'], '0.6.5': ['wallHit', 'carried', 'splatted', 'splatHits', 'walls', 'depthTurned'] };
+
+/** The costumes this version adds, by roster id: Ogre's third, which a board's form gives (`thirdCostume`). */
+const ADDED_COSTUMES: Readonly<Record<number, number>> = { 14: 2 };
+
+/** A fighter as a match played as version `as` has it: a costume this version adds is its character's second in a match played as an older one. */
+export const playedFighter = (f: Fighter, as: string): Fighter => (as !== PLAYS_AS && ADDED_COSTUMES[f.roster] === f.costume ? { roster: f.roster, costume: 1 } : f);
 
 /**
  * Whether a match keeps the arcade board's fighters' own accessories: only where both sides draw
@@ -843,7 +850,7 @@ export class Online<S> {
     const transport = new WebSocketTransport({ socket: this.wire.socket, self: seat });
     this.transport = (this.options.lagMs ?? 0) > 0 ? new LateTransport(transport, this.options.lagMs!, () => this.now) : transport;
     const { name, delay, keys, fighter, side, board } = this.options.player();
-    const hello: Hello = { k: 'hello', version: this.playsAs, roster: rosterWord(this.options.game.roster), name, delay, keys, fighter, together: true, draws: true, saysReady: true, ...(side === undefined ? {} : { side: side === 1 ? 1 : 0 }), ...(board === undefined ? {} : { board }) };
+    const hello: Hello = { k: 'hello', version: this.playsAs, roster: rosterWord(this.options.game.roster), name, delay, keys, fighter: playedFighter(fighter, this.playsAs), together: true, draws: true, saysReady: true, ...(side === undefined ? {} : { side: side === 1 ? 1 : 0 }), ...(board === undefined ? {} : { board }) };
     this.relay!.toPeer(hello);
   }
 
@@ -926,7 +933,7 @@ export class Online<S> {
     /* A player whose seat is not the side they asked for sees the fight from the other side, where both said which they asked for. */
     const turned = ours.side === undefined || (theirs.side !== 0 && theirs.side !== 1) ? 0 : (ours.side === 1 ? 1 : 0) | (theirs.side === 1 ? 0 : 2);
     const board = ownBoard(ours.board, theirs.board) ? { board: ours.board! } : {};
-    const start: Start = { k: 'start', options: this.options.game.options(this.playsAs), delay, keys: [keys(ours.keys), keys(theirs.keys)], fighters: [fighter(ours.fighter), fighter(theirs.fighter)], match: 1, ...(theirs.draws === true ? { draws: 1 } : {}), ...(turned !== 0 ? { turned } : {}), ...board };
+    const start: Start = { k: 'start', options: this.options.game.options(this.playsAs), delay, keys: [keys(ours.keys), keys(theirs.keys)], fighters: [fighter(playedFighter(ours.fighter, this.playsAs)), fighter(playedFighter(theirs.fighter, this.playsAs))], match: 1, ...(theirs.draws === true ? { draws: 1 } : {}), ...(turned !== 0 ? { turned } : {}), ...board };
     this.starting = { start, at: this.now + GREETING_HOLD_MS };
   }
 

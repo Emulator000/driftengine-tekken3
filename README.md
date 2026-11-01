@@ -107,7 +107,8 @@ npm run dev
 
 and open the address it prints (`http://localhost:5190`). The first start converts the disc's data
 into `public/data/` and `public/assets/`, which takes a few minutes (the movies the longest, when
-FFmpeg is installed); later starts are immediate. Everything stays on your machine: the server
+FFmpeg is installed), at low priority and on half the cores at most, so the machine stays usable;
+later starts are immediate. Everything stays on your machine: the server
 listens on `localhost` only, and none of it is committed.
 
 Sound starts once a key, click or touch lets the browser play audio.
@@ -194,6 +195,15 @@ the first, hidden while a gamepad is connected. Alt+Enter takes the game to full
 `F` shows and hides the frame rate; `P` holds a fight and flies a free camera through it ([docs/USAGE.md](docs/USAGE.md#the-free-camera)). `?quick` in the address skips the menus for a match at
 once; [docs/USAGE.md](docs/USAGE.md) lists every option (fighters, stage, the computer's sides,
 the endings, the original textures, the viewer) and every command.
+
+### Your own music
+
+`npm run music -- "<folder>"` makes a library of your own songs from a folder of them (any format
+FFmpeg reads), each converted and brought to the game's own songs' loudness on your machine. REMAKE
+OPTION's MUSIC page then plays them in the game's music's place: for the menus (silent on the
+console), the character select, and each character's theme, the original, a random song of your
+library, or one you pick. Run it again to follow the folder, new songs added and songs gone dropped.
+ONLINE MODE always plays the game's own music ([docs/USAGE.md](docs/USAGE.md#music)).
 
 ### Reachable walls
 
@@ -368,7 +378,7 @@ field. What is done and what is not yet:
 | Tekken Force | Done | Its four stages' streets and the final stage, the soldiers brought on by each stage's script as the camera moves, the bosses each character meets, +LIFE items, the stage clear's tally, the keys and Dr. B to win, the run's results; `?force` starts it |
 | Tekken Ball | Done | The ball chosen on the select (the first to choose a character chooses it), the beach and its court, the ball's touches, charges, strikes, points and burns, its glow in the side's spark, the charge gauges, the knockout's replays, the computer players, the rules page set in type |
 | The Theater: its movies and its music player | Done | The movies open as their endings are seen; the music page once all are. The DISC button (for the Tekken and Tekken 2 discs) is left out |
-| The Options: game options, key configuration, records, display adjust, save data | Done | The key configuration and the prompts show your controller's buttons |
+| The Options: game options, key configuration, records, display adjust, save data | Done | The key configuration and the prompts show your controller's buttons; REMAKE OPTION, the remake's own settings in sections (display, remaster, game, music) |
 | **The fight** | | |
 | Input, moves, throws, hits, the camera, the rounds, the replay | Done | The original's on every field, checked against it frame by frame |
 | The computer opponent | Done | |
@@ -395,7 +405,7 @@ field. What is done and what is not yet:
 | Windows, macOS, Linux | Done | Developed and tested on Linux |
 | Kazuya from Tekken 4 | Done | Optional, from your own Tekken 4 disc |
 | The arcade release's stages | Done | Optional, from a dump of your own arcade board: the 14 stages it has, their backgrounds as the board lays them, their floors as far as the board's and drawn under the stage as it draws them, darkening toward their edges as the disc's do, the carousel, the helicopter and the torches; `?stages=psx` draws the disc's |
-| The arcade release's fighters | Done | Optional, from the same dump: the 31 models it has (where it has a stand-in, Julia's second costume, the disc's is drawn), their seams' own weights, their accessories each on its own joint and swung on the board's own springs; `?fighters=psx` draws the disc's. Their coats' panels and the tails they hang from the hips are kept clear of the legs, as are the tails the disc's models hang from the hips (Hwoarang's belt, in the attract intros too) (`?cloth=original` draws them as the board and the console do). They do not close their eyes, as the board has no closed eyes to draw |
+| The arcade release's fighters | Done | Optional, from the same dump: the models it has of the disc's costumes (where it has a stand-in, Julia's second costume, or another fighter, the arcade's True Ogre in Ogre's second, the disc's is drawn), their seams' own weights, their accessories each on its own joint and swung on the board's own springs; `?fighters=psx` draws the disc's. Their coats' panels and the tails they hang from the hips are kept clear of the legs, as are the tails the disc's models hang from the hips (Hwoarang's belt, in the attract intros too) (`?cloth=original` draws them as the board and the console do). They do not close their eyes, as the board has no closed eyes to draw. The arcade's True Ogre is Ogre's third costume (start on Ogre at the character select): TRUE OGRE, with True Ogre's voice and theme, on Ogre's moves |
 | The remake's settings in the game | Done | REMAKE OPTION in the Options: the textures, the models, the arcade's stages and fighters, the cloth, the picture, the frame rate, the game's speed (60 or 50 Hz), the touch pad and its directions, reachable walls (online only unless chosen) and a CRT filter (off unless chosen), kept on the device |
 | Reachable walls | Done | The stage fixed in place with walls 9.6 m from its middle, the stage drawn larger to meet them; fighters pinned at a wall, a push into it moving the pusher, wall splats (a crumple against it on the ground, a drop down it in the air), once a combo, the third hit after making the fighter fall; the camera kept inside them, and the stage between left out where it stands past one (the fighters along it) or high over them (a knockout's shot from above). In online matches unless the host turns them off; offline where chosen |
 | A stop shown as the game's own | Done | A window with what went wrong and what was playing, its details to copy into an issue |

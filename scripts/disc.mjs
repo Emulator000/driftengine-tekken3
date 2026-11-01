@@ -20,6 +20,10 @@ import { fixAudioOrder } from './lib/audio-order.mjs';
 import { audioTracks, cueFiles, joinedCue, parseCue } from './lib/cue.mjs';
 import { openDisc } from './lib/iso.mjs';
 import { extract7z } from './lib/sevenzip.mjs';
+import { runGently } from './lib/gentle.mjs';
+
+/* Below the machine's other work, so a long run leaves it usable. */
+runGently();
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const cache = path.join(root, '.cache');

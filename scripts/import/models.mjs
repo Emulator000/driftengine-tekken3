@@ -12,7 +12,7 @@ import { roundFighter } from '../lib/round.mjs';
 /** Writes every mesh into `output`; returns how many were rounded. */
 export function roundModels(root, output) {
   let rounded = 0;
-  for (const kind of ['fighters', 'intro', 'arcade/fighters']) {
+  for (const kind of ['fighters', 'intro', 'arcade/fighters', 'arcade/forms']) {
     const dir = path.join(root, 'public/data', kind);
     if (!existsSync(dir)) continue;
     for (const name of readdirSync(dir).filter((n) => n.endsWith('.ftr')).sort()) {

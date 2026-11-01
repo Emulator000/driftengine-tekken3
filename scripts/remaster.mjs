@@ -21,6 +21,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { cleanEnv, fetchTools, remasterDevice, remasterHost, which } from './remaster/tools.mjs';
+import { runGently } from './lib/gentle.mjs';
+
+/* Below the machine's other work, so a long run leaves it usable. */
+runGently();
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);

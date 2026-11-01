@@ -81,6 +81,9 @@ export function countVersusDraw(game: GameState, scenes: SceneTables, first: num
   recordsChanged(game, scenes);
 }
 
+/** Whether a character's third costume is chosen (with start or the fourth button): earned, or given by a board's form here. */
+export const thirdCostume = (game: GameState, roster: number): boolean => (((game.records.extraCostumes | game.remake.forms) >>> (roster & 0x1f)) & 1) !== 0;
+
 /** An extra costume given, the plays' count restarting when it is new. */
 function giveCostume(game: GameState, bit: number): void {
   const costumes = game.records.extraCostumes;

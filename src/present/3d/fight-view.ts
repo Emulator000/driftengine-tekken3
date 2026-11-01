@@ -44,8 +44,14 @@ import { stageCodes } from '../../sim/fight/force-stage.ts';
  * Where the presentation finds a model pack's and a stage's drawing files; whether the textures
  * are the enlarged ones, drawn smoothly (filtered, with mipmaps), or the originals, each texel sharp.
  */
+/** A fighter's model past the packs: the form drawn for a roster code (`DrawingFiles.forms`), at this and the code past it. */
+export const FORMS = 0x100;
+
 export interface DrawingFiles {
+  /** A pack's model, or past `FORMS` the form drawn for that roster code. */
   fighter(pack: number): Promise<{ mesh: ArrayBuffer; texture: ImageBitmap; maps?: MaterialMaps | null }>;
+  /** The roster codes drawn with a board's form, a model of another fighter it keeps in a pack's place, over the pack's (Ogre's third costume); none without them. */
+  readonly forms?: ReadonlySet<number>;
   /**
    * A stage's scenery, ground and atlas, and Tekken Ball's beach's panorama or a Tekken Force
    * stage's backdrop with them; and the arcade's scenery and its atlas, drawn in place of the
@@ -316,6 +322,11 @@ export class FightView {
    * A side's fighter for its model pack, loaded the first time it is asked for (null until then);
    * the side's other models are let go but those in `kept` (the packs it may change to).
    */
+  /** The model a fighter is drawn with: its pack's, or the form drawn for its roster code over it. */
+  private drawnPack(f: FighterState): number {
+    return this.files.forms?.has(f.rosterCode) === true ? FORMS + f.rosterCode : f.costume;
+  }
+
   private fighterFor(side: number, pack: number, kept: readonly number[] = []): Fighter | null {
     if (pack < 0) return null;
     const models = this.sides[side]!;
@@ -441,7 +452,7 @@ export class FightView {
    * without them, and the frames after wait on their pipelines, so a piece would show late.
    */
   prepare(state: FightState, stageAlone = false): boolean {
-    const sides = stageAlone ? [] : Array.from({ length: this.sidesOf(state) }, (_, i) => ({ pack: state.fighters[i]!.costume, ahead: this.packsAhead(state, i) }));
+    const sides = stageAlone ? [] : Array.from({ length: this.sidesOf(state) }, (_, i) => ({ pack: this.drawnPack(state.fighters[i]!), ahead: this.packsAhead(state, i) }));
     const key = `${stageAlone ? 'alone' : sides.map((side) => [side.pack, ...side.ahead].join(',')).join(' ')} ${state.stage}`;
     const fighters = sides.flatMap(({ pack, ahead }, i) => [pack, ...ahead].map((p) => this.fighterFor(i, p, [pack, ...ahead])));
     const drawn = this.stageFor(state.stage);
@@ -807,8 +818,9 @@ export class FightView {
       const f = state.fighters[i]!;
       const ahead = this.packsAhead(state, i);
       /* Every model the side may change to is loading or loaded, whether or not it is on screen now. */
-      for (const pack of ahead) this.fighterFor(i, pack, [f.costume, ...ahead]);
-      const fighter = this.fighterFor(i, f.costume, ahead);
+      const drawn = this.drawnPack(f);
+      for (const pack of ahead) this.fighterFor(i, pack, [drawn, ...ahead]);
+      const fighter = this.fighterFor(i, drawn, ahead);
       if (((state.posed >> i) & 1) === 0 || fighter === null) continue;
       posed.push(f);
       for (let hand = 0; hand < 2; hand += 1) fighter.shape(handPart(f.roster, hand), f.hands.drawn[hand]!);

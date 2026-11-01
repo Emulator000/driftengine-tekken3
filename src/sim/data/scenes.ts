@@ -450,7 +450,10 @@ export type OptionValue =
   | 'brightness'
   | 'floorFade'
   | 'walls'
-  | 'crt';
+  | 'crt'
+  /* The MUSIC page's: the entry shown, and what it plays. */
+  | 'musicRow'
+  | 'musicPlays';
 
 /**
  * An item of an Options list: what it changes, its label and its values' names, how left and

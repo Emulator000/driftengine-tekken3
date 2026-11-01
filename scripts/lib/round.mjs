@@ -18,8 +18,8 @@
  * vertices and triangles. A face's pictures (its closed eyes) are rounded once, as the face is
  * loaded, and each picture's triangles made from those on vertices of their own, their texture
  * coordinates moved to its region. A face drawn from both faces (version 6) is cut into triangles
- * drawn from both, each wound as the face is; a face lying right under one stays flat
- * (`round/surface.mjs`).
+ * drawn from both, each wound as the face is; a face lying right under one stays flat, as does a
+ * leg's face meeting the hips' skin (`round/surface.mjs`).
  */
 import { bindPose } from './round/bind.mjs';
 import { readFtr, writeFtr5 } from './ftr.mjs';

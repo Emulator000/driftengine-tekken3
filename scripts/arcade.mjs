@@ -13,6 +13,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { CHIP_SIZE, identifyChips, joinData, PROGRAM_CHIP_SIZE, PROGRAM_CHIPS } from './lib/arcade/board.mjs';
+import { runGently } from './lib/gentle.mjs';
+
+/* Below the machine's other work, so a long run leaves it usable. */
+runGently();
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(root, '.cache/arcade');

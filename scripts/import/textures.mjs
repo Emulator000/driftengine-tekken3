@@ -5,10 +5,12 @@
  * `textures/arcade/fighters/NN.png`) four times their size, `textures/stages/NN.png` and the
  * arcade's `textures/arcade/stages/NN.png` twice (a stage's
  * atlas is already 1024 square). Each is made again only when its source or the enlarger is newer,
- * the work spread over worker threads, an atlas each.
+ * the work spread over worker threads (on half the machine's cores, `scripts/lib/gentle.mjs`), an atlas each.
  */
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
+
+import { workersFor } from '../lib/gentle.mjs';
 import path from 'node:path';
 import { Worker } from 'node:worker_threads';
 
@@ -23,6 +25,7 @@ export async function upscaleTextures(root, output) {
     ['stages', TEXTURE_SCALE.stages],
     ['arcade/stages', TEXTURE_SCALE.stages],
     ['arcade/fighters', TEXTURE_SCALE.fighters],
+    ['arcade/forms', TEXTURE_SCALE.fighters],
   ]) {
     const dir = path.join(root, 'public/data', kind);
     if (!existsSync(dir)) continue;
@@ -34,7 +37,7 @@ export async function upscaleTextures(root, output) {
     }
   }
   if (jobs.length === 0) return 0;
-  const workers = Array.from({ length: Math.max(1, Math.min(jobs.length, availableParallelism() - 1)) }, () => new Worker(new URL('./upscale-worker.mjs', import.meta.url)));
+  const workers = Array.from({ length: workersFor(availableParallelism(), jobs.length) }, () => new Worker(new URL('./upscale-worker.mjs', import.meta.url)));
   let next = 0;
   await Promise.all(
     workers.map(

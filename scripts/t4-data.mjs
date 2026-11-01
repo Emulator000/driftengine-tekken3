@@ -17,6 +17,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { extract7z } from './lib/sevenzip.mjs';
+import { runGently } from './lib/gentle.mjs';
+
+/* Below the machine's other work, so a long run leaves it usable. */
+runGently();
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(root, '.cache/t4');

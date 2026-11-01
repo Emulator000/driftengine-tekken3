@@ -1,10 +1,12 @@
 /**
- * Yoshimitsu's sword glow, as the console draws it over his blade every frame he is drawn: a haze
- * of light added along the blade, brightest on the blade's line and fading out to either side; its
- * colour by the costume (green, his second costume's red, Mokujin's own while he fights as
- * Yoshimitsu), two shades taken in turn, one a field. Drawn here as soft motes of light close along
- * the blade, so it follows the blade without a seam: from a little past the hilt, fading out over
- * the blade's last stretch to just past the tip, so the haze stays on the blade.
+ * Yoshimitsu's sword glow, as the console draws it over his blade every frame he is drawn: a band
+ * of light added along the blade from its hilt to its tip, brightest on the blade's line and falling
+ * off evenly to nothing 124 mm to either side; its colour by the costume (green, his second
+ * costume's red, Mokujin's own while he fights as Yoshimitsu), two shades taken in turn, one a
+ * field. The console adds it to the picture as shown, where the scene adds light: it is added here
+ * as the light it shows as where nothing lies under it (`hazeLight`). Drawn as soft motes of light
+ * along the blade, of two sizes, so it follows the blade without a seam and falls off as the
+ * console's band does.
  */
 import type { Camera, Environment, ParticleHandle, RendererApi } from '@driftengine/core';
 import { particleSet } from '../effects/effect-looks.ts';
@@ -18,17 +20,22 @@ const BLADE = [
   [30, -720, 0],
   [-60, -950, 0],
 ] as const;
-/** The line's points: one past the hilt, the blade's four, one past the tip. */
-export const BLADE_LINE_POINTS = BLADE.length + 2;
-/** How far the haze runs past the hilt and past the tip (metres). */
-const PAST_HILT = 0.128;
-const PAST_TIP = 0.02;
-/** The line's point the haze is full to, the blade's third: past it, it fades out to the line's end. */
-const FULL_TO = 3;
-/** The haze's motes: their radius (metres), a step between them a third of it, and their strength. */
-const HAZE = { size: 0.05, step: 0.016, gain: 0.16 } as const;
-/** The most motes drawn: both sides' haze along their blades. */
-const MOST_MOTES = 256;
+/** The line's points: the blade's four. */
+export const BLADE_LINE_POINTS = BLADE.length;
+/**
+ * The band's motes: a step apart along the blade (metres), in two sizes (their radii), each mote's
+ * colour its share of the band's light on the blade's line; together they fall off as the console's
+ * band does, to nothing 124 mm off the line.
+ */
+export const HAZE = {
+  step: 0.016,
+  layers: [
+    { size: 0.04, share: 0.1244 },
+    { size: 0.115, share: 0.0581 },
+  ],
+} as const;
+/** The most motes drawn: both sides' band along their blades. */
+const MOST_MOTES = 512;
 /** How far the motes are drawn toward the eye (metres), as the effects' are, so the blade does not cut them. */
 const TOWARD_EYE = 0.4;
 
@@ -50,8 +57,15 @@ const MOKUJIN_SHADES: readonly [Shade, Shade] = [
   [60, 30, 12],
   [30, 18, 12],
 ];
-/** What the console's white texel adds at a shade's full strength (248 of 255, times the shade over 128). */
+/** What the console's white texel adds at a shade's full strength (248 of 255, times the shade over 128), as shown. */
 const ADDED = 248 / 128 / 255;
+/** The picture as shown and the scene's light: shown values to the 2.2. */
+const GAMMA = 2.2;
+
+/** The light the band adds on the blade's line, by channel: its shade as shown, taken back to light. */
+export function hazeLight(shade: Shade): [number, number, number] {
+  return shade.map((c) => (c * ADDED) ** GAMMA) as [number, number, number];
+}
 
 interface Glowing {
   readonly roster: number;
@@ -80,49 +94,27 @@ interface Posed {
 export function bladeLine(f: Posed, out: Float32Array): void {
   const { rotation: r, translation: t } = f.skeleton.joints[SWORD_JOINT]!.world;
   BLADE.forEach((p, i) => {
-    const at = (i + 1) * 3;
     for (let k = 0; k < 3; k += 1) {
       const game = (r[k * 3]! * p[0] + r[k * 3 + 1]! * p[1] + r[k * 3 + 2]! * p[2]) / 4096 + t[k]!;
-      out[at + k] = (k === 0 ? game : -game) / 1000;
+      out[i * 3 + k] = (k === 0 ? game : -game) / 1000;
     }
   });
-  /* On past the hilt along the blade's first stretch, past the tip along its last. */
-  const past = (to: number, from: number, onto: number, by: number): void => {
-    const d = [0, 1, 2].map((k) => out[onto * 3 + k]! - out[from * 3 + k]!);
-    const length = Math.hypot(d[0]!, d[1]!, d[2]!) || 1;
-    for (let k = 0; k < 3; k += 1) out[to * 3 + k] = out[onto * 3 + k]! + (d[k]! / length) * by;
-  };
-  past(0, 2, 1, PAST_HILT);
-  past(BLADE_LINE_POINTS - 1, BLADE_LINE_POINTS - 3, BLADE_LINE_POINTS - 2, PAST_TIP);
 }
 
-/** A mote along the glow's line: where it is, and its strength (0 to 1). */
-export interface BladeMote {
-  readonly at: readonly [number, number, number];
-  readonly strength: number;
-}
-
-/**
- * The motes along a glow's line (`bladeLine`'s points), `step` apart at most and evenly from one
- * end to the other: fading in from the end past the hilt to the hilt, full along the blade, and
- * fading out from the blade's third point to the line's end past the tip.
- */
-export function bladeMotes(line: Float32Array, step: number): BladeMote[] {
+/** The motes along a glow's line (`bladeLine`'s points): `step` apart at most and evenly, from the hilt to the tip. */
+export function bladeMotes(line: Float32Array, step: number): [number, number, number][] {
   const reach = [0];
   for (let n = 1; n < BLADE_LINE_POINTS; n += 1) reach.push(reach[n - 1]! + Math.hypot(line[n * 3]! - line[n * 3 - 3]!, line[n * 3 + 1]! - line[n * 3 - 2]!, line[n * 3 + 2]! - line[n * 3 - 1]!));
   const total = reach[BLADE_LINE_POINTS - 1]!;
-  const [hilt, full] = [reach[1]!, reach[FULL_TO]!];
   const count = Math.max(1, Math.ceil(total / step - 1e-9));
-  const motes: BladeMote[] = [];
+  const motes: [number, number, number][] = [];
   let n = 0;
   for (let j = 0; j <= count; j += 1) {
     const u = (total * j) / count;
     while (n < BLADE_LINE_POINTS - 2 && reach[n + 1]! < u) n += 1;
     const span = reach[n + 1]! - reach[n]! || 1;
     const t = (u - reach[n]!) / span;
-    const at = [0, 1, 2].map((k) => line[n * 3 + k]! + (line[(n + 1) * 3 + k]! - line[n * 3 + k]!) * t) as [number, number, number];
-    const strength = u < hilt ? u / hilt : u > full ? (total - u) / (total - full) : 1;
-    motes.push({ at, strength: Math.max(0, Math.min(1, strength)) });
+    motes.push([0, 1, 2].map((k) => line[n * 3 + k]! + (line[(n + 1) * 3 + k]! - line[n * 3 + k]!) * t) as [number, number, number]);
   }
   return motes;
 }
@@ -155,20 +147,24 @@ export class SwordGlows {
       for (let k = 0; k < 3; k += 1) this.line[n * 3 + k] = model[k]! * x + model[4 + k]! * y + model[8 + k]! * z + model[12 + k]!;
     }
     const set = this.set;
-    for (const mote of bladeMotes(this.line, HAZE.step)) {
-      if (set.count >= set.capacity || mote.strength <= 0) continue;
-      const i = set.count;
-      set.positions.set(mote.at, i * 3);
-      set.velocities.fill(0, i * 3, i * 3 + 3);
-      set.sizes[i] = HAZE.size;
-      set.spins[i] = 0;
-      set.frames[i] = 0;
-      set.heights[i] = 0;
-      for (let c = 0; c < 3; c += 1) set.colors[i * 3 + c] = shade[c]! * ADDED * HAZE.gain * mote.strength;
-      set.alphas[i] = 1;
-      set.ages[i] = 0;
-      set.seeds[i] = 0;
-      set.count += 1;
+    const light = hazeLight(shade);
+    const motes = bladeMotes(this.line, HAZE.step);
+    for (const { size, share } of HAZE.layers) {
+      for (const at of motes) {
+        if (set.count >= set.capacity) break;
+        const i = set.count;
+        set.positions.set(at, i * 3);
+        set.velocities.fill(0, i * 3, i * 3 + 3);
+        set.sizes[i] = size;
+        set.spins[i] = 0;
+        set.frames[i] = 0;
+        set.heights[i] = 0;
+        for (let c = 0; c < 3; c += 1) set.colors[i * 3 + c] = light[c]! * share;
+        set.alphas[i] = 1;
+        set.ages[i] = 0;
+        set.seeds[i] = 0;
+        set.count += 1;
+      }
     }
   }
 

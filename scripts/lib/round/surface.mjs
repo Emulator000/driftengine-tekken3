@@ -25,6 +25,12 @@
 import { bindNormal, bindPosition, ELASTIC, trustedJoints } from './bind.mjs';
 import { add, cross, dot, length, normalize, place, scale, sub } from './vec.mjs';
 
+/** The hips' joint, and the legs' (thighs, shins and feet). */
+const HIPS = 11;
+/** The joint a board's garment hangs on, posed as the hips (`arcade/fighter.mjs`). */
+const GARMENT = 24;
+const LEGS = new Set([12, 13, 14, 15, 16, 17]);
+
 /** Two joints whose seams meet within this (their median, millimetres) are placed right against each other. */
 export const TIGHT = 2;
 
@@ -149,6 +155,20 @@ export function surfaceOf(vertices, indices, frames, twoFaced = new Set()) {
     face.round = false;
     for (const g of over.flat()) faces[g].round = false;
   });
+  /*
+   * A leg's face meeting the hips' skin (a corner at the place of a corner of a face on the hips,
+   * alone or blended: a skirt made of that skin and its hem, the hips' joins to the thighs) stays
+   * flat: rounded, it would come out through that skin as the leg swings, where the console's flat
+   * face stays under it.
+   */
+  const placeKey = (c) => position[c].map((x) => Math.round(x)).join();
+  const onHips = (c) => vertices[c].influences.some((f) => f.weight > 0 && (f.joint === HIPS || f.joint === GARMENT));
+  const besideHips = new Set();
+  for (const face of faces) if (face.corners.some(onHips)) for (const c of face.corners) besideHips.add(placeKey(c));
+  for (const face of faces) {
+    const leg = face.corners.some((c) => vertices[c].influences.some((f) => f.weight > 0 && LEGS.has(f.joint)));
+    if (leg && face.corners.some((c) => besideHips.has(placeKey(c)))) face.round = false;
+  }
 
   /* The faces each edge bounds. */
   const edgesOf = () => {
