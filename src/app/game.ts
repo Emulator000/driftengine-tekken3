@@ -7,7 +7,7 @@
  * stage likewise, before their first frame).
  */
 import { loadFightTables, loadIntroModels, loadMoveset } from '../assets/load.ts';
-import { bindMoveIds, bossMoveset, drawnMovesets, fightDataFor, matchMovesets, type MatchSetup } from '../sim/fight/match.ts';
+import { bindMoveIds, bossMoveset, drawnMovesets, fightDataFor, matchMovesets, moveRefs, type MatchSetup } from '../sim/fight/match.ts';
 import type { FightData, LoadedMoveset } from '../sim/fight/state.ts';
 import { Game } from '../sim/game/game.ts';
 import { Scene } from '../sim/game/state.ts';
@@ -119,7 +119,8 @@ export async function playGame(): Promise<void> {
     let data = intros.get(intro);
     if (data === undefined) {
       const sets = [introSet, introSet, common] as const;
-      data = { ...tables, models: introModels[intro]!, sets, moveIds: bindMoveIds(sets) };
+      const refs = moveRefs([introSet, common]);
+      data = { ...tables, models: introModels[intro]!, sets, refs, moveIds: bindMoveIds(sets, refs) };
       intros.set(intro, data);
     }
     return data;

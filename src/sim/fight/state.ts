@@ -89,12 +89,19 @@ export interface FightData {
   /** The lines under a side not in, as the select shows them: who should press start, and the credits. */
   readonly lines: { readonly coin: readonly StartLine[]; readonly credit: readonly StartLine[] };
   sets: readonly [LoadedMoveset | null, LoadedMoveset | null, LoadedMoveset];
+  /** The references to its moves every binding of the match takes (`moveRefs`): per moveset slot, one a move. */
+  readonly refs: readonly (readonly MoveRef[])[];
   /** Per moveset slot, the move ids as bound for the fight: an id the character lacks takes the opponent's move, else the default. */
   moveIds: readonly [readonly (MoveRef | null)[], readonly (MoveRef | null)[]];
   /** In Tekken Force: the enemies' moveset (the second slot's as the stage begins) and the boss's, which takes the second slot when he arrives. */
   readonly forceSets?: { readonly enemies: LoadedMoveset; readonly boss: LoadedMoveset | null };
-  /** With Mokujin in the match: the characters he draws from (roster bits), their movesets loaded (by id), and each side's own as the match began. */
-  readonly mokujin?: { readonly draws: number; readonly movesets: ReadonlyMap<number, LoadedMoveset>; readonly own: readonly [LoadedMoveset, LoadedMoveset] };
+  /** With Mokujin in the match: the characters he draws from (roster bits), their movesets loaded (by id), each side's own as the match began, and the move ids as each pairing of the draws binds them. */
+  readonly mokujin?: {
+    readonly draws: number;
+    readonly movesets: ReadonlyMap<number, LoadedMoveset>;
+    readonly own: readonly [LoadedMoveset, LoadedMoveset];
+    readonly bindings: Map<string, readonly [readonly (MoveRef | null)[], readonly (MoveRef | null)[]]>;
+  };
 }
 
 /** Tekken Ball's ball as a replay keeps a frame of it: its position (and the word after it), its first two turns, its look and count, its stretch's angles (and the word after them) and its stretch. */

@@ -191,7 +191,7 @@ export function startForceStage(state: FightState, data: FightData): void {
     const enemies = sets.enemies === own ? null : sets.enemies;
     if (data.sets[1] !== enemies) {
       data.sets = [data.sets[0], enemies, data.sets[2]];
-      data.moveIds = bindMoveIds(data.sets);
+      data.moveIds = bindMoveIds(data.sets, data.refs);
     }
   }
   force.slots.forEach((slot, i) => {
@@ -622,7 +622,7 @@ export function bossArrives(state: FightState, data: FightData): void {
   chooseFighterBanks(state, data);
   if (set !== null) {
     data.sets = [data.sets[0], set === data.sets[0] ? null : set, data.sets[2]];
-    data.moveIds = bindMoveIds(data.sets);
+    data.moveIds = bindMoveIds(data.sets, data.refs);
   }
   setUpModel(state, data, boss);
   setUpModel(state, data, player);

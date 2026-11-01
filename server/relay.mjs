@@ -93,6 +93,9 @@ const stamp = (ms) => new Date(ms).toISOString();
 /** A pairing as the log names it. */
 const pairingOf = (room) => (room.quick ? 'quick match' : `room ${room.code}`);
 /** A word a game said of itself to the other (its version, its board's fighters), as the log shows it: letters, digits, dots and dashes. */
+/** A match's start as the log keeps it: its own fields (not the message's kind), as JSON, cut to a length. */
+const START_FIELDS = ['options', 'delay', 'keys', 'fighters', 'match', 'draws', 'turned', 'board'];
+const startLine = (body) => JSON.stringify(Object.fromEntries(START_FIELDS.filter((key) => body[key] !== undefined).map((key) => [key, body[key]]))).slice(0, 2000);
 const saidWord = (raw, most = 64) => (typeof raw === 'string' ? raw.replace(/[^0-9A-Za-z.\-]/g, '').slice(0, most) : undefined);
 
 function addressOf(request) {
@@ -486,8 +489,9 @@ export class Relay {
 
   /**
    * What a player's game tells the other, as far as the log keeps it: its hello's version and
-   * board's fighters, the match's start (who plays which fighter, where, with what delay), and its
-   * goodbye's reason (the field where the two games differed, where it says so).
+   * board's fighters, the match's start (who plays which fighter, where, with what delay; and the
+   * start whole, to play the match again from), and its goodbye's reason (the field where the two
+   * games differed, where it says so).
    */
   heardOfPeer(client, body) {
     const room = client.room;
@@ -504,6 +508,8 @@ export class Relay {
       });
       const stage = Number.isInteger(body.options?.stage) ? body.options.stage : '?';
       this.log(`[relay] ${pairingOf(room)}: match ${Number.isInteger(body.match) ? body.match : '?'} began, played as ${client.told?.version ?? '?'}, stage ${stage}, delay ${Number.isInteger(body.delay) ? body.delay : '?'}${body.options?.walls === 1 ? ', walls' : ''}${body.board === undefined ? '' : `, the board's fighters ${saidWord(body.board, 80)}`}: ${sides.join('; ')}`);
+      /* The start whole, as the host gave it (its options, both players' buttons and fighters), so a match that went wrong can be played again from it. */
+      this.log(`[relay] ${pairingOf(room)}: match ${Number.isInteger(body.match) ? body.match : '?'}'s start: ${startLine(body)}`);
     } else if (body.k === 'bye') {
       const at = Number.isInteger(body.at) ? ` at field ${body.at}` : '';
       this.log(`[relay] ${pairingOf(room)}: ${who(client)} ended match ${room.match?.number ?? '?'} (${saidWord(body.why) ?? 'left'}${at})`);

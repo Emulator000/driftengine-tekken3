@@ -483,6 +483,15 @@ test("the server's log: each line stamped with its time; a match's start with ea
     assert.ok(began !== undefined, 'the start logged');
     assert.match(began, /played as 0\.7\.8/);
     assert.match(began, /HOST \(127\.0\.0\.1\) 0\.7\.8, fighter 9\/0, board 1c\.00ff00ff00ff00ff; GUEST \(127\.0\.0\.1\) 0\.7\.8, fighter 12\/0, no board word/);
+    /* The start as the host gave it, to play the match again from: its options, both players' buttons and fighters. */
+    const start = lines.find((line) => line.includes("match 1's start: "));
+    assert.ok(start !== undefined, 'the whole start logged');
+    const given = JSON.parse(start.slice(start.indexOf("match 1's start: ") + "match 1's start: ".length));
+    assert.equal(given.k, undefined, 'its fields alone');
+    assert.deepEqual(given.fighters, [{ roster: 9, costume: 0 }, { roster: 12, costume: 0 }]);
+    assert.equal(given.keys.length, 2);
+    assert.equal(typeof given.options, 'object');
+    assert.equal(given.delay, 2);
     /* The first side's word ends the pairing: the other's, after it, has none to be logged with. */
     const ended = lines.filter((line) => line.includes('ended match 1'));
     assert.equal(ended.length, 1, 'its end');

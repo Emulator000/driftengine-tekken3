@@ -52,8 +52,9 @@ Players then set **SERVER** on ONLINE MODE's page to its address (`relay.example
 address as they connect, are offered, paired and leave (behind a proxy, the address the proxy
 passes in `X-Forwarded-For`), each line stamped with its time (UTC, to the millisecond). A match
 is logged as it begins (the version it is played as, its stage and input delay, and each player's
-version, fighter and costume, and the arcade board's fighters their game swings) and as it ends
-early, with why (`desynced at field N` where the two games differed, `left`, `quit`); Ctrl+C
+version, fighter and costume, and the arcade board's fighters their game swings, then the start
+the host gave whole, as JSON: options, buttons, fighters, so the match can be played again from it)
+and as it ends early, with why (`desynced at field N` where the two games differed, `left`, `quit`); Ctrl+C
 stops it at once.
 
 ## Its page

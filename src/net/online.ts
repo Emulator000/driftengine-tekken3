@@ -168,18 +168,18 @@ export interface OnlineOptions<S> {
  * players and those of every release back to that one play each other; one that changes any of
  * them sets it to its own version.
  */
-export const PLAYS_AS = '0.7.13';
+export const PLAYS_AS = '0.7.14';
 
 /**
  * The older versions this release also plays a match as, each with the fields of the state its own
  * matches have and that version's has not: a match as one is played without what those fields
  * hold (the remake's walls; the moves into the screen of a player who sees the fight from the
  * other side going by that view), and those fields (all at rest) left out of its fingerprint. A
- * version whose matches differ from this one's in nothing but the code, as 0.7.6's to 0.7.8's and 0.7.12's,
- * leaves none out; a costume the remake added after it is played there as its character's
- * second (`playedFighter`).
+ * version whose matches differ from this one's in nothing but the code, as 0.7.6's to 0.7.8's and
+ * 0.7.12's and 0.7.13's, leaves none out; a costume the remake added after it is played there as its
+ * character's second (`playedFighter`).
  */
-export const ALSO_PLAYS: Readonly<Record<string, readonly string[]>> = { '0.7.12': [], '0.7.8': [], '0.7.7': [], '0.7.6': [], '0.7.0': ['depthTurned'], '0.6.5': ['wallHit', 'carried', 'splatted', 'splatHits', 'walls', 'depthTurned'] };
+export const ALSO_PLAYS: Readonly<Record<string, readonly string[]>> = { '0.7.13': [], '0.7.12': [], '0.7.8': [], '0.7.7': [], '0.7.6': [], '0.7.0': ['depthTurned'], '0.6.5': ['wallHit', 'carried', 'splatted', 'splatHits', 'walls', 'depthTurned'] };
 
 /** The costumes the remake adds, by roster id, and the version that added each: Ogre's third, which a board's form gives (`thirdCostume`). */
 const ADDED_COSTUMES: Readonly<Record<number, { readonly costume: number; readonly since: string }>> = { 14: { costume: 2, since: '0.7.12' } };
