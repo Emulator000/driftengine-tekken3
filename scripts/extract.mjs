@@ -77,7 +77,7 @@ const out = path.join(root, 'public/data');
 const exePath = path.join(root, '.cache/disc/SLUS_004.02');
 if (!existsSync(exePath)) throw new Error('no disc data: run npm run disc first');
 /** The format of what this writes, in its manifest: raised when the output changes, so `npm run dev` extracts again. */
-const DATA_FORMAT = 21;
+const DATA_FORMAT = 22;
 /** The arcade board's data, when `npm run arcade` has read it. */
 const arcadePath = path.join(root, '.cache/arcade/data.bin');
 /* Extracted already: at this format, and with the arcade's stages exactly when its data is there. */

@@ -1225,6 +1225,8 @@ export interface FightState {
     skipAsks: number;
     /** A bit a pad: its player sees the fight from the other side, its moves into and out of the screen going by that view. */
     depthTurned: number;
+    /** 1 in a match played as a release before 0.7.15, which buzzed a fighter's pad at its move's dust too: so this side asks the pads as that one does. */
+    dustBuzz: number;
     winner: number;
     challenger: number;
     goesOn: number;

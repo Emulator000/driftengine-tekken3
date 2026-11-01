@@ -54,7 +54,16 @@ const FIST = [
 ];
 /** The belt's two hanging chains: their first nodes, which the bind pose turns to hang down. */
 const BELT = [111, 114];
+/**
+ * The jaw (the lower face and lips), which Tekken 4's model rests a little open, its teeth showing,
+ * and Tekken 4 shuts with the face's own animation, which the port does not play: the bind pose
+ * turns it up about its hinge (its X) until the lips meet.
+ */
+const JAW = 85;
+const JAW_SHUT = -0.05;
 
+/** A rotation about X, for column vectors. */
+const turnX = (a) => [1, 0, 0, 0, Math.cos(a), -Math.sin(a), 0, Math.sin(a), Math.cos(a)];
 /** A rotation about Z, for column vectors. */
 const turnZ = (a) => [Math.cos(a), -Math.sin(a), 0, Math.sin(a), Math.cos(a), 0, 0, 0, 1];
 
@@ -70,8 +79,8 @@ function turnOnto(a, b) {
 }
 
 /**
- * His vertices and normals as the model holds them, but posed for binding: the fists closed, and
- * the belt's tails hanging straight down, as Tekken 4's cloth leaves them and Tekken 3's rigid hips
+ * His vertices and normals as the model holds them, but posed for binding: the fists closed, the
+ * jaw shut, and the belt's tails hanging straight down, as Tekken 4's cloth leaves them and Tekken 3's rigid hips
  * keep them. Skinned on Tekken 4's own skeleton from its rest pose, every other node still.
  */
 export function bindPose(model) {
@@ -82,6 +91,7 @@ export function bindPose(model) {
     const side = first < 70 ? 1 : -1;
     turns.forEach((angle, k) => (posed[first + k] = mul(rest[first + k], turnZ(side * angle))));
   }
+  posed[JAW] = mul(rest[JAW], turnX(JAW_SHUT));
   const world = (locals) => {
     const frames = [];
     model.nodes.forEach((node, i) => {

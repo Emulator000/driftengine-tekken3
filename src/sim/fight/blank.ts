@@ -910,6 +910,7 @@ export function blankFightState(): FightState {
         online: 0,
         skipAsks: 0,
         depthTurned: 0,
+        dustBuzz: 0,
         canPause: 0,
         drawRule: 0,
         healthBackForPoses: 0,

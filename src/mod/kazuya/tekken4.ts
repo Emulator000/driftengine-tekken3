@@ -83,6 +83,19 @@ const apply = (m: Mat, v: Vec): Vec => [
   m[3]! * v[0] + m[4]! * v[1] + m[5]! * v[2],
   m[6]! * v[0] + m[7]! * v[1] + m[8]! * v[2],
 ];
+/**
+ * The rotation a joint's matrix stands for: the game keeps each entry to a 4096th, so its columns
+ * come a little longer or shorter than one and not quite square to each other, which Tekken 4's
+ * rules (made for rotations) would turn into a helper's twist a degree or more off, and back, field
+ * by field. The first column made unit, the second square to it, the third their cross.
+ */
+function rotationOf(m: ArrayLike<number>): Mat {
+  const x = unit([m[0]!, m[3]!, m[6]!]);
+  const second: Vec = [m[1]!, m[4]!, m[7]!];
+  const y = unit(sub(second, scale(x, dot(second, x))));
+  return fromAxes(x, y, cross(x, y));
+}
+
 /** Axis `k` of a frame: a column here, a row of Tekken 4's matrix. */
 const axis = (m: Mat, k: number): Vec => [m[k]!, m[3 + k]!, m[6 + k]!];
 const fromAxes = (x: Vec, y: Vec, z: Vec): Mat => [x[0], y[0], z[0], x[1], y[1], z[1], x[2], y[2], z[2]];
@@ -230,7 +243,7 @@ export class HelperRig {
     for (const [node, joint] of JOINT_OF_NODE) {
       const j = joints[joint];
       if (j === undefined) return [...joints];
-      world.set(node, { r: mul(Array.from(j.r), convention(joint)), t: [j.t[0]!, j.t[1]!, j.t[2]!] });
+      world.set(node, { r: mul(rotationOf(j.r), convention(joint)), t: [j.t[0]!, j.t[1]!, j.t[2]!] });
     }
     /* Tekken 3's chest joint stands at the spine; the chest node sits along it. */
     const chest = world.get(2)!;

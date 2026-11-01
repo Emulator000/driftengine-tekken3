@@ -581,6 +581,8 @@ export class OnlinePlay {
     state.world.options.walls = playedWith(as, 'walls') && start.options.walls === 1 ? 1 : 0;
     /* The players who see the fight from the other side, their moves into the screen going by that view, where the version played has it. */
     state.world.match.depthTurned = playedWith(as, 'depthTurned') && Number.isInteger(start.turned) ? start.turned! & 3 : 0;
+    /* A move's dust buzzing the pads as the version played does: once, or, before 0.7.15, twice. */
+    state.world.match.dustBuzz = playedWith(as, 'dustBuzz') ? 0 : 1;
     state.run.onlineStage = typeof start.options.stage === 'number' ? start.options.stage : -1;
     start.fighters.forEach((fighter, n) => {
       state.entrants.roster[n] = fighter.roster;

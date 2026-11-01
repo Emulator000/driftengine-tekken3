@@ -395,6 +395,9 @@ async function besideRelease(t, version, check = () => {}) {
     const left = ALSO_PLAYS[version];
     assert.ok(left !== undefined, `${version} is played`);
     const games = [await versusGameOf(older.load), await versusGameOf((file) => import(`../${file}`), left)];
+    /* This release's side asks the pads at a move's dust as that version does, as a match's start played as it sets. */
+    const { playedWith } = await import('../src/net/online.ts');
+    if (!playedWith(version, 'dustBuzz')) games[1].state.world.match.dustBuzz = 1;
     check(games);
     /* As they start: the same fingerprint with those fields left out, another with them in. */
     assert.equal(games[1].snapshotter.digestNow(), games[0].snapshotter.digestNow(), 'the same game as they start');
@@ -421,12 +424,14 @@ test("a Versus game of this release with the walls off and one of 0.6.5 pick the
 
 test("a Versus game of this release and one of 0.7.0 pick their characters, fight and stay the same game over a bad link, the field of the players who see the fight from the other side left out of this one's fingerprint", { skip, timeout: 300_000 }, (t) => besideRelease(t, '0.7.0'));
 
-test('a Versus game of this release and one of 0.7.6 pick their characters, fight and stay the same game over a bad link, nothing left out of either fingerprint', { skip, timeout: 300_000 }, (t) => besideRelease(t, '0.7.6'));
+test("a Versus game of this release and one of 0.7.6 pick their characters, fight and stay the same game over a bad link, the dust's buzz as that version's and its word left out of this one's fingerprint", { skip, timeout: 300_000 }, (t) => besideRelease(t, '0.7.6'));
 
-test('a Versus game of this release and one of 0.7.7 pick their characters, fight and stay the same game over a bad link, nothing left out of either fingerprint', { skip, timeout: 300_000 }, (t) => besideRelease(t, '0.7.7'));
+test("a Versus game of this release and one of 0.7.7 pick their characters, fight and stay the same game over a bad link, the dust's buzz as that version's and its word left out of this one's fingerprint", { skip, timeout: 300_000 }, (t) => besideRelease(t, '0.7.7'));
 
-test('a Versus game of this release and one of 0.7.8 pick their characters, fight and stay the same game over a bad link, nothing left out of either fingerprint', { skip, timeout: 300_000 }, (t) => besideRelease(t, '0.7.8'));
+test("a Versus game of this release and one of 0.7.8 pick their characters, fight and stay the same game over a bad link, the dust's buzz as that version's and its word left out of this one's fingerprint", { skip, timeout: 300_000 }, (t) => besideRelease(t, '0.7.8'));
 
-test('a Versus game of this release and one of 0.7.12 pick their characters, fight and stay the same game over a bad link, nothing left out of either fingerprint', { skip, timeout: 300_000 }, (t) => besideRelease(t, '0.7.12'));
+test("a Versus game of this release and one of 0.7.12 pick their characters, fight and stay the same game over a bad link, the dust's buzz as that version's and its word left out of this one's fingerprint", { skip, timeout: 300_000 }, (t) => besideRelease(t, '0.7.12'));
 
-test('a Versus game of this release and one of 0.7.13 pick their characters, fight and stay the same game over a bad link, nothing left out of either fingerprint', { skip, timeout: 300_000 }, (t) => besideRelease(t, '0.7.13'));
+test("a Versus game of this release and one of 0.7.13 pick their characters, fight and stay the same game over a bad link, the dust's buzz as that version's and its word left out of this one's fingerprint", { skip, timeout: 300_000 }, (t) => besideRelease(t, '0.7.13'));
+
+test("a Versus game of this release and one of 0.7.14 pick their characters, fight and stay the same game over a bad link, the dust's buzz as that version's and its word left out of this one's fingerprint", { skip, timeout: 300_000 }, (t) => besideRelease(t, '0.7.14'));
