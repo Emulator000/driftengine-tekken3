@@ -238,6 +238,22 @@ function bleed(pixels, width, height) {
  */
 const windowed = (c, mask, offset) => (c & ~mask) | (offset & mask);
 
+/**
+ * A triangle's three texture coordinates (texels) as it is drawn: along an axis where its corners
+ * lie within one texel of each other, the console reads the first of those texels at every pixel,
+ * so each corner is put at that texel's centre. At its edge a GPU reads the texel before it as
+ * often as not, sharp, or half of it, filtered.
+ */
+export function texelCentred(uvs) {
+  const out = uvs.map(([u, v]) => [u, v]);
+  for (const axis of [0, 1]) {
+    const along = uvs.map((uv) => uv[axis]);
+    const first = Math.min(...along);
+    if (Math.max(...along) - first <= 1) for (const uv of out) uv[axis] = first + 0.5;
+  }
+  return out;
+}
+
 export function packAtlas(vram, uses) {
   const rects = new Map();
   for (const { target, uvs, from = vram } of uses) {

@@ -1,12 +1,12 @@
 /**
  * An arcade stage: its scenery model, cells on a square grid in 8 mm units and game axes, with
- * the texture pages its polygons draw from, as a stage mesh (`STG1` version 3,
+ * the texture pages its polygons draw from, as a stage mesh (`STG1` version 4,
  * scripts/lib/stage.mjs) and its atlas. A polygon's colours are its own, or shades the stage gives
  * it as the fight runs, which its vertices are flagged for.
  */
 import { arcMembers } from '../bns.mjs';
 import { decompress } from '../lz.mjs';
-import { CUT, LAYER_SHIFT, ONE_SIDED, SHADED, writeStageMesh } from '../stage.mjs';
+import { CUT, LAYER_SHIFT, ONE_SIDED, pushPolygon, SHADED, writeStageMesh } from '../stage.mjs';
 import { absoluteVram, decodePage, packAtlas, readTimChain } from '../texture.mjs';
 import { BACKGROUND_TABLES, PROGRAM_CODE } from './board.mjs';
 
@@ -136,13 +136,29 @@ const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 
-/** A polygon's plane (unit normal and distance), or null for one with no area. */
+/** A triangle's plane (unit normal and distance), or null for one with no area. */
 function planeOf(points) {
   const n = cross(sub(points[1], points[0]), sub(points[2], points[0]));
   const length = Math.hypot(...n);
   if (length === 0) return null;
   const normal = n.map((v) => v / length);
   return { normal, distance: dot(normal, points[0]) };
+}
+
+/** Two axes across a plane's normal, to lay points flat in it. */
+function axesOf(normal) {
+  const across = Math.abs(normal[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+  const u = cross(normal, across).map((v, _, a) => v / Math.hypot(...a));
+  return [u, cross(normal, u)];
+}
+
+/** A polygon's triangles as the GPU draws them, each with its plane, those with no area left out. */
+function trianglesOf(polygon) {
+  const corners = polygon.corners.length === 4 ? [[0, 1, 2], [1, 3, 2]] : [[0, 1, 2]];
+  return corners.map((t) => t.map((k) => polygon.corners[k].p)).flatMap((points) => {
+    const plane = planeOf(points);
+    return plane === null ? [] : [{ points, plane }];
+  });
 }
 
 /** Whether two convex outlines in a plane overlap by more than `OVERLAP` along every axis that could part them. */
@@ -164,30 +180,68 @@ function overlap(a, b) {
 }
 
 /**
- * Each polygon's layer: one above the highest of the polygons before it that it lies over in the
- * same plane (a decal on its wall, a mark on its floor), which a depth buffer cannot otherwise tell
- * apart, and 0 for the rest.
+ * The axes of the plane two polygons' triangles share where they overlap in it, or null: a triangle
+ * of one facing along a triangle of the other, each corner of it within `PLANE.distance` of that
+ * one's plane, the two overlapping.
+ */
+function sharedPlane(own, other) {
+  for (const a of own) {
+    for (const b of other) {
+      if (Math.abs(dot(a.plane.normal, b.plane.normal)) < PLANE.cosine) continue;
+      if (b.points.some((q) => Math.abs(dot(a.plane.normal, q) - a.plane.distance) > PLANE.distance)) continue;
+      const [u, v] = axesOf(a.plane.normal);
+      const flat = (points) => points.map((q) => [dot(q, u), dot(q, v)]);
+      if (overlap(flat(a.points), flat(b.points))) return [u, v];
+    }
+  }
+  return null;
+}
+
+/** Whether every point of `inner` lies within the convex outline `outer`, or within `OVERLAP` of it. */
+function within(outer, inner) {
+  /* Which way the outline runs, so that inside is the same side of each of its edges. */
+  let area = 0;
+  outer.forEach(([x0, y0], i) => {
+    const [x1, y1] = outer[(i + 1) % outer.length];
+    area += x0 * y1 - x1 * y0;
+  });
+  return inner.every(([x, y]) =>
+    outer.every(([x0, y0], i) => {
+      const [x1, y1] = outer[(i + 1) % outer.length];
+      const length = Math.hypot(x1 - x0, y1 - y0);
+      return length === 0 || (Math.sign(area) * ((x1 - x0) * (y - y0) - (y1 - y0) * (x - x0))) / length >= -OVERLAP;
+    }),
+  );
+}
+
+/**
+ * Each polygon's layer over the polygons before it that it lies over in the same plane, which a
+ * depth buffer cannot otherwise tell apart: above each it lies wholly within or wholly covers (a
+ * decal on its wall, a mark on its floor), and above each it overlaps in part (a band's end over the
+ * next band's) while the layers last, else in a layer none of those is in; 0 for the rest.
  */
 function stackLayers(polygons) {
-  const planes = polygons.map((p) => planeOf(p.corners.map((c) => c.p)));
+  const triangles = polygons.map(trianglesOf);
   const bounds = polygons.map((p) => [0, 1, 2].map((k) => [Math.min(...p.corners.map((c) => c.p[k])), Math.max(...p.corners.map((c) => c.p[k]))]));
+  /* A polygon's outline laid flat in a plane: a quad's runs round its corners 0, 1, 3, 2. */
+  const outline = (p, [u, v]) => (p.corners.length === 4 ? [0, 1, 3, 2] : [0, 1, 2]).map((k) => [dot(p.corners[k].p, u), dot(p.corners[k].p, v)]);
   polygons.forEach((p, i) => {
-    p.layer = 0;
-    const plane = planes[i];
-    if (plane === null) return;
-    /* The plane's own two axes, to lay both outlines flat in it. */
-    const across = Math.abs(plane.normal[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
-    const u = cross(plane.normal, across).map((v, _, a) => v / Math.hypot(...a));
-    const v = cross(plane.normal, u);
-    const flat = (q) => q.corners.map((c) => [dot(c.p, u), dot(c.p, v)]);
+    /* The least layer it may take, the one over all it overlaps, and the layers of those it overlaps in part. */
+    let least = 0;
+    let over = 0;
+    const partly = new Set();
     for (let j = 0; j < i; j += 1) {
-      const other = planes[j];
-      if (other === null || polygons[j].layer + 1 <= p.layer) continue;
       if (bounds[i].some(([lo, hi], k) => hi < bounds[j][k][0] - PLANE.distance || bounds[j][k][1] + PLANE.distance < lo)) continue;
-      const facing = dot(plane.normal, other.normal);
-      if (Math.abs(facing) < PLANE.cosine || Math.abs(plane.distance - Math.sign(facing) * other.distance) > PLANE.distance) continue;
-      if (overlap(flat(p), flat(polygons[j]))) p.layer = Math.min(LAYERS, polygons[j].layer + 1);
+      const axes = sharedPlane(triangles[i], triangles[j]);
+      if (axes === null) continue;
+      const [mine, under] = [outline(p, axes), outline(polygons[j], axes)];
+      if (within(mine, under) || within(under, mine)) least = Math.max(least, polygons[j].layer + 1);
+      else partly.add(polygons[j].layer);
+      over = Math.max(over, polygons[j].layer + 1);
     }
+    let layer = Math.min(LAYERS, over <= LAYERS ? over : least);
+    while (over > LAYERS && partly.has(layer) && layer < LAYERS) layer += 1;
+    p.layer = layer;
   });
 }
 
@@ -302,14 +356,12 @@ function writeArcadeMesh(polygons, vram, cellSize, grid, encodePng) {
   const indices = [];
   const cellRanges = Array.from({ length: grid * grid }, () => [0, 0]);
   for (const polygon of polygons) {
-    const base = vertices.length;
     if (cellRanges[polygon.cell][1] === 0) cellRanges[polygon.cell][0] = indices.length;
     const cut = packed.clearIn(polygon.target, polygon.corners.map((c) => c.uv));
     const flags = (polygon.shaded ? SHADED : 0) | (polygon.oneSided ? ONE_SIDED : 0) | (polygon.layer << LAYER_SHIFT) | (cut ? CUT : 0);
-    for (const corner of polygon.corners) vertices.push({ p: corner.p, rgb: corner.rgb, flags, uv: packed.place(polygon.target, corner.uv) });
     /* Wound the other way from the PlayStation's order, so a polygon's front faces the engine's way. */
-    if (polygon.corners.length === 3) indices.push(base, base + 2, base + 1);
-    else indices.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
+    const triangles = polygon.corners.length === 3 ? [[0, 2, 1]] : [[0, 2, 1], [1, 2, 3]];
+    pushPolygon(vertices, indices, polygon.corners.map((c) => packed.place(polygon.target, c.uv)), triangles, (k, uv) => ({ p: polygon.corners[k].p, rgb: polygon.corners[k].rgb, flags, uv }));
     cellRanges[polygon.cell][1] = indices.length - cellRanges[polygon.cell][0];
   }
   const mesh = writeStageMesh({ vertices, indices, cellRanges, width: packed.width, height: packed.height, cellSize, grid });

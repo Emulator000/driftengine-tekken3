@@ -4,19 +4,19 @@
  * use; and the ground's 100 map cells with their atlas UVs, which the game lays as a patch that
  * follows the fighters.
  *
- * The mesh format (`STG1` version 3, little-endian): u32 magic, u32 version, u32 vertex count,
+ * The mesh format (`STG1` version 4, little-endian): u32 magic, u32 version, u32 vertex count,
  * u32 index count, u16 atlas width, u16 atlas height, u32 the model's cell size (its second word),
  * u32 the grid's cells each way (6; 16 for an arcade stage); per cell of the grid, row by row,
  * u32 first index and u32 index count; per vertex 20 bytes: i16 x, y, z (8 mm units), u8 r, g, b
  * (128 is unchanged), u8 flags (1: the stage shades it as the fight runs; 2: its polygon is seen
  * from its front only; 4 and 8: the layer it lies in over a polygon in the same plane; 16: its
- * texture has clear texels, so it is drawn after the solid scenery), u16 u, v (atlas texels),
- * u16 reserved, u16 reserved; then u32 indices, cell by cell.
+ * texture has clear texels, so it is drawn after the solid scenery), u16 u, v (eighths of an atlas
+ * texel), u16 reserved, u16 reserved; then u32 indices, cell by cell.
  */
-import { absoluteVram, packAtlas, packetTarget, readTimChain } from './texture.mjs';
+import { absoluteVram, packAtlas, packetTarget, readTimChain, texelCentred } from './texture.mjs';
 
 export const STG_MAGIC = 0x31475453; // 'STG1'
-export const STG_VERSION = 3;
+export const STG_VERSION = 4;
 /** The stage model's 6 × 6 grid of cells. */
 const GRID = 6;
 /**
@@ -130,12 +130,10 @@ export function exportStage(modelBytes, textureMembers, encodePng, tims = readTi
   /* Per cell, where its polygons' indices start and how many, so the cells the game culls can be left out. */
   const cellRanges = Array.from({ length: GRID * GRID }, () => [0, 0]);
   for (const polygon of polygons) {
-    const base = vertices.length;
     if (cellRanges[polygon.cell][1] === 0) cellRanges[polygon.cell][0] = indices.length;
     const flags = packed.clearIn(polygon.target, polygon.corners.map((c) => c.uv)) ? CUT : 0;
-    for (const corner of polygon.corners) vertices.push({ p: corner.p, rgb: polygon.rgb, flags, uv: packed.place(polygon.target, corner.uv) });
-    if (polygon.corners.length === 3) indices.push(base, base + 1, base + 2);
-    else indices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+    const triangles = polygon.corners.length === 3 ? [[0, 1, 2]] : [[0, 1, 2], [1, 3, 2]];
+    pushPolygon(vertices, indices, polygon.corners.map((c) => packed.place(polygon.target, c.uv)), triangles, (k, uv) => ({ p: polygon.corners[k].p, rgb: polygon.rgb, flags, uv }));
     cellRanges[polygon.cell][1] = indices.length - cellRanges[polygon.cell][0];
   }
   const mesh = writeStageMesh({ vertices, indices, cellRanges, width, height, cellSize: view === null ? 0 : view.getUint32(4, true), grid: GRID });
@@ -154,8 +152,29 @@ export function exportStage(modelBytes, textureMembers, encodePng, tims = readTi
 }
 
 /**
- * A stage mesh file: `vertices` as `{ p: [x, y, z], rgb, flags, uv }`, `indices` cell by cell,
- * and per cell of the `grid` × `grid` cells its first index and index count.
+ * A polygon's vertices and triangles added to a mesh's: `placed`, its corners' atlas texels;
+ * `triangles`, its corners in each triangle; `vertex(k, uv)`, corner k's vertex at uv (eighths of a
+ * texel). Each triangle's coordinates are those it is drawn from (`texelCentred`), so a corner its
+ * triangles draw from different texels is a vertex for each.
+ */
+export function pushPolygon(vertices, indices, placed, triangles, vertex) {
+  const drawn = triangles.map((t) => texelCentred(t.map((k) => placed[k])).map((uv) => uv.map((c) => Math.round(c * 8))));
+  const made = new Map();
+  const key = (k, uv) => `${k} ${uv.join(' ')}`;
+  placed.forEach((_, k) => {
+    triangles.forEach((t, n) => {
+      const at = t.indexOf(k);
+      if (at < 0 || made.has(key(k, drawn[n][at]))) return;
+      made.set(key(k, drawn[n][at]), vertices.length);
+      vertices.push(vertex(k, drawn[n][at]));
+    });
+  });
+  triangles.forEach((t, n) => indices.push(...t.map((k, at) => made.get(key(k, drawn[n][at])))));
+}
+
+/**
+ * A stage mesh file: `vertices` as `{ p: [x, y, z], rgb, flags, uv }` (uv in eighths of a texel),
+ * `indices` cell by cell, and per cell of the `grid` × `grid` cells its first index and index count.
  */
 export function writeStageMesh({ vertices, indices, cellRanges, width, height, cellSize, grid }) {
   const mesh = new Uint8Array(28 + grid * grid * 8 + vertices.length * 20 + indices.length * 4);
@@ -175,6 +194,7 @@ export function writeStageMesh({ vertices, indices, cellRanges, width, height, c
     at += 8;
   }
   for (const v of vertices) {
+    if (v.uv.some((c) => c < 0 || 0xffff < c)) throw new Error(`a texture coordinate of ${v.uv.join(', ')} eighths does not fit a stage mesh`);
     for (let k = 0; k < 3; k += 1) out.setInt16(at + k * 2, v.p[k], true);
     for (let k = 0; k < 3; k += 1) out.setUint8(at + 6 + k, v.rgb[k]);
     out.setUint8(at + 9, v.flags);

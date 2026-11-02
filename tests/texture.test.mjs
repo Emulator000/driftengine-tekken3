@@ -7,8 +7,17 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { packAtlas, readTimChain } from '../scripts/lib/texture.mjs';
+import { packAtlas, readTimChain, texelCentred } from '../scripts/lib/texture.mjs';
 import { upscale } from '../scripts/lib/upscale.mjs';
+
+test("a triangle drawn from one texel along an axis is drawn from that texel's centre, as the console reads it, not from its edge", () => {
+  /* Its corners at one u: the console reads that column at every pixel. */
+  assert.deepEqual(texelCentred([[349, 4], [349, 9], [349, 6]]), [[349.5, 4], [349.5, 9], [349.5, 6]]);
+  /* A texel apart: the console reads the first, the second only at the far corner itself. */
+  assert.deepEqual(texelCentred([[349, 5], [350, 6], [349, 6]]), [[349.5, 5.5], [349.5, 5.5], [349.5, 5.5]]);
+  /* Two texels or more apart along an axis: drawn as given along it. */
+  assert.deepEqual(texelCentred([[10, 20], [12, 20], [10, 30]]), [[10, 20], [12, 20], [10, 30]]);
+});
 
 test('an atlas region is surrounded by copies of its edge texels', () => {
   /* A 16-bit direct-colour page whose texel (u, v) is a colour distinct for each position. */
