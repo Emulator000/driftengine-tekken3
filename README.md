@@ -71,6 +71,9 @@ This repository intentionally does not contain or provide:
 
 ## Getting Started
 
+New to the command line, or on Windows? [docs/INSTALL.md](docs/INSTALL.md) goes through these steps
+one at a time, with the usual problems and where to get help.
+
 ### 1. Make an image of your disc
 
 The game reads a raw image of the disc: every sector at its full 2352 bytes, with the audio tracks,
@@ -426,6 +429,7 @@ field. What is done and what is not yet:
 | `src/mod/kazuya/` | Kazuya, added through the game's extension points |
 | `drift.package.json` | The apps, as DriftEngine's packager builds them (`npm run desktop`, `npm run android`, `npm run ios`) |
 | `tests/` | The tests (`npm test`); those that need the disc's data skip without it |
+| `docs/INSTALL.md` | Installing, step by step, and what to do when a step fails |
 | `docs/USAGE.md` | Commands and the page's options |
 | `docs/ENGINE.md` | What the game needs from DriftEngine |
 

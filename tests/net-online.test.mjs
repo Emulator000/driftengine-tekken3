@@ -37,7 +37,7 @@ const EVERY = Array.from({ length: 23 }, (_, i) => i);
 const DEFAULT_KEYS = [12, 12, 12, 12, 1, 3, 2, 0];
 const OWN_KEYS = [12, 12, 12, 12, 0, 1, 2, 3];
 
-function side(url, { version = '0.6.1', plays, roster = EVERY, fighter = 0, name = 'A', delay = 2, now, keys = DEFAULT_KEYS, id, seen, board } = {}) {
+function side(url, { version = '0.6.1', plays, roster = EVERY, fighter = 0, name = 'A', delay = 2, now, keys = DEFAULT_KEYS, id, seen, board, disc, options = { rounds: 3 } } = {}) {
   const chosen = { fighter };
   const log = { began: null, ended: null, begun: 0, waited: 0, optionsAs: null, steps: [] };
   const state = { at: [0, 0], mix: 1, fields: 0 };
@@ -49,7 +49,7 @@ function side(url, { version = '0.6.1', plays, roster = EVERY, fighter = 0, name
     defaultKeys: DEFAULT_KEYS,
     options: (as) => {
       log.optionsAs = as;
-      return { rounds: 3 };
+      return options;
     },
     begin(start, seat, as, ownBoard) {
       log.began = { start, seat, as, ownBoard };
@@ -75,7 +75,7 @@ function side(url, { version = '0.6.1', plays, roster = EVERY, fighter = 0, name
       log.waited += 1;
     },
   };
-  const online = new Online({ url: () => url, game, player: () => ({ name, delay, keys, fighter: { roster: chosen.fighter, costume: 0 }, ...(id === undefined ? {} : { id }), ...(seen === undefined ? {} : { side: seen }), ...(board === undefined ? {} : { board }) }), open: (at) => new WebSocket(at), peerConnection: null, now });
+  const online = new Online({ url: () => url, game, player: () => ({ name, delay, keys, fighter: { roster: chosen.fighter, costume: 0 }, ...(id === undefined ? {} : { id }), ...(seen === undefined ? {} : { side: seen }), ...(board === undefined ? {} : { board }), ...(disc === undefined ? {} : { disc }) }), open: (at) => new WebSocket(at), peerConnection: null, now });
   return { online, state, log, pick: (to) => (chosen.fighter = to) };
 }
 
@@ -459,6 +459,28 @@ test("a fight whose two games swing the board's fighters is watched only by a ga
     assert.equal(same.online.tape.start.board, board);
     assert.equal(other.online.state, 'lobby', 'without: back at once');
     assert.equal(other.online.ended, 'CANNOT WATCH THIS FIGHT');
+  } finally {
+    for (const one of sides) one.online.disconnect();
+    await relay.close();
+  }
+});
+
+test("the server's log gives each player's disc word beside their fighter, and a start carrying the host's power-on values whole", async () => {
+  const lines = [];
+  const relay = new Relay(readConfig(['--host', '127.0.0.1', '--port', '0'], {}), { log: (line) => lines.push(line) });
+  const url = `ws://127.0.0.1:${await relay.listen()}/`;
+  const sides = [];
+  /* Power-on values as large as the game's: a record for each character and the survivors'. */
+  const powerOn = { times: Array.from({ length: 22 }, (_, k) => ({ frames: 200000 + k, initials: 'ABC' })), survivors: Array.from({ length: 10 }, (_, k) => ({ roster: k, wins: k, initials: 'DEF' })), plays: Array.from({ length: 22 }, () => [0, 0, 0, 0]) };
+  try {
+    const [a, b] = await playing(url, { fighter: 9, disc: '0123456789abcdef', options: { rounds: 3, powerOn } }, { fighter: 12 });
+    sides.push(a, b);
+    await frames(sides, () => lines.some((line) => line.includes("match 1's start: ")), 400);
+    const began = lines.find((line) => line.includes('match 1 began'));
+    assert.match(began, /HOST \(127\.0\.0\.1\) [^,]+, fighter 9\/0, disc 0123456789abcdef, no board word; GUEST \(127\.0\.0\.1\) [^,]+, fighter 12\/0, no board word/);
+    const start = lines.find((line) => line.includes("match 1's start: "));
+    const given = JSON.parse(start.slice(start.indexOf("match 1's start: ") + "match 1's start: ".length));
+    assert.deepEqual(given.options.powerOn, powerOn, 'the power-on values whole');
   } finally {
     for (const one of sides) one.online.disconnect();
     await relay.close();

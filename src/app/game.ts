@@ -45,6 +45,7 @@ import { startSound } from './sound.ts';
 import { Rumble } from './rumble.ts';
 import { MoviePicture } from '../present/scenes/movie.ts';
 import { OnlinePlay } from './online.ts';
+import { discWord } from './match-start.ts';
 import { mirror } from '../present/2d/mirror.ts';
 import { menuCorner, newestVersion } from './version.ts';
 import pkg from '../../package.json';
@@ -138,7 +139,7 @@ export async function playGame(): Promise<void> {
     boardFighters.on = on;
     fight?.view.forgetFighters();
   };
-  online = new OnlinePlay(game, { data: game.data, matches: () => matches.values(), roster, board: await boardWord(), drawBoard });
+  online = new OnlinePlay(game, { data: game.data, matches: () => matches.values(), roster, board: await boardWord(), disc: discWord(scenes), drawBoard });
   /* The pads' vibration, felt on the gamepads. */
   const rumble = new Rumble(window);
   /*

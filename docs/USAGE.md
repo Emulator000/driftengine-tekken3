@@ -340,7 +340,10 @@ greyed in the room list. ONLINE MODE says why a pairing cannot be made (THE OTHE
 VERSION 0.6.0, YOU LACK KAZUYA, THE OTHER PLAYER LACKS KAZUYA). The rest of the game's data may
 differ between the two (a disc ripped without its cue sheet, the remaster, an arcade board's
 stages); should it make the two games play differently, the match ends as they part (THE GAMES
-DIFFERED). The arcade board's fighters swing their own hair, tails and belts, which the fight
+DIFFERED). From 0.7.17 a match begins from the values the host's game powers on with (its records,
+its options' defaults), so two discs that differ only there play each other; a match played as an
+older version begins from each game's own, as that version does, and two such games part as it
+begins (at field 0). The arcade board's fighters swing their own hair, tails and belts, which the fight
 plays: two games keep them only where both draw the same fighters from the same board; otherwise
 both swing the disc's, and a game with the board's fighters shows that match with the console's
 models. Ogre's third costume (the board's True Ogre) is fought as his second costume's body, so

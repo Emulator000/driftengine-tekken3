@@ -92,10 +92,10 @@ const who = (client) => `${client.name} (${client.address})`;
 const stamp = (ms) => new Date(ms).toISOString();
 /** A pairing as the log names it. */
 const pairingOf = (room) => (room.quick ? 'quick match' : `room ${room.code}`);
-/** A word a game said of itself to the other (its version, its board's fighters), as the log shows it: letters, digits, dots and dashes. */
+/** A word a game said of itself to the other (its version, its board's fighters, its disc's word), as the log shows it: letters, digits, dots and dashes. */
 /** A match's start as the log keeps it: its own fields (not the message's kind), as JSON, cut to a length. */
 const START_FIELDS = ['options', 'delay', 'keys', 'fighters', 'match', 'draws', 'turned', 'board'];
-const startLine = (body) => JSON.stringify(Object.fromEntries(START_FIELDS.filter((key) => body[key] !== undefined).map((key) => [key, body[key]]))).slice(0, 2000);
+const startLine = (body) => JSON.stringify(Object.fromEntries(START_FIELDS.filter((key) => body[key] !== undefined).map((key) => [key, body[key]]))).slice(0, 8000);
 const saidWord = (raw, most = 64) => (typeof raw === 'string' ? raw.replace(/[^0-9A-Za-z.\-]/g, '').slice(0, most) : undefined);
 
 function addressOf(request) {
@@ -488,23 +488,23 @@ export class Relay {
   }
 
   /**
-   * What a player's game tells the other, as far as the log keeps it: its hello's version and
-   * board's fighters, the match's start (who plays which fighter, where, with what delay; and the
+   * What a player's game tells the other, as far as the log keeps it: its hello's version, board's
+   * fighters and disc's word, the match's start (who plays which fighter, where, with what delay; and the
    * start whole, to play the match again from), and its goodbye's reason (the field where the two
    * games differed, where it says so).
    */
   heardOfPeer(client, body) {
     const room = client.room;
     if (room === null) return;
-    if (body.k === 'hello') client.told = { version: saidWord(body.version), board: saidWord(body.board, 80) };
+    if (body.k === 'hello') client.told = { version: saidWord(body.version), board: saidWord(body.board, 80), disc: saidWord(body.disc, 32) };
     else if (body.k === 'start' && client.seat === 0) {
       const fighters = Array.isArray(body.fighters) ? body.fighters : [];
       const sides = room.seats.map((one, seat) => {
         if (one === null) return '?';
         const fighter = fighters[seat];
         const chose = Number.isInteger(fighter?.roster) ? `fighter ${fighter.roster}/${Number.isInteger(fighter.costume) ? fighter.costume : 0}` : 'fighter ?';
-        const board = one.told?.board;
-        return `${who(one)} ${one.build || '?'}, ${chose}, ${board === undefined ? 'no board word' : board === '0' ? 'no board' : `board ${board}`}`;
+        const { board, disc } = one.told ?? {};
+        return `${who(one)} ${one.build || '?'}, ${chose}, ${disc === undefined ? '' : `disc ${disc}, `}${board === undefined ? 'no board word' : board === '0' ? 'no board' : `board ${board}`}`;
       });
       const stage = Number.isInteger(body.options?.stage) ? body.options.stage : '?';
       this.log(`[relay] ${pairingOf(room)}: match ${Number.isInteger(body.match) ? body.match : '?'} began, played as ${client.told?.version ?? '?'}, stage ${stage}, delay ${Number.isInteger(body.delay) ? body.delay : '?'}${body.options?.walls === 1 ? ', walls' : ''}${body.board === undefined ? '' : `, the board's fighters ${saidWord(body.board, 80)}`}: ${sides.join('; ')}`);

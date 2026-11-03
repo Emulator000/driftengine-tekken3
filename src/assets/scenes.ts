@@ -2,7 +2,7 @@
  * The scenes' tables (`tables/scenes.json`), validated: the values the game's state starts with,
  * the title's lines and the mode menu's entries.
  */
-import type { CreditsTables, IntroTables, PracticeLines, PracticeTables, TheaterTables, OptionsItem, OptionsLines, OptionsTables, OptionValue, Point, MovieRecord, MovieStream, MovieTables, NameTables, OgreChangeTables, RecordsTables, SceneTables, SelectTables, StartLine, SurvivalRecord, TimeRecord, ResultsTables, VersusPlace, VersusTables, VsSelectQuad, VsSelectTables } from '../sim/data/scenes.ts';
+import type { CreditsTables, PowerOn, IntroTables, PracticeLines, PracticeTables, TheaterTables, OptionsItem, OptionsLines, OptionsTables, OptionValue, Point, MovieRecord, MovieStream, MovieTables, NameTables, OgreChangeTables, RecordsTables, SceneTables, SelectTables, StartLine, SurvivalRecord, TimeRecord, ResultsTables, VersusPlace, VersusTables, VsSelectQuad, VsSelectTables } from '../sim/data/scenes.ts';
 import { AssetError, expectArray, expectBoolean, expectInt, expectObject, expectString } from './validate.ts';
 
 const int = (value: unknown, where: string): number => expectInt(value, where, -0x80000000, 0xffffffff);
@@ -217,71 +217,78 @@ const parseSurvivor = (json: unknown, where: string): SurvivalRecord => {
   return { roster: expectInt(o.roster, `${where}.roster`, 0, 0xffff), wins: expectInt(o.wins, `${where}.wins`, 0, 0xffff), initials: expectString(o.initials, `${where}.initials`) };
 };
 
-export function parseSceneTables(json: unknown, where = 'tables/scenes.json'): SceneTables {
-  const o = expectObject(json, where);
-  const p = expectObject(o.powerOn, `${where}.powerOn`);
-  const byte = (key: string): number => expectInt(p[key], `${where}.powerOn.${key}`, 0, 0xff);
+/** The values the game powers on with, as its executable has them: from the imported scenes, or from a host's online match's start. */
+export function parsePowerOn(json: unknown, where: string): PowerOn {
+  const p = expectObject(json, where);
+  const byte = (key: string): number => expectInt(p[key], `${where}.${key}`, 0, 0xff);
   const bytes = (value: unknown, at: string, length: number): number[] => expectArray(value, at, length).map((v, i) => expectInt(v, `${at}[${i}]`, 0, 0xff));
   const words = (value: unknown, at: string, length: number): number[] => expectArray(value, at, length).map((v, i) => expectInt(v, `${at}[${i}]`, 0, 0xffff));
-  const o2 = expectObject(p.options, `${where}.powerOn.options`);
-  const option = (key: string): number => expectInt(o2[key], `${where}.powerOn.options.${key}`, 0, 0xff);
+  const o2 = expectObject(p.options, `${where}.options`);
+  const option = (key: string): number => expectInt(o2[key], `${where}.options.${key}`, 0, 0xff);
+  return {
+    next: byte('next'),
+    last: byte('last'),
+    attractOverlay: byte('attractOverlay'),
+    lastAttractOverlay: byte('lastAttractOverlay'),
+    attractStep: byte('attractStep'),
+    intro: byte('intro'),
+    intros: byte('intros'),
+    options: {
+      difficulty: option('difficulty'),
+      rounds: option('rounds'),
+      roundTime: option('roundTime'),
+      alwaysChip: option('alwaysChip'),
+      continueChooses: option('continueChooses'),
+      otherTitle: option('otherTitle'),
+      vibration: bytes(o2.vibration, `${where}.options.vibration`, 2),
+      lastChoices: bytes(o2.lastChoices, `${where}.options.lastChoices`, 2),
+      keepChoices: option('keepChoices'),
+      modeSetting: option('modeSetting'),
+      autoSave: option('autoSave'),
+      display: (() => {
+        const d = expectObject(o2.display, `${where}.options.display`);
+        return { x: expectInt(d.x, `${where}.options.display.x`, -0x80, 0x7f), y: expectInt(d.y, `${where}.options.display.y`, -0x80, 0x7f) };
+      })(),
+    },
+    keys: expectArray(p.keys, `${where}.keys`, 2).map((pad, i) => bytes(pad, `${where}.keys[${i}]`, 8)),
+    ball: byte('ball'),
+    theater: byte('theater'),
+    picked: byte('picked'),
+    toOptions: byte('toOptions'),
+    earnedRoster: expectInt(p.earnedRoster, `${where}.earnedRoster`, 0, 0xffffffff),
+    extraCostumes: expectInt(p.extraCostumes, `${where}.extraCostumes`, 0, 0xffffffff),
+    versusPortraits: bytes(p.versusPortraits, `${where}.versusPortraits`, 2),
+    versusBackground: expectInt(p.versusBackground, `${where}.versusBackground`, -0x8000, 0x7fff),
+    extraDrawn: byte('extraDrawn'),
+    plays: expectArray(p.plays, `${where}.plays`, 22).map((row, r) => words(row, `${where}.plays[${r}]`, 4)),
+    endings: expectArray(p.endings, `${where}.endings`, 2).map((v, i) => expectInt(v, `${where}.endings[${i}]`, 0, 0xffffffff)),
+    newest: byte('newest'),
+    playsSince: expectInt(p.playsSince, `${where}.playsSince`, 0, 0xffff),
+    scheduleStep: byte('scheduleStep'),
+    scheduleStarted: byte('scheduleStarted'),
+    times: expectArray(p.times, `${where}.times`, 22).map((v, i) => parseTime(v, `${where}.times[${i}]`)),
+    timeSet: expectInt(p.timeSet, `${where}.timeSet`, -1, 21),
+    survivors: expectArray(p.survivors, `${where}.survivors`, 10).map((v, i) => parseSurvivor(v, `${where}.survivors[${i}]`)),
+    survivorSet: expectInt(p.survivorSet, `${where}.survivorSet`, -1, 9),
+    list: byte('list'),
+    stageTurn: byte('stageTurn'),
+    naming: byte('naming'),
+    holder: (() => {
+      const h = expectObject(p.holder, `${where}.holder`);
+      return { side: expectInt(h.side, `${where}.holder.side`, 0, 0xff), roster: expectInt(h.roster, `${where}.holder.roster`, 0, 0xff) };
+    })(),
+    demoTurn: byte('demoTurn'),
+  };
+}
+
+export function parseSceneTables(json: unknown, where = 'tables/scenes.json'): SceneTables {
+  const o = expectObject(json, where);
+  const bytes = (value: unknown, at: string, length: number): number[] => expectArray(value, at, length).map((v, i) => expectInt(v, `${at}[${i}]`, 0, 0xff));
+  const words = (value: unknown, at: string, length: number): number[] => expectArray(value, at, length).map((v, i) => expectInt(v, `${at}[${i}]`, 0, 0xffff));
   const copyright = expectArray(o.copyright, `${where}.copyright`).map((line, i) => expectString(line, `${where}.copyright[${i}]`));
   if (copyright.length !== 2) throw new Error(`${where}.copyright has ${copyright.length} lines, not 2`);
   return {
-    powerOn: {
-      next: byte('next'),
-      last: byte('last'),
-      attractOverlay: byte('attractOverlay'),
-      lastAttractOverlay: byte('lastAttractOverlay'),
-      attractStep: byte('attractStep'),
-      intro: byte('intro'),
-      intros: byte('intros'),
-      options: {
-        difficulty: option('difficulty'),
-        rounds: option('rounds'),
-        roundTime: option('roundTime'),
-        alwaysChip: option('alwaysChip'),
-        continueChooses: option('continueChooses'),
-        otherTitle: option('otherTitle'),
-        vibration: bytes(o2.vibration, `${where}.powerOn.options.vibration`, 2),
-        lastChoices: bytes(o2.lastChoices, `${where}.powerOn.options.lastChoices`, 2),
-        keepChoices: option('keepChoices'),
-        modeSetting: option('modeSetting'),
-        autoSave: option('autoSave'),
-        display: (() => {
-          const d = expectObject(o2.display, `${where}.powerOn.options.display`);
-          return { x: expectInt(d.x, `${where}.powerOn.options.display.x`, -0x80, 0x7f), y: expectInt(d.y, `${where}.powerOn.options.display.y`, -0x80, 0x7f) };
-        })(),
-      },
-      keys: expectArray(p.keys, `${where}.powerOn.keys`, 2).map((pad, i) => bytes(pad, `${where}.powerOn.keys[${i}]`, 8)),
-      ball: byte('ball'),
-      theater: byte('theater'),
-      picked: byte('picked'),
-      toOptions: byte('toOptions'),
-      earnedRoster: expectInt(p.earnedRoster, `${where}.powerOn.earnedRoster`, 0, 0xffffffff),
-      extraCostumes: expectInt(p.extraCostumes, `${where}.powerOn.extraCostumes`, 0, 0xffffffff),
-      versusPortraits: bytes(p.versusPortraits, `${where}.powerOn.versusPortraits`, 2),
-      versusBackground: expectInt(p.versusBackground, `${where}.powerOn.versusBackground`, -0x8000, 0x7fff),
-      extraDrawn: byte('extraDrawn'),
-      plays: expectArray(p.plays, `${where}.powerOn.plays`, 22).map((row, r) => words(row, `${where}.powerOn.plays[${r}]`, 4)),
-      endings: expectArray(p.endings, `${where}.powerOn.endings`, 2).map((v, i) => expectInt(v, `${where}.powerOn.endings[${i}]`, 0, 0xffffffff)),
-      newest: byte('newest'),
-      playsSince: expectInt(p.playsSince, `${where}.powerOn.playsSince`, 0, 0xffff),
-      scheduleStep: byte('scheduleStep'),
-      scheduleStarted: byte('scheduleStarted'),
-      times: expectArray(p.times, `${where}.powerOn.times`, 22).map((v, i) => parseTime(v, `${where}.powerOn.times[${i}]`)),
-      timeSet: expectInt(p.timeSet, `${where}.powerOn.timeSet`, -1, 21),
-      survivors: expectArray(p.survivors, `${where}.powerOn.survivors`, 10).map((v, i) => parseSurvivor(v, `${where}.powerOn.survivors[${i}]`)),
-      survivorSet: expectInt(p.survivorSet, `${where}.powerOn.survivorSet`, -1, 9),
-      list: byte('list'),
-      stageTurn: byte('stageTurn'),
-      naming: byte('naming'),
-      holder: (() => {
-        const h = expectObject(p.holder, `${where}.powerOn.holder`);
-        return { side: expectInt(h.side, `${where}.powerOn.holder.side`, 0, 0xff), roster: expectInt(h.roster, `${where}.powerOn.holder.roster`, 0, 0xff) };
-      })(),
-      demoTurn: byte('demoTurn'),
-    },
+    powerOn: parsePowerOn(o.powerOn, `${where}.powerOn`),
     copyright: [copyright[0]!, copyright[1]!],
     startLines: expectArray(o.startLines, `${where}.startLines`).map((value, i) => {
       const line = expectObject(value, `${where}.startLines[${i}]`);

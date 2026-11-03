@@ -435,3 +435,5 @@ test("a Versus game of this release and one of 0.7.12 pick their characters, fig
 test("a Versus game of this release and one of 0.7.13 pick their characters, fight and stay the same game over a bad link, the dust's buzz as that version's and its word left out of this one's fingerprint", { skip, timeout: 300_000 }, (t) => besideRelease(t, '0.7.13'));
 
 test("a Versus game of this release and one of 0.7.14 pick their characters, fight and stay the same game over a bad link, the dust's buzz as that version's and its word left out of this one's fingerprint", { skip, timeout: 300_000 }, (t) => besideRelease(t, '0.7.14'));
+
+test('a Versus game of this release and one of 0.7.15 pick their characters, fight and stay the same game over a bad link, nothing left out of the fingerprint', { skip, timeout: 300_000 }, (t) => besideRelease(t, '0.7.15'));
