@@ -107,6 +107,11 @@ export interface Moveset {
   readonly cancels: readonly Cancel[];
   readonly moveIds: readonly (Ref | null)[];
   readonly missing: readonly number[];
+  /**
+   * The flags an id with no move in either fighter's moveset reads: the console takes such an id
+   * as the record just before the moveset's first move, the end of its cancel lists.
+   */
+  readonly noMoveFlags: number;
   readonly sounds: readonly number[];
   readonly events: readonly MoveEvent[];
   readonly hitTables: readonly HitTable[];

@@ -1,5 +1,5 @@
 /**
- * A stage's scenery (`STG1` version 3, scripts/lib/stage.mjs): its cells (the disc's 6 × 6, an
+ * A stage's scenery (`STG1` version 4, scripts/lib/stage.mjs): its cells (the disc's 6 × 6, an
  * arcade stage's 16 × 16), each its own mesh so the cells the game culls are left out, in game
  * axes of 8 mm units turned into the player's metres with Y up. Drawn unlit, texture times vertex
  * colour, as the PlayStation draws its stage polygons. A cell's polygons are split by the layer they
@@ -15,7 +15,7 @@
 import type { MeshHandle, RendererApi, SurfaceMaterial, SurfaceTextureHandle } from '@driftengine/core';
 
 const STG_MAGIC = 0x31475453;
-const STG_VERSION = 3;
+const STG_VERSION = 4;
 const UNIT_M = 0.008;
 /** A vertex's flags: its polygon seen from its front only; the layer it lies in; its texture's clear texels. */
 const ONE_SIDED = 2;
@@ -389,8 +389,9 @@ export function createStage(renderer: RendererApi, buffer: ArrayBuffer, texture:
     /* The PlayStation modulates a texel by the polygon's colour over 128. */
     for (let k = 0; k < 3; k += 1) colors[i * 3 + k] = view.getUint8(at + 6 + k) / 128;
     flags[i] = view.getUint8(at + 9);
-    uvs[i * 2] = view.getUint16(at + 10, true) / width;
-    uvs[i * 2 + 1] = view.getUint16(at + 12, true) / height;
+    /* Eighths of a texel. */
+    uvs[i * 2] = view.getUint16(at + 10, true) / 8 / width;
+    uvs[i * 2 + 1] = view.getUint16(at + 12, true) / 8 / height;
     at += 20;
   }
   const indices = new Uint32Array(indexCount);

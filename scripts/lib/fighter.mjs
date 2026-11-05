@@ -17,7 +17,7 @@
 import { facingNormals } from './facing.mjs';
 import { KEEP_SHAPE, writeFtr5 } from './ftr.mjs';
 import { resolveFighter } from './model.mjs';
-import { attributeTarget, decodePage, packAtlas, readTimChain, vramOf } from './texture.mjs';
+import { attributeTarget, decodePage, packAtlas, readTimChain, texelCentred, vramOf } from './texture.mjs';
 
 /** Texels of the face kept around a picture's region, so it is enlarged as the face is around it. */
 const PICTURE_MARGIN = 4;
@@ -184,7 +184,7 @@ export function exportFighter(modelBytes, archiveMembers, parts, parseModel, enc
   const shapesOf = [];
   const lookup = new Map();
   const indices = [];
-  const vertexOf = (i, k, target, picture) => {
+  const vertexOf = (i, k, uv, picture) => {
     const corner = polygons[i].corners[k];
     const influences = pointsOf(corner.position);
     const weight = 1 / influences.length;
@@ -199,12 +199,11 @@ export function exportFighter(modelBytes, archiveMembers, parts, parseModel, enc
       if (shaped !== null) throw new Error('two hands move one corner');
       shaped = { group: g, points: forms.map((form) => form.map((f) => f.point)) };
     });
-    const [u, v] = packed.place(target, corner.uv);
     const record = {
       influences: influences.map((f) => ({ joint: f.joint, weight, point: f.point })),
       normalJoint: corner.normal.joint,
       normal: corner.normal.n,
-      uv: [u * 8, v * 8],
+      uv: uv.map((c) => Math.round(c * 8)),
     };
     const key = JSON.stringify([record, shaped, picture]);
     let index = lookup.get(key);
@@ -217,14 +216,16 @@ export function exportFighter(modelBytes, archiveMembers, parts, parseModel, enc
     return index;
   };
   /* The GPU draws a quad as (0, 1, 2) and (1, 3, 2); each turned round, its front counter-clockwise. */
-  const triangles = (ids) => (ids.length === 3 ? [[ids[0], ids[2], ids[1]]] : [[ids[0], ids[2], ids[1]], [ids[1], ids[2], ids[3]]]);
+  const triangles = (corners) => (corners === 3 ? [[0, 2, 1]] : [[0, 2, 1], [1, 2, 3]]);
   const pictures = [[], []];
   const twoFaced = [];
   const emit = (i, target, picture) => {
-    for (const t of triangles(polygons[i].corners.map((_, k) => vertexOf(i, k, target, picture)))) {
+    const placed = polygons[i].corners.map((corner) => packed.place(target, corner.uv));
+    for (const t of triangles(placed.length)) {
+      const uvs = texelCentred(t.map((k) => placed[k]));
       if (picture !== null) pictures[picture].push(indices.length / 3);
       if (polygons[i].doubleSided) twoFaced.push(indices.length / 3);
-      indices.push(...t);
+      indices.push(...t.map((k, n) => vertexOf(i, k, uvs[n], picture)));
     }
   };
   polygons.forEach((_, i) => emit(i, targetOf[i], shut.has(i) ? 0 : null));

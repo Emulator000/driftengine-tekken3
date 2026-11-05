@@ -51,9 +51,9 @@ export function moveEvents(state: FightState, data: FightData, f: Fighter): void
       shakeVibration(state, code - 1);
     } else if (code === Code.DUST) {
       landingDust(state, data, f);
-      sparkVibration(state, f.movesetSlot, 2);
-    }
-    else if (code >= Code.HEALTH && code < Code.HEALTH_END) {
+      /* The dust's own buzz comes with its effect; a release before 0.7.15 buzzed here too, and a match played as one does. */
+      if (state.match.dustBuzz !== 0) sparkVibration(state, f.movesetSlot, 2);
+    } else if (code >= Code.HEALTH && code < Code.HEALTH_END) {
       f.eventHealth = code - (Code.HEALTH - 1);
       f.eventAmount = arg;
     }

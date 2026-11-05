@@ -116,5 +116,6 @@ export function parseMoveset(json: unknown, where: string): Moveset {
   moveIds.forEach((r, id) => {
     if (r === null && !lacking.has(id)) throw new AssetError(`${where} moveIds[${id}]`, 'has no move but is not missing');
   });
-  return { moves, cancels, moveIds, missing, sounds, events, hitTables, ...parseMovesetCamera(o, where) };
+  const noMoveFlags = expectInt(o.noMoveFlags, `${where} noMoveFlags`, 0, 0xffff);
+  return { moves, cancels, moveIds, missing, noMoveFlags, sounds, events, hitTables, ...parseMovesetCamera(o, where) };
 }

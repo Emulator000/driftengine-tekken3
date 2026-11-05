@@ -1,8 +1,8 @@
 /**
  * The faces a fighter is drawn from: the mesh format that lists the triangles drawn from both faces,
  * the player drawing each face from its front (a face drawn from both twice), its rounding, the
- * normals turned the way the faces face, the board's stand-in left out, and, when `npm run extract`
- * has run, every fighter's mesh wound and lit from its front.
+ * normals turned the way the faces face, the board's stand-in and another fighter in a pack's place
+ * left out, and, when `npm run extract` has run, every fighter's mesh wound and lit from its front.
  */
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -10,7 +10,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { standIn } from '../scripts/lib/arcade/fighter.mjs';
+import { sameBody, standIn } from '../scripts/lib/arcade/fighter.mjs';
 import { facingNormals } from '../scripts/lib/facing.mjs';
 import { hasRig, readFtr, writeFtr5 } from '../scripts/lib/ftr.mjs';
 import { roundMesh } from '../scripts/lib/round.mjs';
@@ -91,6 +91,15 @@ test('a face lying right under one drawn from both faces stays flat, and so does
   assert.deepEqual(surfaceOf(above, indices, bindPose(above, ROOT, indices), new Set([0])).faces.map((f) => f.round), [true, true, true]);
 });
 
+test("a leg's face meeting the hips' skin stays flat, the skin rounding as it does; a leg's face away from it rounds", () => {
+  /* The hips (11) and a thigh (12) where the root is; a face of the hips' skin, a thigh's face sharing a corner's place with it, and one away from it. */
+  const SKELETON = [ROOT[0], { joint: 11, parent: 0, offset: [0, 0, 0] }, { joint: 12, parent: 11, offset: [0, 0, 0] }];
+  const at = (joint, point) => ({ ...on(point), influences: [{ joint, weight: 1, point }], normalJoint: joint });
+  const vertices = [at(11, [0, 0, 0]), at(11, [100, 0, 0]), at(11, [0, 100, 0]), at(12, [100, 0, 0]), at(12, [200, 0, 0]), at(12, [100, 100, 0]), at(12, [400, 0, 0]), at(12, [500, 0, 0]), at(12, [400, 100, 0])];
+  const indices = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+  assert.deepEqual(surfaceOf(vertices, indices, bindPose(vertices, SKELETON, indices)).faces.map((f) => f.round), [true, false, true]);
+});
+
 test('a normal pointing against the faces its vertex is on is turned round, in its hand\'s shapes too', () => {
   const mesh = sheet();
   mesh.vertices[1] = on([100, 0, 0], [0, 0, -4096]);
@@ -133,6 +142,18 @@ const chain = (...tims) => {
 test('the board\'s stand-in for a costume it has no model of, a texture chain of one image, is told from a fighter', () => {
   assert.equal(standIn({ textures: chain(tim(0, 8, 32)) }), true);
   assert.equal(standIn({ textures: chain(tim(0, 8, 32), tim(8, 16, 64)) }), false);
+});
+
+test("a board's model is its pack's fighter only where its body reaches as the disc's does on every joint: another fighter's in its place is told from it", () => {
+  /* Twenty points on each body joint, reaching out to `reach(joint)` millimetres. */
+  const body = (reach) => Array.from({ length: 18 }, (_, joint) => Array.from({ length: 20 }, (_, k) => ({ influences: [{ joint, weight: 1, point: [((k + 1) / 20) * reach(joint), 0, 0] }] }))).flat();
+  const disc = body(() => 200);
+  assert.equal(sameBody(body(() => 200), disc), true);
+  assert.equal(sameBody(body((joint) => (joint === 3 ? 260 : 170)), disc), true, 'a costume a little fuller or slighter');
+  assert.equal(sameBody(body((joint) => (joint === 11 ? 1100 : 200)), disc), false, 'a tail from the hips');
+  assert.equal(sameBody(body((joint) => (joint === 1 ? 480 : 200)), disc), false, 'wings on the chest');
+  assert.equal(sameBody(body((joint) => (joint === 5 ? 90 : 200)), disc), false, 'a part far slighter');
+  assert.equal(sameBody(body(() => 200).filter((v) => v.influences[0].joint !== 3), disc), true, 'a joint without points on one of them is not compared');
 });
 
 const data = path.join(root, 'public/data');
@@ -178,4 +199,29 @@ test("Kazuya's mesh, on Tekken 4's rig, is drawn from the front of each face, an
   assert.ok(mesh.oneSided);
   assert.notEqual(mesh.rig, null);
   assert.equal(mesh.indices.length, triangles * 6, 'every triangle drawn again from its back');
+});
+
+const sorted = existsSync(path.join(data, 'manifest.json')) && JSON.parse(readFileSync(path.join(data, 'manifest.json'), 'utf8')).format >= 21;
+
+test("every board's model drawn in a pack's place is that pack's fighter", { skip: !sorted && 'no extracted data at format 21; run npm run extract' }, () => {
+  const dir = path.join(data, 'arcade/fighters');
+  if (!existsSync(dir)) return;
+  for (const name of readdirSync(dir).filter((n) => n.endsWith('.ftr'))) {
+    const board = readFtr(new Uint8Array(readFileSync(path.join(dir, name))));
+    const disc = readFtr(new Uint8Array(readFileSync(path.join(data, 'fighters', name))));
+    assert.ok(sameBody(board.vertices, disc.vertices), name);
+  }
+});
+
+test("a board's model of another fighter in a pack's place is kept as a form, for its character's costume the disc has no model of", { skip: !sorted && 'no extracted data at format 21; run npm run extract' }, () => {
+  const manifest = JSON.parse(readFileSync(path.join(data, 'manifest.json'), 'utf8'));
+  if (!(manifest.arcadeFighters?.length > 0)) return;
+  for (const code of manifest.arcadeForms) {
+    assert.ok(existsSync(path.join(data, 'arcade/forms', `${code}.ftr`)), `form ${code}`);
+    assert.equal(code & 3, 2, 'a third costume');
+    const roster = JSON.parse(readFileSync(path.join(root, 'public/assets/tables/roster.json'), 'utf8'));
+    const second = String(roster.codes[(code & ~3) | 1].pack).padStart(2, '0');
+    const form = readFtr(new Uint8Array(readFileSync(path.join(data, 'arcade/forms', `${code}.ftr`))));
+    if (existsSync(path.join(data, 'fighters', `${second}.ftr`))) assert.equal(sameBody(form.vertices, readFtr(new Uint8Array(readFileSync(path.join(data, 'fighters', `${second}.ftr`)))).vertices), false, 'another fighter than the pack it stood in');
+  }
 });

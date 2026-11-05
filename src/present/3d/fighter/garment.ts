@@ -18,7 +18,9 @@
  * does not tear or fold. A point no turn keeps clear is put back out from the part's line, square
  * to it. A tail's point is never turned: it hangs where its spring holds it, and only where that is
  * too near a part is it put back out so. A point is near a part only level with it, between its
- * two ends.
+ * two ends. Cloth above a thigh's joint, within the thigh's reach (`reachOf`: as far as its top
+ * rises past its joint as it is raised, its own thickness), is kept off it too, to its surface, the
+ * thigh not being there at rest; a panel hangs from above that reach.
  *
  * Points and frames are the game's: millimetres, a rotation's rows then a place.
  */
@@ -49,7 +51,8 @@ const ROUND = 16;
  * length, its joint's turn (a rotation's rows, the hips' frame); how far it has swung from rest,
  * about what axis and toward which side (square to the hips' x); where its leg's line runs at rest
  * (its y and z, from the thigh's joint at `top` down) and how far down it the part starts
- * (`from`); and its surface (`profileOf`).
+ * (`from`); its surface (`profileOf`); and how far its leg's thigh reaches past its joint
+ * (`reachOf`).
  */
 export interface LimbNow {
   readonly at: number[];
@@ -63,9 +66,20 @@ export interface LimbNow {
   top: number;
   from: number;
   readonly surface: Float32Array;
+  readonly reach: number;
 }
 
-export const newLimb = (surface: Float32Array): LimbNow => ({ at: [0, 0, 0], along: [1, 0, 0], length: 0, turn: [1, 0, 0, 0, 1, 0, 0, 0, 1], swing: 0, about: [0, 0, 1], toward: [0, 1, 0], line: [0, 0], top: 0, from: 0, surface });
+export const newLimb = (surface: Float32Array, reach = 0): LimbNow => ({ at: [0, 0, 0], along: [1, 0, 0], length: 0, turn: [1, 0, 0, 0, 1, 0, 0, 0, 1], swing: 0, about: [0, 0, 1], toward: [0, 1, 0], line: [0, 0], top: 0, from: 0, surface, reach });
+
+/** How far a thigh's rounded top rises past its joint: its surface's farthest from its line where it starts (`profileOf`'s). */
+export function reachOf(surface: Float32Array): number {
+  let most = 0;
+  for (let b = 0; b < ROUND; b += 1) most = Math.max(most, surface[b]!);
+  return most;
+}
+
+/** How far above its start a point that hangs there is carried by a part: a thigh's reach past its joint, nothing for a shin. */
+const capOf = (limb: LimbNow): number => (limb.from === 0 ? limb.reach : 0);
 
 /** `(x, y, z)` turned back by `r` (by its transpose), into `out`. */
 export function unturn(r: ArrayLike<number>, x: number, y: number, z: number, out: number[]): void {
@@ -104,10 +118,16 @@ export function placeLimb(hips: Frame, thigh: Frame, from: Frame, to: Frame, out
   out.toward[2] = z / aside;
 }
 
-/** How far a point that hangs at `p` (three at `i`) lies from its leg's line at rest: 0 where it is above the leg. */
+/** How far a point that hangs at `p` (three at `i`) lies from its leg's line at rest: 0 where it is above the leg's reach. */
 function restOf(p: ArrayLike<number>, i: number, limb: LimbNow): number {
-  if (limb.length === 0 || !(p[i]! > limb.top)) return 0;
+  if (limb.length === 0 || !(p[i]! > limb.top - limb.reach)) return 0;
   return Math.hypot(p[i + 1]! - limb.line[0]!, p[i + 2]! - limb.line[1]!);
+}
+
+/** How far from a part a point that hangs at `p` (three at `i`) may be kept: as far as it lay at rest, all the way to its surface above the thigh's joint, 0 above the leg's reach. */
+function keptOf(p: ArrayLike<number>, i: number, limb: LimbNow): number {
+  const rest = restOf(p, i, limb);
+  return rest > 0 && !(p[i]! > limb.top) ? Infinity : rest;
 }
 
 /** Where `surface` lies `s` along its part, the way round of `(y, z)` (the part's frame). */
@@ -125,7 +145,7 @@ function surfaceAt(surface: Float32Array, s: number, y: number, z: number): numb
 function carried(p: ArrayLike<number>, i: number, limb: LimbNow): number {
   const rest = restOf(p, i, limb);
   const s = p[i]! - limb.top - limb.from;
-  if (rest === 0 || limb.swing === 0 || !(s > 0 && s < limb.length)) return 0;
+  if (rest === 0 || limb.swing === 0 || !(s > -capOf(limb) && s < limb.length)) return 0;
   const y = p[i + 1]! - limb.line[0]!;
   const z = p[i + 2]! - limb.line[1]!;
   const square = (y * limb.toward[1]! + z * limb.toward[2]!) / rest;
@@ -135,18 +155,18 @@ function carried(p: ArrayLike<number>, i: number, limb: LimbNow): number {
 
 /**
  * How much nearer than it is kept the point three at `i` of `p` lies to the part (0 or less where
- * it is clear, level with the part or not): `rest`, how far it lay from the leg's line at rest.
+ * it is clear, level with the part or not): `kept`, how far from it it may be kept (`keptOf`).
  */
-function nearness(p: ArrayLike<number>, i: number, limb: LimbNow, rest: number): number {
+function nearness(p: ArrayLike<number>, i: number, limb: LimbNow, kept: number): number {
   const { at, along, turn } = limb;
   const wx = p[i]! - at[0]!;
   const wy = p[i + 1]! - at[1]!;
   const wz = p[i + 2]! - at[2]!;
   const s = wx * along[0]! + wy * along[1]! + wz * along[2]!;
-  if (rest === 0 || !(s > 0 && s < limb.length)) return 0;
+  if (kept === 0 || !(s > 0 && s < limb.length)) return 0;
   const y = wx * turn[1]! + wy * turn[4]! + wz * turn[7]!;
   const z = wx * turn[2]! + wy * turn[5]! + wz * turn[8]!;
-  return Math.min(rest, surfaceAt(limb.surface, s, y, z) + MARGIN) - Math.hypot(wx - s * along[0]!, wy - s * along[1]!, wz - s * along[2]!);
+  return Math.min(kept, surfaceAt(limb.surface, s, y, z) + MARGIN) - Math.hypot(wx - s * along[0]!, wy - s * along[1]!, wz - s * along[2]!);
 }
 
 /** The point three at `i` of `p` turned by `angle` about the unit `axis` through the hinge three at `i` of `hinges`, into `out` at `o`. */
@@ -165,15 +185,15 @@ function turnAbout(p: ArrayLike<number>, i: number, hinges: ArrayLike<number>, a
 
 const TRIED = [0, 0, 0];
 
-/** The least turn about its hinge, the way `limb` swung, that keeps the point three at `i` of `p` clear of it (`rest` as `nearness` takes it): 0 where it is clear, the best where none is enough. */
-function leastTurn(p: ArrayLike<number>, i: number, hinges: ArrayLike<number>, rest: number, limb: LimbNow): number {
-  if (!(nearness(p, i, limb, rest) > 0) || limb.swing === 0) return 0;
+/** The least turn about its hinge, the way `limb` swung, that keeps the point three at `i` of `p` clear of it (`kept` as `nearness` takes it): 0 where it is clear, the best where none is enough. */
+function leastTurn(p: ArrayLike<number>, i: number, hinges: ArrayLike<number>, kept: number, limb: LimbNow): number {
+  if (!(nearness(p, i, limb, kept) > 0) || limb.swing === 0) return 0;
   let clear = 0;
   let best = 0;
   let least = Infinity;
   for (let k = 1; k <= STEPS && clear === 0; k += 1) {
     turnAbout(p, i, hinges, limb.about, (k * Math.PI) / STEPS, TRIED, 0);
-    const near = nearness(TRIED, 0, limb, rest);
+    const near = nearness(TRIED, 0, limb, kept);
     if (!(near > 0)) clear = (k * Math.PI) / STEPS;
     else if (near < least) [best, least] = [(k * Math.PI) / STEPS, near];
   }
@@ -183,7 +203,7 @@ function leastTurn(p: ArrayLike<number>, i: number, hinges: ArrayLike<number>, r
   for (let k = 0; k < HALVINGS; k += 1) {
     const middle = (low + high) / 2;
     turnAbout(p, i, hinges, limb.about, middle, TRIED, 0);
-    if (nearness(TRIED, 0, limb, rest) > 0) low = middle;
+    if (nearness(TRIED, 0, limb, kept) > 0) low = middle;
     else high = middle;
   }
   return high;
@@ -203,7 +223,7 @@ export function keepClothOff(points: Float32Array, turning: Uint8Array, hinges: 
     if (limb.length === 0 || limb.swing === 0) continue;
     let any = false;
     for (let g = 0; g < count; g += 1) {
-      turns[g] = turning[g] === 0 ? 0 : Math.max(carried(points, g * 3, limb), leastTurn(out, g * 3, hinges, restOf(points, g * 3, limb), limb));
+      turns[g] = turning[g] === 0 ? 0 : Math.max(carried(points, g * 3, limb), leastTurn(out, g * 3, hinges, keptOf(points, g * 3, limb), limb));
       if (turns[g]! > 0) any = true;
     }
     if (!any) continue;
@@ -221,7 +241,7 @@ export function keepClothOff(points: Float32Array, turning: Uint8Array, hinges: 
   for (const limb of limbs) {
     const { at, along } = limb;
     for (let g = 0; g < count; g += 1) {
-      const near = nearness(out, g * 3, limb, restOf(points, g * 3, limb));
+      const near = nearness(out, g * 3, limb, keptOf(points, g * 3, limb));
       if (!(near > 0)) continue;
       const i = g * 3;
       const wx: number = out[i]! - at[0]!;

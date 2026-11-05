@@ -431,6 +431,32 @@ export interface CreditsState {
  * legs, or as the original draws it), the picture's quality (by the device, high, low or very
  * low), the frame rate shown (off, on) and the touch pad (on a touch screen, on, off).
  */
+/** A music entry of the MUSIC page: what it is kept by, the song it is (-1 the menus, where the console plays none), its name. */
+export interface MusicRow {
+  readonly key: string;
+  readonly song: number;
+  readonly label: string;
+}
+
+/** A song of the player's library as the menus show it. */
+export interface MusicName {
+  readonly title: string;
+  readonly artist: string;
+}
+
+/**
+ * The player's own songs in place of the game's music: the entries (`rows`), the library's songs,
+ * and what each entry plays (`chosen`, an entry's: 0 the original, 1 a random song of the library,
+ * 2 on the library's first song on); the entry the MUSIC page shows, and its list's cursor.
+ */
+export interface MusicChoices {
+  rows: MusicRow[];
+  library: MusicName[];
+  chosen: number[];
+  row: number;
+  readonly page: { cursor: number; sub: number };
+}
+
 export interface RemakeSettings {
   textures: number;
   models: number;
@@ -580,8 +606,14 @@ export interface GameState {
     readonly display: { x: number; y: number };
   };
   readonly earned: { ball: number; theater: number };
-  /** The remake's own settings (its page in the Options), as set and as the page started with them; and whether the remaster's assets were made on this machine. */
-  readonly remake: { readonly settings: RemakeSettings; readonly started: RemakeSettings; remasterMade: boolean };
+  /**
+   * The remake's own settings (its page in the Options), as set and as the page started with them;
+   * whether the remaster's assets were made on this machine; and the characters (a bit a roster id)
+   * whose third costume a board's form gives here, its model kept in the place of another of theirs;
+   * the music the player's own songs play in place of (its MUSIC page); and the cursors of its
+   * sections' pages (DISPLAY, REMASTER, GAME).
+   */
+  readonly remake: { readonly settings: RemakeSettings; readonly started: RemakeSettings; remasterMade: boolean; forms: number; readonly music: MusicChoices; readonly sections: { cursor: number; sub: number }[] };
   /** ONLINE MODE's page: its screens and settings, what it asks of the page and what the page tells it of the connection. */
   readonly online: OnlineState;
   /** The progress as last saved, which a load brings back (null: none saved), as the memory card holds it. */
@@ -931,7 +963,7 @@ export function blankGameState(): GameState {
       display: { x: 0, y: 0 },
     },
     earned: { ball: 0, theater: 0 },
-    remake: { settings: { ...REMAKE_DEFAULTS }, started: { ...REMAKE_DEFAULTS }, remasterMade: false },
+    remake: { settings: { ...REMAKE_DEFAULTS }, started: { ...REMAKE_DEFAULTS }, remasterMade: false, forms: 0, music: { rows: [], library: [], chosen: [], row: 0, page: { cursor: 0, sub: 0 } }, sections: [0, 1, 2].map(() => ({ cursor: 0, sub: 0 })) },
     online: blankOnline(),
     kept: null,
     practice: blankPractice(),

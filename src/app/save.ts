@@ -6,7 +6,9 @@
  */
 import { defaultStore, type KeyValueStore } from '@driftengine/core';
 import { expectArray, expectInt, expectObject, expectString } from '../assets/validate.ts';
+import { saveRecords } from '../sim/game/records.ts';
 import type { Progress, SavedSurvivor, SavedTime } from '../sim/game/save.ts';
+import type { GameState } from '../sim/game/state.ts';
 
 /**
  * Where the progress is kept, and the shape it is kept in (the first had none of the options the
@@ -118,4 +120,22 @@ export function readProgress(store: KeyValueStore = defaultStore()): Progress | 
 /** The progress kept in `store`, in place of what was. */
 export function writeProgress(progress: Progress, store: KeyValueStore = defaultStore()): void {
   store.write(KEY, JSON.stringify({ format: FORMAT, ...progress }));
+}
+
+/**
+ * With auto save on, the records saved as soon as the game moves on (a scene, or a step of one)
+ * after they change: a match's result, an ending, a record. The console saves only on the way to
+ * the title and before the records, so a game closed after a fight would lose it.
+ */
+export class SaveAsItGoes {
+  private scene = -1;
+  private step = -1;
+
+  /** After a field: the records saved (`saveRecords`) if the game moved on. */
+  field(game: GameState): void {
+    if (game.scene === this.scene && game.step === this.step) return;
+    this.scene = game.scene;
+    this.step = game.step;
+    saveRecords(game);
+  }
 }

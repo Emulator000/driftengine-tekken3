@@ -2,7 +2,7 @@
 import { AssetError, expectArray, expectBoolean, expectInt, expectObject } from './validate.ts';
 
 /** The format the importer writes and the loaders read. Raised when an asset's shape changes. */
-export const ASSET_FORMAT = 54;
+export const ASSET_FORMAT = 56;
 
 /** How many times their size the original pictures are written (`pictures/*.png`), enlarged by edge-directed interpolation. */
 export const PICTURE_SCALE = 4;
@@ -22,6 +22,8 @@ export interface Manifest {
   readonly arcadeObjects: readonly ArcadeObject[];
   /** The fighters' packs drawn with the board's models, where it was read. */
   readonly arcadeFighters: readonly number[];
+  /** The roster codes drawn with a board's form, a model of another fighter it keeps in a pack's place (Ogre's third costume). */
+  readonly arcadeForms: readonly number[];
 }
 
 /** A sway: one of the piece's height or angles moved `step` a field, the other way every `period` fields, the first time after `start`. */
@@ -175,5 +177,6 @@ export function parseManifest(json: unknown, where = 'manifest.json'): Manifest 
       };
     }),
     arcadeFighters: expectArray(o.arcadeFighters, `${where} arcadeFighters`).map((v, i) => expectInt(v, `${where} arcadeFighters[${i}]`, 0, 0xff)),
+    arcadeForms: expectArray(o.arcadeForms, `${where} arcadeForms`).map((v, i) => expectInt(v, `${where} arcadeForms[${i}]`, 0, 0x5b)),
   };
 }

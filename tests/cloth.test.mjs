@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { hingesOf, keepClothOff, newLimb, placeLimb, profileOf } from '../src/present/3d/fighter/garment.ts';
+import { hingesOf, keepClothOff, newLimb, placeLimb, profileOf, reachOf } from '../src/present/3d/fighter/garment.ts';
 import { hungFromHips } from '../src/sim/fight/match.ts';
 
 const I = [1, 0, 0, 0, 1, 0, 0, 0, 1];
@@ -34,8 +34,8 @@ function leg(turn) {
   const top = [150, 0, 100];
   const knee = apply(turn, [400, 0, 0]).map((v, i) => v + top[i]);
   const ankle = apply(turn, [800, 0, 0]).map((v, i) => v + top[i]);
-  const thigh = newLimb(roundPart(12));
-  const shin = newLimb(roundPart(13));
+  const thigh = newLimb(roundPart(12), reachOf(roundPart(12)));
+  const shin = newLimb(roundPart(13), reachOf(roundPart(12)));
   placeLimb(frame([0, 0, 0]), frame(top, turn), frame(top, turn), frame(knee, turn), thigh);
   placeLimb(frame([0, 0, 0]), frame(top, turn), frame(knee, turn), frame(ankle, turn), shin);
   return [thigh, shin];
@@ -66,12 +66,25 @@ test('a leg\'s part swings from rest down the hips\' x, about the axis square to
   assert.equal(leg(I)[0].swing, 0);
 });
 
-test('cloth is left where it hangs while the legs are at rest, and above the legs whatever they do', () => {
+test('cloth is left where it hangs while the legs are at rest, and above the legs\' reach whatever they do', () => {
   const panel = [250, -110, 100];
-  const hinge = [100, -110, 100];
+  const hinge = [0, -110, 100];
   assert.deepEqual(keep(panel, hinge, [], [], leg(I)).map(Math.round), panel);
-  const above = [120, -60, 100];
+  const above = [40, -60, 100];
   assert.deepEqual(keep(above, hinge, [], [], leg(aboutZ(-60))).map(Math.round), above);
+});
+
+test("a thigh's rounded top rises past its joint by its own thickness: a thigh raised high keeps off it cloth that hung just above its joint", () => {
+  assert.equal(reachOf(roundPart(12)), 100, "a round thigh's reach is its thickness");
+  const [thigh, shin] = leg(aboutZ(-60));
+  const above = [120, -60, 100];
+  assert.ok(fromLine(above, thigh.at, thigh.along) < 100, 'the raised thigh reaches where it hung, 30 mm above its joint');
+  for (const turning of [1, 0]) {
+    const out = new Float32Array(3);
+    keepClothOff(Float32Array.from(above), Uint8Array.from([turning]), Float32Array.from([0, -60, 100]), new Uint32Array(0), new Float32Array(0), [thigh, shin], new Float32Array(1), out);
+    const kept = fromLine([...out], thigh.at, thigh.along);
+    assert.ok(kept >= 108 - 0.5, `${turning ? 'a panel' : 'a tail'} kept ${kept.toFixed(1)} mm from the thigh's line`);
+  }
 });
 
 test('a thigh swung into the cloth turns it the way it swung, as far from the thigh as it hung', () => {

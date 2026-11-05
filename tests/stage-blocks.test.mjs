@@ -15,7 +15,7 @@ const ONE_SIDED = 2;
 const LAYER = (n) => n << 2;
 const CUT = 16;
 
-/** A version 3 stage of `grid` × `grid` cells, each cell's triangles given as [x, z, flags] (one triangle a corner at x, z, its flags). */
+/** A version 4 stage of `grid` × `grid` cells, each cell's triangles given as [x, z, flags] (one triangle a corner at x, z, its flags). */
 function stageBuffer(cells, grid = GRID) {
   const vertices = [];
   const indices = [];
@@ -34,7 +34,7 @@ function stageBuffer(cells, grid = GRID) {
   const buffer = new ArrayBuffer(header + vertices.length * 20 + indices.length * 4);
   const view = new DataView(buffer);
   view.setUint32(0, 0x31475453, true);
-  view.setUint32(4, 3, true);
+  view.setUint32(4, 4, true);
   view.setUint32(8, vertices.length, true);
   view.setUint32(12, indices.length, true);
   view.setUint16(16, 256, true);

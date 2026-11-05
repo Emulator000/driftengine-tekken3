@@ -9,6 +9,7 @@
 | `npm run import` | Writes the game's typed assets, under `public/assets/` |
 | `npm run t4 -- "<image>"` | Reads your Tekken 4 disc image (`.iso`, or a `.7z` holding one) for Kazuya; then run `npm run extract` again |
 | `npm run arcade -- "<folder>"` | Reads the dump of your own Tekken 3 arcade board (its chips' files, in one folder) for the arcade's stages, into `.cache/arcade/`; then run `npm run extract` again ([Tekken 3 Arcade assets](../README.md#tekken-3-arcade-assets-optional)) |
+| `npm run music -- "<folder>"` | Makes a library of your own songs from a folder of them (any format FFmpeg reads, its subfolders too), each brought to the game's own songs' loudness, into `public/data/music/custom/`; again with no folder, it follows the folder imported last (new songs added, songs gone dropped); `-- --clear` empties it. REMAKE OPTION's MUSIC page plays them ([REMAKE OPTION](#remake-option)) |
 | `npm run remaster` | Makes the remaster's assets on this machine (an x64 PC with Linux or Windows, or a Mac with Apple silicon on macOS 26 or later), on its GPU where it has one (`-- --cpu`, `-- --rocm`, `-- --cuda`, `-- --mps` to choose; job names after it make those parts alone), into `public/assets/remaster/`; then REMASTER in REMAKE OPTION draws with them ([The remaster](../README.md#the-remaster-optional)) |
 | `npm run dev` | Serves the game on `localhost:5190` (or the next free port), running `extract` and `import` first when their output is missing |
 | `npm run dev:lan` | Serves the game to your own devices on your home network, over HTTPS and over plain HTTP at the next port ([Over your home network](#over-your-home-network)) |
@@ -55,7 +56,7 @@ address's.
 | `ball` | Starts Tekken Ball at once, the first pad in, on its character select (where the first to choose a character chooses the ball) |
 | `force`, `force=ROSTER`, `force=ROSTER,COSTUME` or `force=ROSTER,COSTUME,STAGE` | Starts Tekken Force at once, the first pad in: on its character select, or with that character chosen at that stage (1 to 4, 5 the final stage; by default the first) |
 | `ending=ROSTER` or `ending=ROSTER,COSTUME` | Plays that character's ending at once |
-| `unlock` | Earns everything the game unlocks, as its last unlock does: every character (the character select then shows its two rows), the costumes, Tekken Ball and the Theater |
+| `unlock` | Earns everything the game unlocks, as its last unlock does: every character (the character select then shows its two rows), the costumes, Tekken Ball and the Theater (the title's code earns the same and keeps it, in the apps too: [below](#unlocking-everything)) |
 | `unlock=ball` or `unlock=theater` | Earns Tekken Ball alone, or the Theater alone, as the game's own unlock does (the mode menu lists it, new) |
 | `record=time,ROSTER` or `record=survival,ROSTER,WINS` | Goes to the records with a new best time for that character (ten stages of 30 seconds, through Time Attack's results) or a survival record of that many wins (more than the tenth best has, through Survival's results), its name to enter, on the first pad |
 | `record=force,ROSTER` or `record=force,ROSTER,FLAGS` | Goes to Tekken Force's results for that character on the first side, a run cleared with a new best score, then the records; `FLAGS` 1 a copper key (the default), 8 Dr. B saved, 0x10 the bosses beaten shown |
@@ -64,7 +65,7 @@ address's.
 | `fighters=psx` | Draws the disc's fighters where the arcade board's data has the arcade's models (by default the arcade's, once `npm run arcade` has read it) |
 | `cloth=original` | Draws the fighters' cloth as the board and the console do, a leg passing through a coat's panel or a tail where it swings into it (by default each is kept clear of the legs, the disc's models' tails too, in the attract intros as well) |
 | `models=psx`, `models=rounded` | Draws the fighters with the console's meshes, or the rounded ones (by default the rounded ones, but at `quality=verylow`) |
-| `quality=high` | The whole picture: ambient occlusion and bloom over the multisampled HDR scene; the default but on a phone |
+| `quality=high` | The whole picture: ambient occlusion and bloom over the multisampled HDR scene, the bloom only on what is brighter than a fighter is ever lit (the sparks and flashes), so a fighter, which the console clips to white, never has a halo; the default but on a phone |
 | `quality=low` | Leaves out the ambient occlusion and the bloom, the fighters' shadows from a smaller map filtered less; a phone's default |
 | `quality=verylow` | The picture for an entry-level phone: the scene drawn straight to the screen with no pass after it and no multisampling, one pixel to the CSS pixel and no more pixels than a 640 by 480 picture, the shadows from a small map filtered least, and the fighters with the console's meshes; sixty pictures a second while its frames keep up, and an even thirty for the rest of the start from the first second and a half they do not with its density at its least (the game runs sixty fields either way). It is the default on a phone whose GPU the browser names as an entry-level part (a Mali-G31, G51, G52 or G57, any Mali of one or two cores, an Adreno 5xx or 600s to 610s, or a PowerVR) |
 | `budget=N` | The frame time, in milliseconds, the picture's density is held to (20 by default): while most of a fight's frames take longer, the picture steps down toward half its pixels each way, and back up as the frames allow; `0` holds it still |
@@ -107,11 +108,20 @@ configuration, the music, the display's place). Here it keeps them on the device
 the browser's storage for the page's address, or in the app's own. The Options' SAVE DATA page
 (the console's memory card page) saves them (SAVE), brings back what was last saved (LOAD), and
 turns the auto save on or off. With AUTO SAVE on, the game saves where the console saves on its
-own (on the way back to the title, and before the records) whenever the records changed; options
-changed in the Options are kept by a SAVE, or by the next of those. A device with nothing saved yet
-starts with AUTO SAVE and both pads' VIBRATION on. A page started with `arcade`, `versus`, `ball`,
+own (on the way back to the title, and before the records) whenever the records changed, and also
+as soon as it moves on after they change (a match's result, an ending, a record), so a game closed
+after a fight keeps it; options changed in the Options are kept by a SAVE, or by the next of
+those. A device with nothing saved yet starts with AUTO SAVE and both pads' VIBRATION on. A page started with `arcade`, `versus`, `ball`,
 `force`, `ending`, `record` or `unlock` reads the progress but never saves it, so those shortcuts
 leave it as it was. Clearing the site's data in the browser (or the app's) starts the game afresh.
+
+### Unlocking everything
+
+On the title (PRESS START BUTTON), press 0 five times within three seconds, or tap the screen
+five times on a phone: the game earns everything it unlocks, as `?unlock` does (every character,
+the costumes, Tekken Ball and the Theater), with a challenger's sound, and saves it at once, so it
+stays earned. It is for the apps, which have no address to add `?unlock` to, and works in a
+browser too. Any other key starts the count over.
 
 ## Controllers
 
@@ -142,16 +152,20 @@ their mean time and the longest of them. Whether it shows is kept with REMAKE OP
 
 ## REMAKE OPTION
 
-The Options' first page lists REMAKE OPTION before its EXIT: the remake's own settings, changed as
-GAME OPTION's are (up and down to pick, left and right to change), kept on the device (the browser,
-or the app) for every start after.
+The Options' first page lists REMAKE OPTION before its EXIT: the remake's own settings, in four
+sections, each a page of its own (select or EXIT goes back to the list): DISPLAY (textures, models,
+stages, fighters, cloth, picture, frame rate, CRT filter), REMASTER (the remaster, and while it is
+on its look, brightness and floor fade), GAME (game speed, reachable walls, touch pad, touch
+directions) and MUSIC (your own songs, below). Each setting is changed as GAME OPTION's are (up and
+down to pick, left and right to change) and kept on the device (the browser, or the app) for every
+start after.
 
 | Setting | Values |
 | --- | --- |
 | TEXTURES | SMOOTH (enlarged and smoothed), ORIGINAL (each texel sharp, as `textures=psx`) |
 | MODELS | AUTO (rounded, but on an entry-level phone), ROUNDED, ORIGINAL (the console's meshes) |
 | STAGES | ARCADE (the arcade board's, where `npm run arcade` has read them), CONSOLE |
-| FIGHTERS | ARCADE (the arcade board's models, where it has read them), CONSOLE |
+| FIGHTERS | ARCADE (the arcade board's models, where it has read them, and Ogre's third costume, start at the character select: the board's True Ogre, TRUE OGRE on Ogre's moves), CONSOLE |
 | CLOTH | CLEAR OF LEGS (a board's fighter's coat panels and the tails a fighter hangs from the hips, a board's model's or the disc's, kept clear of the legs: a panel carried over a raised thigh, a tail put out where a leg swings into it), ORIGINAL (as the board and the console draw them, as `cloth=original`) |
 | PICTURE | AUTO (by the device), HIGH, LOW, VERY LOW (as `quality=`) |
 | FRAME RATE | OFF, ON (as `F`) |
@@ -166,8 +180,22 @@ or the app) for every start after.
 | CRT FILTER | OFF (the default), ON: the picture as a tape played on a television showed it. It is softened, a little across, and its colour much more, smeared to the right of the edges it belongs to. Over it lie soft scanlines (240 down the picture), a faint aperture grille of red, green and blue columns and darkened corners, the picture under them a little brighter. A fine grain crawls over it, a faint band rolls slowly down and the picture flickers a little; all three hold still where the system asks for less motion. Laid over the picture, so the same with any renderer and quality; changed at once |
 
 The frame rate, the game's speed, the touch pad's directions and the CRT filter change at once, and REACHABLE WALLS is taken at the next match. The others change what the game loads: while one differs
-from the start's, the page says LEAVING RESTARTS THE GAME, and leaving it starts the game again
-(with auto save on, the progress is saved first).
+from the start's, its page says LEAVING RESTARTS THE GAME, and leaving REMAKE OPTION starts the
+game again (with auto save on, the progress is saved first).
+
+### MUSIC
+
+Your own songs in place of the game's music, once `npm run music` has made a library of them
+(until then the page says RUN NPM RUN MUSIC FIRST). SONG picks an entry: MENU (the title and the
+mode menu, the Options, where the console plays no music), SELECT (the character select's song),
+then each character's theme, as the game picks a fight's song by its character (Kuma's plays for
+Panda, Heihachi's for Kazuya). PLAYS picks what it plays: ORIGINAL (the game's own; for MENU,
+silence), RANDOM (a song of your library, another each time the entry's song starts), or one of
+your songs, its whole title and artist under the list. A song plays in the game's song's place,
+from its start each time the game's starts, looping for as long as the game's plays, at its volume
+and through its fades; on this page, the entry's song plays as you pick it. The choices are kept
+on the device and take effect at once. ONLINE MODE plays the game's own music: its waiting room,
+its matches and the fights watched.
 
 ## Online
 
@@ -312,10 +340,15 @@ greyed in the room list. ONLINE MODE says why a pairing cannot be made (THE OTHE
 VERSION 0.6.0, YOU LACK KAZUYA, THE OTHER PLAYER LACKS KAZUYA). The rest of the game's data may
 differ between the two (a disc ripped without its cue sheet, the remaster, an arcade board's
 stages); should it make the two games play differently, the match ends as they part (THE GAMES
-DIFFERED). The arcade board's fighters swing their own hair, tails and belts, which the fight
+DIFFERED). From 0.7.17 a match begins from the values the host's game powers on with (its records,
+its options' defaults), so two discs that differ only there play each other; a match played as an
+older version begins from each game's own, as that version does, and two such games part as it
+begins (at field 0). The arcade board's fighters swing their own hair, tails and belts, which the fight
 plays: two games keep them only where both draw the same fighters from the same board; otherwise
 both swing the disc's, and a game with the board's fighters shows that match with the console's
-models.
+models. Ogre's third costume (the board's True Ogre) is fought as his second costume's body, so
+either may play it; a game without the board's model shows his second costume, and against a
+game older than 0.7.12 he is played in his second costume.
 
 **A server to play over.** `npm run dev` runs one beside the page for players on the same machine,
 `npm run dev:lan` for players on the same home network. Over the internet, one of you runs

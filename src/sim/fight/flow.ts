@@ -452,8 +452,12 @@ function markTimeOut(state: FightState): void {
   if (b.outcome < 0) b.closing = b.outcome;
 }
 
-/** What the computer's last move leaves it holding: the guard its move's stance asks for, or nothing. */
-function settleStance(state: FightState, data: FightData, f: Fighter): void {
+/**
+ * What the computer's last move leaves it holding: the guard its move's stance asks for, or
+ * nothing. A last move going on to an id neither moveset has a move for (the default move) reads
+ * the flags the console reads there, the fighter's moveset's `noMoveFlags`.
+ */
+export function settleStance(state: FightState, data: FightData, f: Fighter): void {
   if (f.character !== BOSCONOVITCH_SET) {
     if (state.mode === Mode.TEKKEN_FORCE && ((f.moveId - FORCE_STANCES.first) & 0xffff) < FORCE_STANCES.count) {
       f.input.replayHeld = 0x8000;
@@ -461,8 +465,8 @@ function settleStance(state: FightState, data: FightData, f: Fighter): void {
     }
     let move = f.next.move;
     if (move === null) move = moveById(data, f, moveAt(data, f.move!).next);
-    if (move === null) throw new Error("a computer's last move goes on to no move");
-    if ((moveAt(data, move).flags & 0x204) !== 0) {
+    const flags = move === null ? (data.sets[f.movesetSlot] ?? data.sets[0]!).moveset.noMoveFlags : moveAt(data, move).flags;
+    if ((flags & 0x204) !== 0) {
       f.input.replayHeld = 0x1000;
       return;
     }

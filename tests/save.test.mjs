@@ -3,13 +3,14 @@
  * a saved progress that is not the game's is not read (the game starts afresh), one saved before
  * the Options' own options were is read with auto save on, one saved before Tekken Force's
  * records were reads them as none, and the game saves on its own only with auto save on and its
- * records changed, keeping what it saved.
+ * records changed, keeping what it saved: where the console saves, and as soon as it moves on after
+ * they change.
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { MemoryStore } from '@driftengine/core';
-import { parseProgress, readProgress, writeProgress } from '../src/app/save.ts';
+import { parseProgress, readProgress, SaveAsItGoes, writeProgress } from '../src/app/save.ts';
 import { saveRecords } from '../src/sim/game/records.ts';
 import { progressOf, restoreProgress } from '../src/sim/game/save.ts';
 import { blankGameState } from '../src/sim/game/state.ts';
@@ -114,4 +115,31 @@ test('the game saves on its own only with auto save on and its records changed s
   assert.equal(game.kept.records.earnedRoster, 0x1ff);
   game.records.earnedRoster = 0x3ff;
   assert.equal(game.kept.records.earnedRoster, 0x1ff, 'kept as it was saved');
+});
+
+test('with auto save on, records that change are saved as soon as the game moves on (a scene, or a step of one), not before', () => {
+  const game = blankGameState();
+  game.options.autoSave = 1;
+  const asItGoes = new SaveAsItGoes();
+  Object.assign(game, { scene: 7, step: 2 });
+  asItGoes.field(game);
+  assert.equal(game.saving, 0, 'nothing changed');
+  game.records.changed = 1;
+  game.records.plays[9][0] = 1;
+  asItGoes.field(game);
+  assert.equal(game.saving, 0, 'still on the same step');
+  game.step = 3;
+  asItGoes.field(game);
+  assert.equal(game.saving, 1, 'the step after the change');
+  assert.equal(game.records.changed, 0);
+  assert.deepEqual(game.kept.records.plays[9], [1, 0, 0, 0]);
+  game.saving = 0;
+  game.scene = 8;
+  asItGoes.field(game);
+  assert.equal(game.saving, 0, 'nothing changed since');
+  game.options.autoSave = 0;
+  game.records.changed = 1;
+  game.step = 4;
+  asItGoes.field(game);
+  assert.equal(game.saving, 0, 'auto save off');
 });

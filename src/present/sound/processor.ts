@@ -1,7 +1,8 @@
 /**
  * The sound's worklet: the mixer run on the audio thread at the chip's rate, given the banks and
  * the music's tables once, each field's commands as the game makes them, and each song's bytes as
- * they arrive; a movie's sound on its input. Before the banks are in it plays silence.
+ * they arrive; a movie's sound, or a song of the player's own, on its input. Before the banks are
+ * in it plays silence.
  */
 import type { SoundCommand } from '../../sim/fight/voices.ts';
 import type { PlayableBanks } from './banks.ts';
@@ -13,7 +14,8 @@ export type SoundMessage =
   | { readonly kind: 'start'; readonly banks: PlayableBanks; readonly music: MusicTables }
   | { readonly kind: 'field'; readonly commands: readonly SoundCommand[]; readonly vabs: readonly number[]; readonly frameRan: boolean; readonly vblank: number }
   | { readonly kind: 'song'; readonly xa: number; readonly bytes: Uint8Array }
-  | { readonly kind: 'track'; readonly track: number; readonly samples: Int16Array };
+  | { readonly kind: 'track'; readonly track: number; readonly samples: Int16Array }
+  | { readonly kind: 'own'; readonly songs: readonly number[]; readonly menu: boolean };
 
 /** What the worklet tells the page: the song it plays (its XA song, the start it was made for) and the samples of it put out so far, or null. */
 export type SoundReport = { readonly xa: number; readonly starts: number; readonly samples: number } | null;
@@ -40,10 +42,11 @@ class GameSound extends AudioWorkletProcessor {
     if (message.kind === 'start') this.mixer = new Mixer(message.banks, message.music);
     else if (message.kind === 'field') this.mixer?.field(message.commands, message.vabs, message.frameRan, message.vblank);
     else if (message.kind === 'song') this.mixer?.song(message.xa, message.bytes);
+    else if (message.kind === 'own') this.mixer?.ownSongs(message.songs, message.menu);
     else this.mixer?.track(message.track, message.samples);
   }
 
-  /** The movie's sound comes in on the first input (stereo, or mono into both), the drive's CD audio while it reads a movie. */
+  /** The first input (stereo, or mono into both): a movie's sound, the drive's CD audio while it reads a movie; or a song of the player's own. */
   process(inputs: Float32Array[][], outputs: Float32Array[][]): boolean {
     const [left, right] = outputs[0]!;
     if (left === undefined || right === undefined) return true;

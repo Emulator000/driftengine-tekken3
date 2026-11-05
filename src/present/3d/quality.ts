@@ -1,7 +1,7 @@
 /**
  * The picture's finishing, by quality: `high` (the default, but on a phone) adds the engine's
  * ambient occlusion (the fighters set on the floor, the stage's corners) and bloom (only what is
- * brighter than white: the sparks and flashes) to the multisampled HDR scene; `low` (a phone's
+ * brighter than a fighter is ever lit: the sparks and flashes) to the multisampled HDR scene; `low` (a phone's
  * default) is the scene multisampled only, the fighters' shadows from a smaller map filtered less;
  * `verylow` (a phone with an entry-level GPU) draws the scene straight to the screen with no pass
  * after it and no multisampling, at one pixel to the CSS pixel and no more pixels than a 640 by 480
@@ -31,6 +31,17 @@ export function entryLevelGpu(renderer: string): boolean {
   return ENTRY_LEVEL.some((pattern) => pattern.test(name));
 }
 
+/**
+ * The brightest a fighter's channel comes to: a white texel lit to twice the texture, as the console
+ * holds it, in the picture's linear light. The bloom starts there, so a fighter, which the console
+ * clips to white with no halo round it, never blooms, under any stage's light; the sparks and
+ * flashes, brighter still, do.
+ */
+export const FIGHTERS_BRIGHTEST = (255 / 128) ** 2.2;
+
+/** The remaster's bloom: a little weaker, from the same start. */
+export const REMASTER_BLOOM = { bloom: 0.26, bloomThreshold: FIGHTERS_BRIGHTEST } as const;
+
 /** The most pixels a very low picture has. */
 const VERY_LOW_PIXELS = 640 * 480;
 
@@ -43,5 +54,5 @@ const VERY_LOW_SHADOWS = { directionalShadowMapSize: 512, shadowFilterTaps: 4 } 
 export function fightQuality(level: Quality): RenderQualityOptions {
   if (level === 'verylow') return { ...BASE, ...VERY_LOW_SHADOWS, screenEffects: false, hdrScene: false, sceneSamples: 1, maxDevicePixelRatio: 1, maxDrawingBufferPixels: VERY_LOW_PIXELS };
   if (level === 'low') return { ...BASE, ...LOW_SHADOWS };
-  return { ...BASE, ambientOcclusion: 0.55, ambientOcclusionRadius: 0.45, bloom: 0.35, bloomThreshold: 1 };
+  return { ...BASE, ambientOcclusion: 0.55, ambientOcclusionRadius: 0.45, bloom: 0.35, bloomThreshold: FIGHTERS_BRIGHTEST };
 }

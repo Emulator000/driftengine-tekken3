@@ -22,7 +22,8 @@ import { ONLINE_PAGE, onlineFrame } from './online-page.ts';
 import { print } from './printer.ts';
 import { playCount, sortPairs } from './records.ts';
 import { share } from './records-screen.ts';
-import { isRemakeSetting, REMAKE_ITEM, REMAKE_PAGE, remakeLineY, remakeOptions, REMASTER_LINE, remasterMissing, RESTART_LINE, restartWanted } from './remake-options.ts';
+import { musicLines, musicOptions, MUSIC_PAGE, musicValue, setMusicValue } from './music-page.ts';
+import { isRemakeSetting, REMAKE_ITEM, remakeLineY, remakePage, REMASTER_LINE, remasterMissing, RESTART_LINE, restartWanted } from './remake-options.ts';
 import { restoreProgress, saveProgress } from './save.ts';
 import { buttonRow, draw, tile } from './draw.ts';
 import { Scene, type GameState, type KeySide } from './state.ts';
@@ -136,11 +137,13 @@ function titleColour(game: GameState): number {
 
 function valueOf(game: GameState, value: OptionValue): number {
   if (isRemakeSetting(value)) return game.remake.settings[value];
+  if (value === 'musicRow' || value === 'musicPlays') return musicValue(game, value);
   return value === 'none' ? 0 : value === 'page' ? game.optionsScreen.page : game.options[value];
 }
 
 function setValue(game: GameState, value: OptionValue, v: number): void {
   if (isRemakeSetting(value)) game.remake.settings[value] = v & 0xff;
+  else if (value === 'musicRow' || value === 'musicPlays') setMusicValue(game, value, v);
   else if (value === 'page') game.optionsScreen.page = v & 0xff;
   else if (value !== 'none') game.options[value] = v & 0xff;
 }
@@ -713,15 +716,22 @@ function pageFrame(game: GameState, data: OptionsData, scenes: SceneTables): voi
     }
     return;
   }
-  if (screen.page === REMAKE_PAGE) {
-    /* The list as the remaster leaves it, the cursor kept on it where a line has gone. */
-    const remake = remakeOptions(game);
-    screen.remake.cursor = Math.min(screen.remake.cursor, remake.items.length - 1);
-    listInput(game, data, remake, screen.remake);
-    const listed = remakeOptions(game);
-    listDraw(game, listed, screen.remake);
-    if (remasterMissing(game)) message(game, REMASTER_LINE, 5, remakeLineY(listed));
-    else if (restartWanted(game)) message(game, RESTART_LINE, 5, remakeLineY(listed));
+  if (screen.page === MUSIC_PAGE) {
+    const music = musicOptions(game);
+    listInput(game, data, music, game.remake.music.page);
+    listDraw(game, musicOptions(game), game.remake.music.page);
+    for (const line of musicLines(game)) message(game, line.text, 6, line.y);
+    return;
+  }
+  const remake = remakePage(game, screen.page);
+  if (remake !== null) {
+    /* The page as the remaster leaves it, the cursor kept on it where a line has gone. */
+    remake.state.cursor = Math.min(remake.state.cursor, remake.page.items.length - 1);
+    listInput(game, data, remake.page, remake.state);
+    const listed = remakePage(game, screen.page) ?? remake;
+    listDraw(game, listed.page, listed.state);
+    if (remasterMissing(game)) message(game, REMASTER_LINE, 5, remakeLineY(listed.page));
+    else if (restartWanted(game)) message(game, RESTART_LINE, 5, remakeLineY(listed.page));
     return;
   }
   const page = tables.pages[screen.page];

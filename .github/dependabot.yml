@@ -1,0 +1,29 @@
+# Dependabot: a grouped pull request when a security advisory lands against anything this
+# repository installs, and one routine pull request a month for the rest.
+#
+# A pull request from it is a proposal: its change is taken into the next release's commit, where
+# the tests run, and the pull request is closed.
+version: 2
+updates:
+  # The lockfile only: a routine update moves what an install resolves within the ranges
+  # package.json asks for. A new major version (Vite's, TypeScript's) is taken by hand, with the
+  # changes it needs.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    versioning-strategy: lockfile-only
+    # A version a week old, for routine updates: a compromised release is caught within days of
+    # being published, if at all. Security updates do not wait for it.
+    cooldown:
+      default-days: 7
+    ignore:
+      # The engine's packages decide how an online match plays, so they move with a release, by hand.
+      - dependency-name: '@driftengine/*'
+    groups:
+      npm-security:
+        applies-to: security-updates
+        patterns: ['*']
+      npm-monthly:
+        applies-to: version-updates
+        patterns: ['*']

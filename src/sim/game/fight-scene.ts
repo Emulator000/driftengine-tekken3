@@ -14,7 +14,7 @@
  */
 import { fightFrame } from '../fight/fight.ts';
 import type { FightTables, MatchSetup } from '../fight/match.ts';
-import { MOKUJIN, MOKUJIN_DRAWS, startMatch } from '../fight/match.ts';
+import { bindDrawn, MOKUJIN, MOKUJIN_DRAWS, startMatch } from '../fight/match.ts';
 import { bossArrives, startForceStage } from '../fight/force-stage.ts';
 import { forceMatch, forceModeSetup } from './force.ts';
 import { startRoundOfGame } from '../fight/start.ts';
@@ -720,6 +720,8 @@ function step(game: GameState, data: FightSceneData): void {
 
 /** Scene 8: the soft reset first, then the state's step. */
 export function fightScene(game: GameState, data: FightSceneData): void {
+  /* The match's moves bound as this field's state has Mokujin's draw (a field played again after a rollback included). */
+  if (data.match !== null) bindDrawn(game.world, data.match);
   game.drewFight = 0;
   if (softReset(game, data.tables)) return;
   step(game, data);

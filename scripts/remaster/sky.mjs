@@ -10,7 +10,7 @@
  */
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { writeFileSync } from 'node:fs';
-import { cpus } from 'node:os';
+import { workersFor } from '../lib/gentle.mjs';
 import { fileURLToPath } from 'node:url';
 
 /** Where the picture's tone starts nearing white. */
@@ -378,7 +378,7 @@ if (isMainThread) {
   WIDTH = settings.width;
   HEIGHT = settings.height;
   const started = Date.now();
-  const workers = cpus().length;
+  const workers = workersFor();
   const parts = await Promise.all(
     Array.from({ length: workers }, (_, w) => {
       const rows = [];

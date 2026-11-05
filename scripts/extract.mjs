@@ -25,7 +25,8 @@
  *                    and the panorama behind it (.sky.png) where it has one, and its moving
  *                    pieces from the board's program (NN-K.stg and .png)
  *   arcade/fighters/NN.* with the board's data, per pack it has a model of (not its stand-in for a
- *                    costume it has none of): the mesh (.ftr, scripts/lib/arcade/fighter.mjs), its
+ *                    costume it has none of, nor another fighter in its place: that one is a
+ *                    form, arcade/forms/CODE.*, by the roster code it is drawn for): the mesh (.ftr, scripts/lib/arcade/fighter.mjs), its
  *                    skeleton and accessories (.json) and atlas (.png), drawn in place of the disc's
  *   bns/NNN.bin      every file of TEKKEN3.BNS as it is, which the game's own loader reads by
  *                    logical id (the overlays, the menus' textures), their count in the manifest
@@ -55,14 +56,20 @@ import { parseModel } from './lib/model.mjs';
 import { exportStage } from './lib/stage.mjs';
 import { ACCESSORY_TABLES, archiveAt, BACKGROUND_RULES, BACKGROUND_TABLES, PROGRAM_CODE, PROGRAM_STAGES, STAGE_ARCHIVES, STAGE_LEFT_OUT, STAGE_OBJECTS } from './lib/arcade/board.mjs';
 import { exportArcadeBackground, exportArcadeObject, exportArcadeStage } from './lib/arcade/stage.mjs';
-import { arcadeFighters, boardAccessories, exportArcadeFighter, standIn } from './lib/arcade/fighter.mjs';
+import { arcadeFighters, boardAccessories, exportArcadeFighter, sameBody, standIn } from './lib/arcade/fighter.mjs';
 import { decompress } from './lib/lz.mjs';
 import { readTimChain } from './lib/texture.mjs';
+import { readFtr, writeFtr5 } from './lib/ftr.mjs';
+import { tuckUnderSkirt } from './lib/tuck.mjs';
 import { decodePng, encodePng } from './lib/png.mjs';
 import { openDisc } from './lib/iso.mjs';
 import { readXaSongs, xaSongTable } from './lib/xa.mjs';
 import { audioTracks, parseCue } from './lib/cue.mjs';
 import { convertMovie, haveFfmpeg, movieTables, rawSectors, streamOf } from './lib/str.mjs';
+import { runGently } from './lib/gentle.mjs';
+
+/* Below the machine's other work, so a long run leaves it usable. */
+runGently();
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const bns = path.join(root, '.cache/bns');
@@ -70,7 +77,7 @@ const out = path.join(root, 'public/data');
 const exePath = path.join(root, '.cache/disc/SLUS_004.02');
 if (!existsSync(exePath)) throw new Error('no disc data: run npm run disc first');
 /** The format of what this writes, in its manifest: raised when the output changes, so `npm run dev` extracts again. */
-const DATA_FORMAT = 20;
+const DATA_FORMAT = 23;
 /** The arcade board's data, when `npm run arcade` has read it. */
 const arcadePath = path.join(root, '.cache/arcade/data.bin');
 /* Extracted already: at this format, and with the arcade's stages exactly when its data is there. */
@@ -164,10 +171,27 @@ function shapesFromOf(pack) {
   return null;
 }
 
+/** A fighter's exported mesh with the joins between its hips and legs under a skirt tucked behind it (`scripts/lib/tuck.mjs`). */
+function tucked(mesh, skeleton) {
+  if (skeleton == null) return mesh;
+  const read = readFtr(mesh);
+  return tuckUnderSkirt(read, skeleton) > 0 ? writeFtr5(read) : mesh;
+}
+
 /** A pack's costume: the low bits of the first roster code that takes it. */
 function costumeOf(pack) {
   for (let code = 0; code < 0x5c; code += 1) if (exe.readInt8(at(0x800958c4) + code) === pack) return code & 3;
   return 0;
+}
+
+/** The roster code of the first costume of a pack's character that the disc has no model of (Ogre's third, its TRUE OGRE), or -1. */
+function modelLessOf(pack) {
+  for (let code = 0; code < 0x5c; code += 1) {
+    if (exe.readInt8(at(0x800958c4) + code) !== pack) continue;
+    for (let other = code & ~3; other < (code & ~3) + 3; other += 1) if (exe.readInt8(at(0x800958c4) + other) < 0) return other;
+    return -1;
+  }
+  return -1;
 }
 
 /**
@@ -185,14 +209,18 @@ function texturesOf(pack, members) {
 /* Character packs: four files each from BNS 71; the model, a sound bank, the archive, a copy of a moveset. */
 const fighters = [];
 const skeletons = new Map();
+/* Each pack's mesh, for telling whether a board's model in its place is the same fighter. */
+const discMeshes = new Map();
 for (let pack = 0; 71 + pack * 4 + 3 <= 278; pack += 1) {
   const first = 71 + pack * 4;
   const id = String(pack).padStart(2, '0');
   const parts = partTable(exe, pack);
   const result = exportFighter(file(first), texturesOf(pack, arcMembers(Buffer.from(file(first + 2)))), parts, parseModel, encodePng, { eyes: eyesOf(pack), shapesFrom: shapesFromOf(pack) });
+  result.mesh = tucked(result.mesh, result.skeleton);
   put(`fighters/${id}.ftr`, result.mesh);
   put(`fighters/${id}.json`, JSON.stringify({ skeleton: result.skeleton }));
   skeletons.set(pack, result.skeleton);
+  discMeshes.set(pack, result.mesh);
   put(`fighters/${id}.png`, result.atlas);
   put(`fighters/${id}.3dmk`, file(first));
   put(`fighters/${id}.tim`, arcMembers(Buffer.from(file(first + 2)))[0]);
@@ -337,6 +365,8 @@ for (let s = 15; s < 20; s += 1) {
  * Ogre's, whose wings his moveset shapes, stays the disc's).
  */
 const arcadeFighterPacks = [];
+/* The roster codes a board's form is drawn for. */
+const arcadeForms = [];
 const arcadeStages = [];
 const arcadePanoramas = [];
 const arcadeObjects = [];
@@ -389,6 +419,21 @@ if (existsSync(arcadePath)) {
       result = exportArcadeFighter(board, boardAccessories(code, PROGRAM_CODE.base, ACCESSORY_TABLES, pack), hands, encodePng, skeletons.get(pack));
     } catch (error) {
       console.warn(`the board's fighter ${id} is left out (the disc's is drawn): ${error.message}`);
+      return;
+    }
+    result.mesh = tucked(result.mesh, result.skeleton);
+    /*
+     * A board's model of another fighter in the pack's place (True Ogre's in Ogre's second) leaves
+     * the disc's drawn there, and is kept as a form: drawn for the first costume of the pack's
+     * character the disc has no model of (Ogre's third, the disc's TRUE OGRE), on the pack's body.
+     */
+    if (!sameBody(readFtr(result.mesh).vertices, readFtr(discMeshes.get(pack)).vertices)) {
+      const form = modelLessOf(pack);
+      if (form < 0) return;
+      put(`arcade/forms/${form}.ftr`, result.mesh);
+      put(`arcade/forms/${form}.png`, result.atlas);
+      put(`arcade/forms/${form}.json`, JSON.stringify({ skeleton: result.skeleton, accessories: result.accessories }));
+      arcadeForms.push(form);
       return;
     }
     put(`arcade/fighters/${id}.ftr`, result.mesh);
@@ -462,7 +507,7 @@ if (haveFfmpeg()) {
   put('movies/version.json', JSON.stringify({ version: MOVIE_VERSION }));
 } else console.log('no ffmpeg: no movies (the game shows black for their length)');
 
-put('manifest.json', JSON.stringify({ format: DATA_FORMAT, fighters, stages, arcadeStages, arcadePanoramas, arcadeObjects, arcadeFighters: arcadeFighterPacks, files, kazuya, kazuyaVoice: kazuya, songs: songs.length, tracks, movies }, null, 2));
+put('manifest.json', JSON.stringify({ format: DATA_FORMAT, fighters, stages, arcadeStages, arcadePanoramas, arcadeObjects, arcadeFighters: arcadeFighterPacks, arcadeForms, files, kazuya, kazuyaVoice: kazuya, songs: songs.length, tracks, movies }, null, 2));
 
 /*
  * Files are overwritten in place, never the directory removed and made again: a running dev server

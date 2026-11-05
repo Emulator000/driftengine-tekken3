@@ -33,7 +33,7 @@ export const MOKUJIN = 0xf;
 export const MOKUJIN_DRAWS = 0x13fff;
 
 /** The tables a fight reads whatever the match: everything in the fight data but its movesets. */
-export type FightTables = Omit<FightData, 'sets' | 'moveIds'>;
+export type FightTables = Omit<FightData, 'sets' | 'refs' | 'moveIds'>;
 
 const ROSTER_CODES = 0x5c;
 const FALLBACK_CODE = 0x58;
@@ -59,12 +59,17 @@ const FORCE_FINAL_STAGE = 4;
 /** Stages whose ground fades from the fighters at once, by the stage. */
 export const groundFadeOf = (stage: number): number => (stage < 1 || (2 < stage && stage !== 7) ? 10000 : 0x1964);
 
-/** A roster code's record: past the table, the game reads the fallback's. */
+/**
+ * A roster code's record: past the table, the game reads the fallback's. A costume the disc has no
+ * model of (one a board's form gives, `thirdCostume`) is fought on its character's second
+ * costume's model, which the form is drawn over.
+ */
 function codeOf(tables: FightTables, roster: number, costume: number): { code: number; sound: number; moveset: number; pack: number } {
   const code = roster * 4 + (costume & 3);
   if (code === ROSTER_CODES) throw new Error(`roster code ${code} reads past the roster's records`);
   const entry = tables.roster.codes[ROSTER_CODES < code ? FALLBACK_CODE : code]!;
-  return { code, sound: entry.sound, moveset: Math.min(entry.moveset, LAST_MOVESET), pack: code < ROSTER_CODES ? entry.pack : -1 };
+  const pack = code < ROSTER_CODES ? (entry.pack >= 0 ? entry.pack : (tables.roster.codes[(code & ~3) | 1]?.pack ?? -1)) : -1;
+  return { code, sound: entry.sound, moveset: Math.min(entry.moveset, LAST_MOVESET), pack };
 }
 
 /** The movesets a match loads: each side's, the second none (-1) when both play the same. */
@@ -79,13 +84,32 @@ export function bossMoveset(tables: FightTables, setup: MatchSetup): number {
   return boss === null ? -1 : codeOf(tables, boss.roster, boss.costume).moveset;
 }
 
-/** Each fighter's move ids bound to moves: its own moveset's table, the common moveset's shared moves, missing ids shared across. */
-export function bindMoveIds(sets: readonly [LoadedMoveset | null, LoadedMoveset | null, LoadedMoveset]): [(MoveRef | null)[], (MoveRef | null)[]] {
+/**
+ * The references a match's moves are held by, one for each move of each moveset slot (the third
+ * the common moveset's), as many as the largest of `movesets` has: made with the match's data, so
+ * every binding of it (Mokujin's each round, Tekken Force's boss) takes them, and a move the state
+ * holds is always the data's.
+ */
+export function moveRefs(movesets: readonly LoadedMoveset[]): readonly (readonly MoveRef[])[] {
+  const most = Math.max(0, ...movesets.map((set) => set.moveset.moves.length));
+  return [0, 1, 2].map((set) => Array.from({ length: most }, (_, index): MoveRef => ({ set, index })));
+}
+
+/** Each fighter's move ids bound to moves (`refs`' references): its own moveset's table, the common moveset's shared moves, missing ids shared across. */
+export function bindMoveIds(
+  sets: readonly [LoadedMoveset | null, LoadedMoveset | null, LoadedMoveset],
+  refs: readonly (readonly MoveRef[])[] = moveRefs(sets.filter((set): set is LoadedMoveset => set !== null)),
+): [(MoveRef | null)[], (MoveRef | null)[]] {
   const slotOf = (side: number): number => (side === 1 && sets[1] !== null ? 1 : 0);
+  const refOf = (set: number, index: number): MoveRef => {
+    const ref = refs[set]?.[index];
+    if (ref === undefined) throw new Error(`move ${index} of moveset slot ${set} has no reference made for it`);
+    return ref;
+  };
   const tables = [0, 1].map((side) => {
     const slot = slotOf(side);
     const moveset = sets[slot]!.moveset;
-    return moveset.moveIds.map((ref): MoveRef | null => (ref === null ? null : { set: ref.common ? 2 : slot, index: ref.index }));
+    return moveset.moveIds.map((ref): MoveRef | null => (ref === null ? null : refOf(ref.common ? 2 : slot, ref.index)));
   }) as [(MoveRef | null)[], (MoveRef | null)[]];
   if (slotOf(1) === 0) tables[1] = tables[0];
   const missing = [0, 1].map((side) => new Set(sets[slotOf(side)]!.moveset.missing));
@@ -112,11 +136,15 @@ export function fightDataFor(tables: FightTables, setup: MatchSetup, moveset: (i
   const sets: [LoadedMoveset | null, LoadedMoveset | null, LoadedMoveset] = [moveset(a), b < 0 ? null : moveset(b), common];
   const draws = setup.draws ?? 0;
   const boss = bossMoveset(tables, setup);
-  const force = setup.force === undefined ? {} : { forceSets: { enemies: sets[1] ?? sets[0]!, boss: boss < 0 ? null : moveset(boss) } };
-  if (draws === 0) return { ...tables, sets, moveIds: bindMoveIds(sets), ...force };
-  const movesets = new Map(drawnMovesets(tables, draws).map((id) => [id, moveset(id)] as const));
+  const forceSets = setup.force === undefined ? null : { enemies: sets[1] ?? sets[0]!, boss: boss < 0 ? null : moveset(boss) };
+  const force = forceSets === null ? {} : { forceSets };
+  const movesets = draws === 0 ? null : new Map(drawnMovesets(tables, draws).map((id) => [id, moveset(id)] as const));
+  /* Every moveset the match may bind: its own, Tekken Force's enemies' and boss's, those Mokujin draws. */
+  const bound = [...sets, forceSets?.enemies ?? null, forceSets?.boss ?? null, ...(movesets?.values() ?? [])];
+  const refs = moveRefs(bound.filter((set): set is LoadedMoveset => set !== null));
+  if (movesets === null) return { ...tables, sets, refs, moveIds: bindMoveIds(sets, refs), ...force };
   const own: [LoadedMoveset, LoadedMoveset] = [sets[0]!, sets[1] ?? sets[0]!];
-  return { ...tables, sets, moveIds: bindMoveIds(sets), mokujin: { draws, movesets, own }, ...force };
+  return { ...tables, sets, refs, moveIds: bindMoveIds(sets, refs), mokujin: { draws, movesets, own, bindings: new Map() }, ...force };
 }
 
 /**
@@ -124,25 +152,44 @@ export function fightDataFor(tables: FightTables, setup: MatchSetup, moveset: (i
  * then both sides' movesets bound again for the round.
  */
 export function drawMokujin(state: FightState, data: FightData): void {
-  const [a, b] = state.fighters;
   const mokujin = data.mokujin;
   if (mokujin === undefined) throw new Error("Mokujin's match has no movesets to draw from");
-  for (const f of [a, b]) {
+  for (const f of state.fighters.slice(0, 2)) {
     if (f.roster !== MOKUJIN) continue;
     const rosters: number[] = [];
     for (let roster = 0; roster < 0x16; roster += 1) if ((mokujin.draws & (1 << roster)) !== 0) rosters.push(roster);
     state.noise = (Math.imul(state.noise, 5) + 1) >>> 0;
     const roster = rosters.length === 0 ? 0 : rosters[(state.noise & 0xfff) % rosters.length]!;
     f.character = codeOf(data, roster, 0).moveset;
+    if (!mokujin.movesets.has(f.character)) throw new Error(`Mokujin drew moveset ${f.character}, which is not loaded`);
   }
-  const set = (f: Fighter, side: number): LoadedMoveset => {
-    if (f.roster !== MOKUJIN) return mokujin.own[side]!;
-    const found = mokujin.movesets.get(f.character);
-    if (found === undefined) throw new Error(`Mokujin drew moveset ${f.character}, which is not loaded`);
-    return found;
-  };
-  data.sets = [set(a, 0), b.character === a.character ? null : set(b, 1), data.sets[2]];
-  data.moveIds = bindMoveIds(data.sets);
+  bindCharacters(state, data, mokujin);
+}
+
+/**
+ * With Mokujin in a match (not Tekken Force's, which binds its enemies and boss itself), both sides'
+ * movesets bound as the state has the fighters' characters: his drawn one, or his own before the
+ * match's first draw. Each field of the fight starts with it, so a field played again from a state
+ * saved before a draw plays it with the moves that state had.
+ */
+export function bindDrawn(state: FightState, data: FightData): void {
+  if (data.mokujin !== undefined && data.forceSets === undefined) bindCharacters(state, data, data.mokujin);
+}
+
+/** Both sides' movesets bound for the first two fighters' characters, each pairing bound once. */
+function bindCharacters(state: FightState, data: FightData, mokujin: NonNullable<FightData['mokujin']>): void {
+  const [a, b] = state.fighters;
+  const set = (f: Fighter, side: number): LoadedMoveset => (f.roster === MOKUJIN ? (mokujin.movesets.get(f.character) ?? mokujin.own[side]!) : mokujin.own[side]!);
+  const sets = [set(a, 0), b.character === a.character ? null : set(b, 1), data.sets[2]] as const;
+  if (sets[0] === data.sets[0] && sets[1] === data.sets[1]) return;
+  const key = `${a.roster === MOKUJIN ? a.character : -1} ${b.roster === MOKUJIN ? b.character : -1} ${sets[1] === null ? 1 : 2}`;
+  let moveIds = mokujin.bindings.get(key);
+  if (moveIds === undefined) {
+    moveIds = bindMoveIds(sets, data.refs);
+    mokujin.bindings.set(key, moveIds);
+  }
+  data.sets = sets;
+  data.moveIds = moveIds;
 }
 
 /** A fighter on the roster: its roster id and code, its moveset, sound character and model pack. */

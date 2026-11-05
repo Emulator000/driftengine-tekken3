@@ -65,6 +65,12 @@ export interface Hello {
    * only where both sides say the same (`ownBoard`). Absent from an older version's hello.
    */
   readonly board?: string;
+  /**
+   * The disc this side's game reads, as a fingerprint of the tables it takes from the disc's
+   * executable (`discWord`), for the server's log: two games that say the same read the same disc.
+   * Absent from an older version's hello.
+   */
+  readonly disc?: string;
 }
 
 /**
@@ -91,6 +97,7 @@ export interface Fighter {
 /** What the host decides and the guest is told: the match's options (its stage drawn among them), the delay, both players' buttons and fighters, the host's first. */
 export interface Start {
   readonly k: 'start';
+  /** The host's options for both (`OnlineGame`'s `options`): from 0.7.17 with the values its game powers on with (`powerOn`, `hostPowersOn`). */
   readonly options: Readonly<Record<string, unknown>>;
   readonly delay: number;
   readonly keys: readonly [readonly number[], readonly number[]];
@@ -144,6 +151,8 @@ export interface Player {
   readonly side?: number;
   /** The packs this side draws with the arcade board's models and their accessories' fingerprint (`Hello`'s `board`; '0' none). */
   readonly board?: string;
+  /** The disc this side's game reads, as its fingerprint (`Hello`'s `disc`). */
+  readonly disc?: string;
 }
 
 export interface OnlineOptions<S> {
@@ -168,17 +177,48 @@ export interface OnlineOptions<S> {
  * players and those of every release back to that one play each other; one that changes any of
  * them sets it to its own version.
  */
-export const PLAYS_AS = '0.7.8';
+export const PLAYS_AS = '0.7.17';
 
 /**
  * The older versions this release also plays a match as, each with the fields of the state its own
  * matches have and that version's has not: a match as one is played without what those fields
  * hold (the remake's walls; the moves into the screen of a player who sees the fight from the
  * other side going by that view), and those fields (all at rest) left out of its fingerprint. A
- * version whose matches differ from this one's in nothing but the code, as 0.7.6's and 0.7.7's,
- * leaves none out.
+ * version whose matches differ from this one's in nothing but the code, as 0.7.6's to 0.7.8's and
+ * 0.7.12's to 0.7.14's, leaves out only the match's word that it buzzes the pads at a move's dust as
+ * those did (`dustBuzz`, which a match played as one sets); a costume the remake added after it is
+ * played there as its character's second (`playedFighter`). 0.7.15's matches differ from this
+ * one's only in where the state they begin from takes the values the game powers on with: each
+ * game's own disc's there, the host's here (`hostPowersOn`).
  */
-export const ALSO_PLAYS: Readonly<Record<string, readonly string[]>> = { '0.7.7': [], '0.7.6': [], '0.7.0': ['depthTurned'], '0.6.5': ['wallHit', 'carried', 'splatted', 'splatHits', 'walls', 'depthTurned'] };
+const BEFORE_0_7_15 = ['dustBuzz'];
+export const ALSO_PLAYS: Readonly<Record<string, readonly string[]>> = {
+  '0.7.15': [],
+  '0.7.14': BEFORE_0_7_15,
+  '0.7.13': BEFORE_0_7_15,
+  '0.7.12': BEFORE_0_7_15,
+  '0.7.8': BEFORE_0_7_15,
+  '0.7.7': BEFORE_0_7_15,
+  '0.7.6': BEFORE_0_7_15,
+  '0.7.0': ['depthTurned', ...BEFORE_0_7_15],
+  '0.6.5': ['wallHit', 'carried', 'splatted', 'splatHits', 'walls', 'depthTurned', ...BEFORE_0_7_15],
+};
+
+/** The costumes the remake adds, by roster id, and the version that added each: Ogre's third, which a board's form gives (`thirdCostume`). */
+const ADDED_COSTUMES: Readonly<Record<number, { readonly costume: number; readonly since: string }>> = { 14: { costume: 2, since: '0.7.12' } };
+
+/** Whether version `a` is older than version `b`, each part compared as a number. */
+const olderThan = (a: string, b: string): boolean => {
+  const [x, y] = [a, b].map((v) => v.split('.').map(Number));
+  for (let k = 0; k < Math.max(x!.length, y!.length); k += 1) if ((x![k] ?? 0) !== (y![k] ?? 0)) return (x![k] ?? 0) < (y![k] ?? 0);
+  return false;
+};
+
+/** A fighter as a match played as version `as` has it: a costume the remake added after that version is its character's second. */
+export function playedFighter(f: Fighter, as: string): Fighter {
+  const added = ADDED_COSTUMES[f.roster];
+  return added !== undefined && added.costume === f.costume && olderThan(as, added.since) ? { roster: f.roster, costume: 1 } : f;
+}
 
 /**
  * Whether a match keeps the arcade board's fighters' own accessories: only where both sides draw
@@ -187,6 +227,13 @@ export const ALSO_PLAYS: Readonly<Record<string, readonly string[]>> = { '0.7.7'
  * the disc's.
  */
 export const ownBoard = (ours: string | undefined, theirs: string | undefined): boolean => ours !== undefined && ours !== '0' && ours === theirs;
+
+/**
+ * Whether a match played as version `as` begins from the host's power-on values (its records, its
+ * options' defaults), which the host's start carries, rather than from each game's own disc's: from
+ * 0.7.17, so two games whose discs power on otherwise begin it alike.
+ */
+export const hostPowersOn = (as: string): boolean => !olderThan(as, '0.7.17');
 
 /** Whether a match played as version `as` has `field` of the state: every one but those that version lacks. */
 export function playedWith(as: string, field: string): boolean {
@@ -842,8 +889,8 @@ export class Online<S> {
     this.wire = switchableSocket(this.relay!.forInputs);
     const transport = new WebSocketTransport({ socket: this.wire.socket, self: seat });
     this.transport = (this.options.lagMs ?? 0) > 0 ? new LateTransport(transport, this.options.lagMs!, () => this.now) : transport;
-    const { name, delay, keys, fighter, side, board } = this.options.player();
-    const hello: Hello = { k: 'hello', version: this.playsAs, roster: rosterWord(this.options.game.roster), name, delay, keys, fighter, together: true, draws: true, saysReady: true, ...(side === undefined ? {} : { side: side === 1 ? 1 : 0 }), ...(board === undefined ? {} : { board }) };
+    const { name, delay, keys, fighter, side, board, disc } = this.options.player();
+    const hello: Hello = { k: 'hello', version: this.playsAs, roster: rosterWord(this.options.game.roster), name, delay, keys, fighter: playedFighter(fighter, this.playsAs), together: true, draws: true, saysReady: true, ...(side === undefined ? {} : { side: side === 1 ? 1 : 0 }), ...(board === undefined ? {} : { board }), ...(disc === undefined ? {} : { disc }) };
     this.relay!.toPeer(hello);
   }
 
@@ -926,7 +973,7 @@ export class Online<S> {
     /* A player whose seat is not the side they asked for sees the fight from the other side, where both said which they asked for. */
     const turned = ours.side === undefined || (theirs.side !== 0 && theirs.side !== 1) ? 0 : (ours.side === 1 ? 1 : 0) | (theirs.side === 1 ? 0 : 2);
     const board = ownBoard(ours.board, theirs.board) ? { board: ours.board! } : {};
-    const start: Start = { k: 'start', options: this.options.game.options(this.playsAs), delay, keys: [keys(ours.keys), keys(theirs.keys)], fighters: [fighter(ours.fighter), fighter(theirs.fighter)], match: 1, ...(theirs.draws === true ? { draws: 1 } : {}), ...(turned !== 0 ? { turned } : {}), ...board };
+    const start: Start = { k: 'start', options: this.options.game.options(this.playsAs), delay, keys: [keys(ours.keys), keys(theirs.keys)], fighters: [fighter(playedFighter(ours.fighter, this.playsAs)), fighter(playedFighter(theirs.fighter, this.playsAs))], match: 1, ...(theirs.draws === true ? { draws: 1 } : {}), ...(turned !== 0 ? { turned } : {}), ...board };
     this.starting = { start, at: this.now + GREETING_HOLD_MS };
   }
 

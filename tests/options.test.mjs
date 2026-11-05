@@ -4,8 +4,8 @@
  * picked one applies to; the music's options told to its driver (silent in the matches' scenes);
  * the key configuration's boxes opening while a button is held, their values changed and the pad
  * mapped by them on leaving, and vibration switched; SAVE DATA (the memory card's page) saving,
- * loading and turning auto save on; the display's place; REMAKE OPTION's settings; and the
- * records' lists.
+ * loading and turning auto save on; the display's place; REMAKE OPTION's settings, and its MUSIC
+ * page's choices; and the records' lists.
  */
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
@@ -15,7 +15,8 @@ import { fileURLToPath } from 'node:url';
 
 import { loadFightTables } from '../src/assets/load.ts';
 import { Game } from '../src/sim/game/game.ts';
-import { REMAKE_PAGE, REMASTER_LINE, RESTART_LINE, restartWanted } from '../src/sim/game/remake-options.ts';
+import { MUSIC_LINE, MUSIC_PAGE, musicRows } from '../src/sim/game/music-page.ts';
+import { DISPLAY_PAGE, GAME_PAGE, REMAKE_PAGE, REMASTER_LINE, REMASTER_PAGE, RESTART_LINE, restartWanted } from '../src/sim/game/remake-options.ts';
 import { Scene } from '../src/sim/game/state.ts';
 import { musicCommand, newMusic } from '../src/sim/sound/music.ts';
 
@@ -212,15 +213,17 @@ test('DISPLAY ADJUST moves the display\'s place within its limits, start puts it
   assert.equal(state.optionsScreen.page, 0);
 });
 
-test('REMAKE OPTION changes the remake\'s settings, says a restart applies one, and goes back to the first page', { skip }, async () => {
+test("REMAKE OPTION lists its sections, each a page of its settings, which change them, say a restart applies one, and go back to the list, and the list to the first page", { skip }, async () => {
   const { state, press } = await options();
   for (let i = 0; i < 5; i += 1) press(DOWN);
   press(CROSS);
   assert.equal(state.optionsScreen.page, REMAKE_PAGE);
-  for (const label of ['REMAKE OPTION', 'TEXTURES', 'MODELS', 'STAGES', 'FIGHTERS', 'CLOTH', 'PICTURE', 'FRAME RATE', 'GAME SPEED', 'TOUCH PAD', 'TOUCH DIRECTIONS', 'REMASTER', 'REACHABLE WALLS', 'CRT FILTER', 'EXIT']) assert.ok(texts(state).includes(label), label);
-  assert.ok(texts(state).includes('60 HZ') && texts(state).includes('D-PAD'), 'full speed and the d-pad by default');
-  assert.ok(texts(state).includes('ONLINE ONLY'), 'the walls online only by default');
-  assert.ok(printed(state, 'EXIT').y + 16 <= 448, `the list without the remaster's lines ends at ${printed(state, 'EXIT').y}`);
+  for (const label of ['REMAKE OPTION', 'DISPLAY', 'REMASTER', 'GAME', 'MUSIC', 'EXIT']) assert.ok(texts(state).includes(label), label);
+  assert.ok(!texts(state).includes('TEXTURES'), 'the settings on their sections\' pages');
+
+  press(CROSS);
+  assert.equal(state.optionsScreen.page, DISPLAY_PAGE);
+  for (const label of ['DISPLAY', 'TEXTURES', 'MODELS', 'STAGES', 'FIGHTERS', 'CLOTH', 'PICTURE', 'FRAME RATE', 'CRT FILTER', 'EXIT']) assert.ok(texts(state).includes(label), label);
   assert.equal(printed(state, 'SMOOTH').colour, 1, 'the default value');
   assert.ok(!texts(state).includes(RESTART_LINE));
   press(RIGHT);
@@ -239,37 +242,31 @@ test('REMAKE OPTION changes the remake\'s settings, says a restart applies one, 
   assert.equal(state.remake.settings.frameRate, 1);
   assert.ok(!texts(state).includes(RESTART_LINE), 'the frame rate is shown at once');
   press(DOWN);
+  assert.equal(state.remake.settings.crt, 0, 'the CRT filter off unless asked for');
   press(RIGHT);
-  assert.equal(state.remake.settings.speed, 1);
-  assert.ok(texts(state).includes('50 HZ'));
-  assert.ok(!texts(state).includes(RESTART_LINE), 'the game speed taken at once');
-  press(LEFT);
+  assert.equal(state.remake.settings.crt, 1);
+  assert.ok(!restartWanted({ remake: { ...state.remake, settings: { ...state.remake.started, crt: 1 } } }), 'the CRT filter laid at once');
+  assert.ok(printed(state, 'EXIT').y + 16 <= 448, `the page ends at ${printed(state, 'EXIT').y}`);
+  press(SELECT);
+  assert.equal(state.optionsScreen.page, REMAKE_PAGE, 'select back to the list');
+
   press(DOWN);
-  press(LEFT);
-  assert.equal(state.remake.settings.touchPad, 2, 'left from the first wraps to the last');
-  press(DOWN);
-  press(RIGHT);
-  assert.equal(state.remake.settings.touchStick, 1);
-  assert.ok(texts(state).includes('STICK'));
-  assert.ok(!restartWanted({ remake: { ...state.remake, settings: { ...state.remake.started, touchStick: 1 } } }), 'the touch pad\'s directions changed at once');
-  press(DOWN);
+  press(CROSS);
+  assert.equal(state.optionsScreen.page, REMASTER_PAGE);
+  assert.ok(!texts(state).includes('LOOK') && !texts(state).includes('BRIGHTNESS') && !texts(state).includes('FLOOR FADE'), 'the remaster off: its lines not listed');
   press(RIGHT);
   assert.equal(state.remake.settings.remaster, 1);
   assert.ok(texts(state).includes(REMASTER_LINE), 'the remaster asked for, its assets not made');
-  const remasterOnly = { remake: { ...state.remake, settings: { ...state.remake.started, remaster: 1 } } };
-  assert.ok(!restartWanted(remasterOnly), 'not made: the remaster alone restarts nothing');
+  assert.ok(!restartWanted({ remake: { ...state.remake, settings: { ...state.remake.started, remaster: 1 } } }), 'not made: the remaster alone restarts nothing');
   state.remake.remasterMade = true;
   press(LEFT);
   press(RIGHT);
   assert.ok(!texts(state).includes(REMASTER_LINE) && texts(state).includes(RESTART_LINE), 'made: a restart draws it');
-  assert.ok(restartWanted({ remake: { ...state.remake, settings: { ...state.remake.started, remaster: 1 } } }), 'made: the remaster alone restarts');
   assert.ok(texts(state).includes('LOOK') && texts(state).includes('NORMAL'), 'the remaster on: its look listed, normal');
   press(DOWN);
   press(RIGHT);
   assert.equal(state.remake.settings.look, 2);
   assert.ok(!restartWanted({ remake: { ...state.remake, settings: { ...state.remake.started, look: 2 } } }), 'the look changes at once');
-  assert.ok(texts(state).includes('BRIGHTNESS') && texts(state).includes('FLOOR FADE'), 'the remaster on: its brightness and floors listed');
-  assert.ok(printed(state, 'EXIT').y + 16 <= printed(state, RESTART_LINE).y && printed(state, RESTART_LINE).y + 16 <= 448, `the list ends at ${printed(state, 'EXIT').y}, the line under it at ${printed(state, RESTART_LINE).y}`);
   press(DOWN);
   press(RIGHT);
   assert.equal(state.remake.settings.brightness, 2);
@@ -277,25 +274,37 @@ test('REMAKE OPTION changes the remake\'s settings, says a restart applies one, 
   press(RIGHT);
   assert.equal(state.remake.settings.floorFade, 1);
   assert.ok(!restartWanted({ remake: { ...state.remake, settings: { ...state.remake.started, brightness: 2, floorFade: 1 } } }), 'the brightness and the floors change at once');
+  for (let i = 0; i < 3; i += 1) press(UP);
+  press(LEFT);
+  assert.ok(!texts(state).includes('LOOK'), 'the remaster off again: its lines gone');
   press(DOWN);
-  assert.equal(state.remake.settings.walls, 0, 'the walls online only unless asked for');
+  press(CROSS);
+  assert.equal(state.optionsScreen.page, REMAKE_PAGE, 'EXIT back to the list');
+
+  press(DOWN);
+  press(CROSS);
+  assert.equal(state.optionsScreen.page, GAME_PAGE);
+  assert.ok(texts(state).includes('60 HZ') && texts(state).includes('D-PAD') && texts(state).includes('ONLINE ONLY'), 'full speed, the d-pad and the walls online only by default');
+  press(RIGHT);
+  assert.equal(state.remake.settings.speed, 1);
+  assert.ok(texts(state).includes('50 HZ'));
+  assert.ok(!texts(state).includes(RESTART_LINE), 'the game speed taken at once');
+  press(DOWN);
   press(RIGHT);
   assert.equal(state.remake.settings.walls, 1);
-  assert.ok(texts(state).includes('ON'));
-  press(RIGHT);
-  assert.equal(state.remake.settings.walls, 2);
-  assert.ok(!restartWanted({ remake: { ...state.remake, settings: { ...state.remake.started, walls: 2 } } }), 'the walls taken at the next match, no restart');
+  assert.ok(!restartWanted({ remake: { ...state.remake, settings: { ...state.remake.started, walls: 1 } } }), 'the walls taken at the next match, no restart');
   press(DOWN);
-  assert.equal(state.remake.settings.crt, 0, 'the CRT filter off unless asked for');
-  press(RIGHT);
-  assert.equal(state.remake.settings.crt, 1);
-  assert.ok(!restartWanted({ remake: { ...state.remake, settings: { ...state.remake.started, crt: 1 } } }), 'the CRT filter laid at once');
-  press(UP);
-  for (let i = 0; i < 4; i += 1) press(UP);
   press(LEFT);
-  assert.ok(!texts(state).includes('LOOK') && !texts(state).includes('BRIGHTNESS') && !texts(state).includes('FLOOR FADE'), 'the remaster off: its lines not listed');
+  assert.equal(state.remake.settings.touchPad, 2, 'left from the first wraps to the last');
+  press(DOWN);
+  press(RIGHT);
+  assert.equal(state.remake.settings.touchStick, 1);
+  assert.ok(texts(state).includes('STICK'));
+  assert.ok(!restartWanted({ remake: { ...state.remake, settings: { ...state.remake.started, touchStick: 1 } } }), "the touch pad's directions changed at once");
   press(SELECT);
-  assert.equal(state.optionsScreen.page, 0);
+  assert.equal(state.optionsScreen.page, REMAKE_PAGE);
+  press(SELECT);
+  assert.equal(state.optionsScreen.page, 0, 'the list back to the first page');
   assert.equal(state.remake.settings.touchPad, 2, 'kept on leaving');
 });
 
@@ -317,4 +326,75 @@ test('RECORDS shows the four lists, the best times quickest first', { skip }, as
   assert.equal(state.optionsScreen.records.list, 3, 'left from the first wraps');
   press(CROSS);
   assert.equal(state.optionsScreen.page, 0);
+});
+
+test("the music's entries: the menus' (silent on the console), the character select's, and each character's theme once, by the first character whose it is", { skip }, async () => {
+  const { tables } = await loadFightTables(json);
+  const rows = musicRows(tables);
+  assert.deepEqual(rows.slice(0, 2), [
+    { key: 'menu', song: -1, label: 'MENU' },
+    { key: '1', song: 1, label: 'SELECT' },
+  ]);
+  const themes = rows.slice(2);
+  assert.deepEqual(themes.slice(0, 3).map((r) => r.label), ['PAUL', 'LAW', 'LEI']);
+  assert.equal(new Set(themes.map((r) => r.song)).size, themes.length, 'each song once');
+  assert.ok(themes.every((r) => r.song >= 2 && r.key === String(r.song)));
+  assert.equal(themes.find((r) => r.song === 18).label, 'KUMA', "Kuma's and Panda's song by Kuma");
+});
+
+test("REMAKE OPTION's MUSIC page: a song's entry picked, then what it plays (the original, a random song of the library, or one of them), the song's whole name under the list; back to REMAKE OPTION", { skip }, async () => {
+  const { state, tables, press } = await options();
+  Object.assign(state.remake.music, {
+    rows: musicRows(tables),
+    library: [
+      { title: 'DIVINE FUNK (SLOWED)', artist: 'D4R.IO' },
+      { title: 'MONTAGEM EXÉRCITO (SUPER SLOWED) AND A LONG TAIL', artist: 'D4R.IO, TO4ST' },
+    ],
+  });
+  state.remake.music.chosen = state.remake.music.rows.map(() => 0);
+  for (let i = 0; i < 5; i += 1) press(DOWN);
+  press(CROSS);
+  assert.equal(state.optionsScreen.page, REMAKE_PAGE);
+  press(UP);
+  press(UP);
+  press(CROSS);
+  assert.equal(state.optionsScreen.page, MUSIC_PAGE);
+  for (const label of ['MUSIC', 'SONG', 'PLAYS', 'EXIT', 'MENU', 'ORIGINAL']) assert.ok(texts(state).includes(label), label);
+  press(RIGHT);
+  press(RIGHT);
+  assert.equal(state.remake.music.row, 2);
+  assert.ok(texts(state).includes('PAUL'));
+  press(DOWN);
+  press(RIGHT);
+  assert.equal(state.remake.music.chosen[2], 1);
+  assert.ok(texts(state).includes('RANDOM'));
+  press(RIGHT);
+  assert.equal(state.remake.music.chosen[2], 2);
+  assert.ok(texts(state).includes('DIVINE FUNK (SLOWED)') && texts(state).includes('D4R.IO'), "the song's whole name under the list");
+  press(RIGHT);
+  const shown = texts(state).find((t) => t.startsWith('MONTAGEM'));
+  assert.ok(shown.length <= 29 && shown.endsWith('...'), `a long name cut to the row (${shown})`);
+  const lines = state.printed.filter((run) => run.y >= 196).map((run) => run.text);
+  assert.equal(lines.slice(0, -1).join(' '), 'MONTAGEM EXÉRCITO (SUPER SLOWED) AND A LONG TAIL', 'its title whole under the list, in lines');
+  assert.equal(lines.at(-1), 'D4R.IO, TO4ST', 'its artist after');
+  assert.ok(lines.every((l) => l.length <= 36), 'each line within the screen');
+  press(RIGHT);
+  assert.equal(state.remake.music.chosen[2], 0, 'past the last, the original again');
+  assert.equal(state.remake.music.chosen[3], 0, "another song's left");
+  press(UP);
+  press(LEFT);
+  assert.equal(state.remake.music.row, 1);
+  press(SELECT);
+  assert.equal(state.optionsScreen.page, REMAKE_PAGE);
+});
+
+test("the MUSIC page with no library says how to make one, and plays nothing but the original", { skip }, async () => {
+  const { state, tables, press } = await options();
+  state.remake.music.rows = musicRows(tables);
+  state.remake.music.chosen = state.remake.music.rows.map(() => 0);
+  state.optionsScreen.page = MUSIC_PAGE;
+  press(DOWN);
+  press(RIGHT);
+  assert.equal(state.remake.music.chosen[0], 0);
+  assert.ok(texts(state).includes(MUSIC_LINE));
 });

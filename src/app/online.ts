@@ -2,7 +2,8 @@
  * Online play on the page: what ONLINE MODE's page asks carried out (`Online`, `src/net/`), its
  * settings kept on this device, and the page told how the connection goes. A match is played in
  * place of the local game: the game's state is saved, both sides make the same start (the state the
- * game powers on with, the host's options, both players' buttons, Versus with both pads in) and play
+ * game powers on with, the host's options, both players' buttons, Versus with both pads in;
+ * `match-start.ts`) and play
  * it a field at a time from both pads' words; at the match's end the saved state comes back, on
  * ONLINE MODE's page. While a text is entered there (a room's code, the name, the server's address)
  * the keyboard and the mouse edit it as a text field (`text-field.ts`), the clipboard with them;
@@ -16,9 +17,7 @@ import { mirroredStick } from '../net/wire.ts';
 import type { FightData } from '../sim/fight/state.ts';
 import { stopMusic } from '../sim/fight/voices.ts';
 import { Game } from '../sim/game/game.ts';
-import { MenuMode, mapPads, startMode, wallsFor } from '../sim/game/menu.ts';
-import { FightStep } from '../sim/game/fight-scene.ts';
-import { lookOf } from '../sim/game/select.ts';
+import { MenuMode, wallsFor } from '../sim/game/menu.ts';
 import { CODE_LENGTH, CODE_LETTERS, caretAt, DEFAULT_DELAY, Editing, MOST_DELAY, ONLINE_PAGE, OnlineScreen, OnlineStatus, TYPED_ENTER, TYPED_ESCAPE, typing } from '../sim/game/online-page.ts';
 import { printRuns } from '../sim/game/printer.ts';
 import { Scene, type GameState, type SceneDraw } from '../sim/game/state.ts';
@@ -27,14 +26,13 @@ import { canvas, params } from './page.ts';
 import { Available } from './available.ts';
 import { freeCameraBarred } from './free-camera.ts';
 import { MatchJournal, type FieldSound } from './match-journal.ts';
+import { DECIDED, carriedPowerOn, matchStart } from './match-start.ts';
 import { addressBounds, ClipboardBridge, codeBounds, copied, edit, insert, nameBounds, placeCaret, type Bounds, type Field } from './text-field.ts';
 import { touchDevice } from './touch.ts';
 import { TouchTyping, type Typed } from './touch-typing.ts';
 
 /** Where the page's settings are kept on this device. */
 const KEPT = 'tekken3-online';
-/** The options the host's game decides for both. */
-const DECIDED = ['difficulty', 'rounds', 'roundTime', 'alwaysChip', 'continueChooses', 'modeSetting', 'keepChoices', 'musicSet', 'stereo'] as const;
 /** The scenes past an online match: its fight over (Versus's select again), or a reset. */
 const PAST_VERSUS = new Set<number>([Scene.BOOT, Scene.LOGO, Scene.TITLE, Scene.MENU, Scene.OPTIONS, Scene.ATTRACT, Scene.SELECT, Scene.VS_SELECT]);
 /** The scenes a reset goes to, as against Versus's own select after its fight. */
@@ -117,6 +115,8 @@ export interface OnlineHooks {
   readonly roster: readonly number[];
   /** The packs this side draws with the arcade board's models and their accessories' fingerprint (`Hello`'s `board`; '0' none). */
   readonly board: string;
+  /** The disc this side's game reads, as its fingerprint (`Hello`'s `disc`, `discWord`). */
+  readonly disc: string;
   /** Whether a match's fighters swing the board's accessories and are drawn with its models (else the disc's and the console's). */
   readonly drawBoard: (on: boolean) => void;
 }
@@ -167,7 +167,7 @@ export class OnlinePlay {
     Object.assign(online, { delay: this.kept.delay, listed: this.kept.listed, side: this.kept.side, name: this.kept.name, server: params.get('server') ?? this.kept.server });
     this.online = new Online({
       url: () => serverUrls(this.game.state.online.server),
-      player: () => ({ name: this.kept.name, delay: this.kept.delay, keys: this.localKeys(), fighter: this.localFighter(), id: this.kept.id, side: this.kept.side, board: this.hooks.board }),
+      player: () => ({ name: this.kept.name, delay: this.kept.delay, keys: this.localKeys(), fighter: this.localFighter(), id: this.kept.id, side: this.kept.side, board: this.hooks.board, disc: this.hooks.disc }),
       lagMs: Math.max(0, Number(params.get('netlag') ?? 0) || 0),
       game: {
         version: PLAYS_AS,
@@ -320,13 +320,13 @@ export class OnlinePlay {
     return [...this.game.state.options.keys[0]!];
   }
 
-  /** The host's options for a match played as version `as`, its stage (the home stage of a fighter both have, at random), and its walls (REACHABLE WALLS's for an online match) where that version has them, none (nor a word of them) where it has not. */
+  /** The host's options for a match played as version `as`, its stage (the home stage of a fighter both have, at random), its walls (REACHABLE WALLS's for an online match) where that version has them, none (nor a word of them) where it has not, and the values its game powers on with where that version begins from them. */
   private decided(as: string): Record<string, unknown> {
     const { options, records } = this.game.state;
     const homes = this.hooks.roster.filter((fighter) => fighter <= LAST_STAGE_ROSTER);
     const stage = (homes[crypto.getRandomValues(new Uint32Array(1))[0]! % Math.max(1, homes.length)] ?? 0) * 4;
     const walls = playedWith(as, 'walls') ? { walls: wallsFor(MenuMode.VERSUS, this.game.state.remake.settings.walls, true) } : {};
-    return { ...Object.fromEntries(DECIDED.map((key) => [key, options[key]])), earnedRoster: records.earnedRoster, extraCostumes: records.extraCostumes, stage, ...walls };
+    return { ...Object.fromEntries(DECIDED.map((key) => [key, options[key]])), earnedRoster: records.earnedRoster, extraCostumes: records.extraCostumes, stage, ...walls, ...carriedPowerOn(as, this.hooks.data) };
   }
 
   /**
@@ -553,48 +553,20 @@ export class OnlinePlay {
     /* A rematch counts on; a new opponent from nothing. */
     if (this.online.state !== 'result') this.score.fill(0);
     const state = game.state;
-    const own = { settings: { ...state.remake.settings }, started: { ...state.remake.started }, made: state.remake.remasterMade };
+    const own = { settings: { ...state.remake.settings }, started: { ...state.remake.started }, made: state.remake.remasterMade, forms: state.remake.forms };
     const page = { ...state.online, lines: [...state.online.lines], rooms: [...state.online.rooms] };
     const snapshotter = new StateSnapshotter(state);
     this.shareData(snapshotter);
     const slot = snapshotter.create();
     snapshotter.save(slot);
     this.local = { snapshotter, slot, match: game.fightData };
-    /* Both sides alike: the power-on state, the host's options and both players' buttons, Versus. */
-    snapshotter.restore(new Game(game.data).state as unknown as Parameters<typeof snapshotter.restore>[0]);
-    for (const key of DECIDED) if (typeof start.options[key] === 'number') state.options[key] = start.options[key] as number;
-    if (typeof start.options.earnedRoster === 'number') state.records.earnedRoster = start.options.earnedRoster;
-    if (typeof start.options.extraCostumes === 'number') state.records.extraCostumes = start.options.extraCostumes;
-    state.options.keys.splice(0, 2, [...start.keys[0]], [...start.keys[1]]);
-    state.options.vibration.fill(1);
-    mapPads(state, game.data.scenes);
-    stopMusic(state.world);
-    startMode(state, MenuMode.VERSUS, 1);
-    /* Online: straight to the fight, each player's fighter as chosen in the waiting room, the stage the host drew. */
-    state.run.online = 1;
-    /* Three rounds to win (the option is the rounds less one), whatever the host's options; a round's end cut short by both players alone. */
-    state.world.options.rounds = 2;
-    state.world.match.online = 1;
-    /* A level round that brings both to the rounds that win the match a draw, where both games agreed it, rather than the host's by the game's tie-break. */
-    if (start.draws === 1) state.world.match.drawRule = 1;
-    /* The remake's walls as the host's REACHABLE WALLS has them for an online match; none in one played as a version without them. */
-    state.world.options.walls = playedWith(as, 'walls') && start.options.walls === 1 ? 1 : 0;
-    /* The players who see the fight from the other side, their moves into the screen going by that view, where the version played has it. */
-    state.world.match.depthTurned = playedWith(as, 'depthTurned') && Number.isInteger(start.turned) ? start.turned! & 3 : 0;
-    state.run.onlineStage = typeof start.options.stage === 'number' ? start.options.stage : -1;
-    start.fighters.forEach((fighter, n) => {
-      state.entrants.roster[n] = fighter.roster;
-      state.entrants.costume[n] = fighter.costume;
-      state.entrants.chosen[n] = 1;
-      state.entrants.computer[n] = 0;
-      state.versusPortraits[n] = lookOf(game.data.scenes, fighter.roster, fighter.costume) & 0x1f;
-    });
-    state.modeOverlay = state.run.overlay;
-    Object.assign(state, { scene: Scene.FIGHT, step: FightStep.MODE_SETUP });
+    /* Both sides alike: the power-on state (the host's, from 0.7.17), the host's options and both players' buttons, Versus. */
+    matchStart(state, game.data, start, as, snapshotter);
     /* This machine's own: how it draws, and its page as it was, but the waiting room's practice, which is over. */
     Object.assign(state.remake.settings, own.settings);
     Object.assign(state.remake.started, own.started);
     state.remake.remasterMade = own.made;
+    state.remake.forms = own.forms;
     Object.assign(state.online, page, { warming: 0, ask: '', typed: '', card: 0, fight: Number.isInteger(start.match) && start.match > 0 ? start.match : 1 });
     this.pastFields = 0;
     /* Against an older version, the fields of the state it lacks left out of the fingerprint. */

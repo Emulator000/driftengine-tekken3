@@ -27,7 +27,7 @@
  */
 import { facingNormals } from '../facing.mjs';
 import { KEEP_SHAPE, writeFtr5 } from '../ftr.mjs';
-import { absoluteVram, packAtlas, readTimChain } from '../texture.mjs';
+import { absoluteVram, packAtlas, readTimChain, texelCentred } from '../texture.mjs';
 
 /** The archive of the fighters, a texture chain then a model each, in the disc's pack order. */
 export const FIGHTER_ARCHIVE = 0x7f3c;
@@ -432,6 +432,32 @@ function handShapes(model, handParts, accessories) {
 /** Whether the board's archive holds a stand-in for a costume it has no model of: a texture chain of one image. */
 export const standIn = ({ textures }) => readTimChain(textures).filter((t) => t.image).length <= 1;
 
+/** How far apart two models' bodies may reach on a joint, either way, and still be the one fighter. */
+const ALIKE = 1.5;
+
+/**
+ * How far a mesh's points reach on each body joint (`readFtr`'s vertices): the 95th percentile of
+ * their distances from the joint, over the points weighing at least half on it; 0 where none does.
+ */
+export function bodyReach(vertices) {
+  const reaches = Array.from({ length: BODY }, () => []);
+  for (const { influences } of vertices) {
+    for (const { joint, weight, point } of influences) if (joint < BODY && weight >= 0.5) reaches[joint].push(Math.hypot(...point));
+  }
+  return reaches.map((d) => (d.length === 0 ? 0 : d.sort((a, b) => a - b)[Math.floor(d.length * 0.95)]));
+}
+
+/**
+ * Whether a board's model (`board`, `readFtr`'s vertices) is the fighter the disc's pack draws
+ * (`disc`): on every body joint both have points on, it reaches within half again of the disc's,
+ * either way. A board keeps another fighter in a pack's place where it has no such costume (True
+ * Ogre in Ogre's second), whose body reaches far past it.
+ */
+export function sameBody(board, disc) {
+  const [a, b] = [bodyReach(board), bodyReach(disc)];
+  return a.every((reach, joint) => reach === 0 || b[joint] === 0 || (reach <= b[joint] * ALIKE && b[joint] <= reach * ALIKE));
+}
+
 /**
  * The fighter's mesh and atlas from the board (`model` and `textures`, its archive's two members;
  * `board`, its accessories as the board's tables give them), each accessory on its own joint; and
@@ -463,7 +489,7 @@ export function exportArcadeFighter({ model: modelBytes, textures }, board, hand
   const indices = [];
   /* A garment's corner: on the hips' record, drawn both faces, hung on the hips alone. */
   const worn = (p, position) => (p.record === HIPS && p.doubleSided && position.every((t) => t.joint === HIPS) ? position.map((t) => ({ ...t, joint: GARMENT })) : position);
-  const vertexOf = (i, k) => {
+  const vertexOf = (i, k, uv) => {
     const p = polygons[i];
     const corner = p.corners[k];
     const influences = influencesOf(worn(p, corner.position));
@@ -477,12 +503,11 @@ export function exportArcadeFighter({ model: modelBytes, textures }, board, hand
       if (shaped !== null) throw new Error('two hands move one corner');
       shaped = { group: g, points: forms.map((form) => form.map((f) => f.p)) };
     });
-    const [u, v] = packed.place(p.target, corner.uv);
     const record = {
       influences: influences.map((f) => ({ joint: f.joint, weight: f.w, point: f.p })),
       normalJoint: corner.normal.joint,
       normal: corner.normal.n,
-      uv: [u * 8, v * 8],
+      uv: uv.map((c) => Math.round(c * 8)),
     };
     const key = JSON.stringify([record, shaped]);
     let index = lookup.get(key);
@@ -495,12 +520,14 @@ export function exportArcadeFighter({ model: modelBytes, textures }, board, hand
     return index;
   };
   /* The GPU draws a quad as (0, 1, 2) and (1, 3, 2); each turned round, its front counter-clockwise. */
-  const triangles = (ids) => (ids.length === 3 ? [[ids[0], ids[2], ids[1]]] : [[ids[0], ids[2], ids[1]], [ids[1], ids[2], ids[3]]]);
+  const triangles = (corners) => (corners === 3 ? [[0, 2, 1]] : [[0, 2, 1], [1, 2, 3]]);
   const twoFaced = [];
   polygons.forEach((p, i) => {
-    for (const t of triangles(p.corners.map((_, k) => vertexOf(i, k)))) {
+    const placed = p.corners.map((corner) => packed.place(p.target, corner.uv));
+    for (const t of triangles(placed.length)) {
+      const uvs = texelCentred(t.map((k) => placed[k]));
       if (p.doubleSided) twoFaced.push(indices.length / 3);
-      indices.push(...t);
+      indices.push(...t.map((k, n) => vertexOf(i, k, uvs[n])));
     }
   });
   const shapes = groups.map((group, g) => {

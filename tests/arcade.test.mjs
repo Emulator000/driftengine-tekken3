@@ -113,6 +113,55 @@ test('a stage model reads each kind of polygon: its colours stored or shaded, un
   assert.ok(read.every((p) => p.oneSided));
 });
 
+/** A textured quad, its colour stored, on four vertices in the order the console takes a quad's corners. */
+const quad = (a, b, c, d) => [head(0x2d, 8, true), halves(0, 0x1000), halves(63, 0x0008), 63 << 8, 63 | (63 << 8), rgb(128, 128, 128), halves(a, b), halves(c, d)];
+
+test('two quads side by side in one plane, sharing an edge, lie over nothing', () => {
+  const vertices = [
+    [0, 0, 0],
+    [100, 0, 0],
+    [0, -100, 0],
+    [100, -100, 0],
+    [200, 0, 0],
+    [200, -100, 0],
+  ];
+  const { polygons } = readArcadeModel(model(vertices, [quad(0, 1, 2, 3), quad(1, 4, 3, 5)]));
+  assert.deepEqual(polygons.map((p) => p.layer), [0, 0]);
+});
+
+test('a row of bands in one plane, each lying over the end of the one before, has every two that overlap in layers of their own', () => {
+  /* Two rows along a wall overlapping by 8, each band over the ends of the one before and after it in the other row. */
+  const vertices = [];
+  const polygons = [];
+  for (let k = 0; k < 8; k += 1) {
+    const [top, bottom] = k % 2 === 0 ? [0, -40] : [-32, -75];
+    const [left, right] = [k * 100 - 10, k * 100 + 110];
+    const at = vertices.length;
+    vertices.push([left, top, 0], [right, top, 0], [left, bottom, 0], [right, bottom, 0]);
+    polygons.push(quad(at, at + 1, at + 2, at + 3));
+  }
+  const layers = readArcadeModel(model(vertices, polygons)).polygons.map((p) => p.layer);
+  for (let k = 1; k < layers.length; k += 1) assert.notEqual(layers[k], layers[k - 1], `bands ${k - 1} and ${k} (layers ${layers.join(' ')})`);
+  assert.deepEqual(layers.slice(0, 4), [0, 1, 2, 3], 'each over the one before while the layers last');
+});
+
+test("a quad twisted a little out of its plane, far from the stage's middle, lies over the wall its other triangle lies on", () => {
+  const vertices = [
+    /* A wall at x 1000. */
+    [1000, 0, 1000],
+    [1000, 0, 1250],
+    [1000, -200, 1000],
+    [1000, -200, 1250],
+    /* A band partly over it, its first corner 3 off the wall, its second triangle on it. */
+    [1003, -50, 1100],
+    [1000, -50, 1300],
+    [1000, -150, 1100],
+    [1000, -150, 1300],
+  ];
+  const { polygons } = readArcadeModel(model(vertices, [quad(0, 1, 2, 3), quad(4, 5, 6, 7)]));
+  assert.deepEqual(polygons.map((p) => p.layer), [0, 1]);
+});
+
 test('a background takes its tiles, mask and colours from the game\'s tables', () => {
   /* Two 4-bit tiles of 64 texels side by side in one page, each one colour through its own palette: red, then blue. */
   const tim = (x, y, colour, clutX) => {
