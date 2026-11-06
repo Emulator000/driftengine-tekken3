@@ -26,6 +26,10 @@ its page, as the Open Font License allows; their license travels with their pack
 
 ## Tools run on the user's machine
 
+- **NumPy** (<https://numpy.org/>), BSD-3-Clause, and **Pillow** (<https://python-pillow.org/>),
+  HPND: used by the optional local fighter-refinement and comparison-render scripts. No library
+  source or generated game content is distributed with these scripts.
+
 Not part of this repository and never distributed with it: the commands below are run, when the
 user has installed them, on the user's own files.
 
