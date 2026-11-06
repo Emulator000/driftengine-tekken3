@@ -169,11 +169,11 @@ export const drawingFiles: DrawingFiles = {
   fighter: async (pack) => {
     if (pack >= FORMS) {
       const [mesh, texture] = await Promise.all([fighterMesh('arcade/forms', String(pack - FORMS)), atlas('arcade/forms', String(pack - FORMS))]);
-      return { mesh, texture, maps: null };
+      return { mesh, texture, maps: null, board: true };
     }
     const kind = boardFighters.on && (await arcadeStagesOf()).fighters.has(pack) ? 'arcade/fighters' : 'fighters';
     const [mesh, texture, maps] = await Promise.all([fighterMesh(kind, two(pack)), atlas(kind, two(pack)), mapsOf(kind, two(pack))]);
-    return { mesh, texture, maps };
+    return { mesh, texture, maps, board: kind !== 'fighters' };
   },
   /* The board's forms, while the board's fighters are drawn (an online match against a game that draws them otherwise shows the pack's). */
   get forms() {

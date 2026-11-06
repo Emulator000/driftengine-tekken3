@@ -77,7 +77,7 @@ const out = path.join(root, 'public/data');
 const exePath = path.join(root, '.cache/disc/SLUS_004.02');
 if (!existsSync(exePath)) throw new Error('no disc data: run npm run disc first');
 /** The format of what this writes, in its manifest: raised when the output changes, so `npm run dev` extracts again. */
-const DATA_FORMAT = 23;
+const DATA_FORMAT = 24;
 /** The arcade board's data, when `npm run arcade` has read it. */
 const arcadePath = path.join(root, '.cache/arcade/data.bin');
 /* Extracted already: at this format, and with the arcade's stages exactly when its data is there. */
@@ -154,8 +154,8 @@ function eyesOf(pack) {
 /** True Ogre's roster id: his model's second record on the chest has its shapes past the first in his moveset. */
 const TRUE_OGRE = 0x14;
 const WINGS_RECORD = 2;
-/** The hands' joints, whose parts have shapes. */
-const HANDS = [6, 10];
+/** The parts the game draws a hand's shapes on: the second hand's, the first's, and Kuma's and Gon's first, on the head. */
+const HAND_PARTS = [12, 16, 17];
 
 /**
  * Where a pack's model keeps shapes outside itself: for True Ogre's, his moveset (by the roster
@@ -412,7 +412,7 @@ if (existsSync(arcadePath)) {
     if (shapesFromOf(pack) !== null || standIn(board)) return;
     const id = String(pack).padStart(2, '0');
     const parts = partTable(exe, pack);
-    const hands = new Map(parts.filter((p) => p.joint === HANDS[0] || p.joint === HANDS[1]).map((p) => [p.joint, p.index]));
+    const hands = new Map(parts.filter((p) => HAND_PARTS.includes(p.index)).map((p) => [p.joint, p.index]));
     let result;
     try {
       /* The disc's body, which the board's has, with the board's accessories and garment on their own joints. */

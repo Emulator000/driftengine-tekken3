@@ -12,6 +12,8 @@
 import { Camera, computeLightMatrix, createEnvironment, createFrustum, frustumFromViewProjection, sphereInFrustum, type RendererApi, type ShadowCasters, type SurfaceTextureHandle } from '@driftengine/core';
 import type { ArenaTables } from '../../assets/arena.ts';
 import { handPart, wingsPart } from '../../sim/fight/hands.ts';
+import { ReplayState } from '../../sim/fight/replay.ts';
+import { boardHandStep } from './fighter/hand-steps.ts';
 import type { FightData, FightState, Fighter as FighterState } from '../../sim/fight/state.ts';
 import { WALL_REACH, wallsOn } from '../../sim/fight/walls.ts';
 import { Fighter, readFighterMesh, type JointTransform } from './fighter/fighter.ts';
@@ -48,8 +50,8 @@ import { stageCodes } from '../../sim/fight/force-stage.ts';
 export const FORMS = 0x100;
 
 export interface DrawingFiles {
-  /** A pack's model, or past `FORMS` the form drawn for that roster code. */
-  fighter(pack: number): Promise<{ mesh: ArrayBuffer; texture: ImageBitmap; maps?: MaterialMaps | null }>;
+  /** A pack's model, or past `FORMS` the form drawn for that roster code; `board` where it is the arcade board's, whose hands step as the board's do (`boardHandStep`). */
+  fighter(pack: number): Promise<{ mesh: ArrayBuffer; texture: ImageBitmap; maps?: MaterialMaps | null; board?: boolean }>;
   /** The roster codes drawn with a board's form, a model of another fighter it keeps in a pack's place, over the pack's (Ogre's third costume); none without them. */
   readonly forms?: ReadonlySet<number>;
   /**
@@ -160,6 +162,10 @@ const COVER_MARGIN = 0.01;
 const CEILINGS = new Map([[8, 3]]);
 
 const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+/** The replay's states in which the hands are drawn at the steps it kept. */
+const REPLAYED_HANDS: ReadonlySet<number> = new Set([ReplayState.STARTING, ReplayState.PLAYING, ReplayState.PLAYING_LAST, ReplayState.ENDING]);
+/** Whether a replay's kept steps draw the hands. */
+const replaying = (state: FightState): boolean => REPLAYED_HANDS.has(state.replay.state);
 /** How much nearer the fighters' depth lies than the fighters (a share of their distance from the eye): a few centimetres at the fight's distances. */
 const FIGHTER_DEPTH = 0.01;
 /** A camera's pitch and yaw as the game counts them (4096ths), from where it looks in the engine's axes: the fight's, a replay's or the free camera's. */
@@ -250,6 +256,8 @@ export class FightView {
   private readonly white: SurfaceTextureHandle;
   /** Per side, its models by pack: the one it shows, and in Tekken Force those it may change to. */
   private readonly sides: Map<number, { fighter: Fighter | null }>[] = [new Map(), new Map(), new Map()];
+  /** The fighters drawn with an arcade board's model, whose hands step as the board's do. */
+  private readonly boardModels = new WeakSet<Fighter>();
   private readonly stages = new Map<number, StageDrawing | null>();
   /** Tekken Ball's ball, made for the first match that has one. */
   private ball: BallView | null = null;
@@ -339,12 +347,13 @@ export class FightView {
     if (found !== undefined) return found.fighter;
     const next: { fighter: Fighter | null } = { fighter: null };
     models.set(pack, next);
-    void this.files.fighter(pack).then(({ mesh, texture, maps }) => {
+    void this.files.fighter(pack).then(({ mesh, texture, maps, board }) => {
       const handle = this.renderer.createSurfaceTexture(texture, this.textureOptions(false));
       const look = this.files.remaster === true ? this.mapTextures(maps ?? null) : null;
       /* The accessories a model hangs from the hips are kept clear of the legs, as a board's model's garment is: a board's model's own, and the console's (the attract intros' among them). */
       const tails = this.files.cloth ? hungFromHips(this.data, pack) : null;
       const fighter = new Fighter(this.renderer, readFighterMesh(mesh), handle, this.white, tails, look);
+      if (board === true) this.boardModels.add(fighter);
       if (models.get(pack) === next) next.fighter = fighter;
       else fighter.dispose();
     });
@@ -823,7 +832,9 @@ export class FightView {
       const fighter = this.fighterFor(i, drawn, ahead);
       if (((state.posed >> i) & 1) === 0 || fighter === null) continue;
       posed.push(f);
-      for (let hand = 0; hand < 2; hand += 1) fighter.shape(handPart(f.roster, hand), f.hands.drawn[hand]!);
+      /* A board's model's hands at the board's steps, from the game's shape (or, in a replay, the step it kept). */
+      const board = this.boardModels.has(fighter);
+      for (let hand = 0; hand < 2; hand += 1) fighter.shape(handPart(f.roster, hand), board ? boardHandStep(f.hands.shape[hand]!, f.hands.drawn[hand]!, replaying(state)) : f.hands.drawn[hand]!);
       fighter.shape(wingsPart(f.roster), f.trueOgre.wingDrawn);
       fighter.face(f.eyesShut !== 0 ? 1 : 0);
       const joints = this.jointsOf(f);
